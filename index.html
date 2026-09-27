@@ -974,6 +974,15 @@ body {
   line-height: 1;
 }
 
+/* Строка версии: это не пункт меню, поэтому «руки» и подсветки при наведении нет.
+   Селектор составной намеренно: одиночный .settings-version проигрывает
+   правилу .settings-row:hover, и текст окрашивался бы в акцент при наведении. */
+.settings-row.settings-version {
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: default;
+}
+
 /* --- Экран «Привычки» ---------------------------------------------------- */
 /* Та же карточка, что у вкладки каза */
 #habits-edit-view {
@@ -1270,8 +1279,8 @@ body.view-settings #header-actions {
     display: none;
   }
 
-  /* Привычки на телефоне правятся отдельным экраном из настроек */
-  #edit-habits-btn {
+  /* Настройки на телефоне открываются таб-баром — кнопка в шапке лишняя */
+  #settings-btn {
     display: none;
   }
 
@@ -1459,6 +1468,12 @@ body.view-settings #header-actions {
     display: none;
   }
 
+  /* В настройках стрелка оставлена: она ведёт на главную и с экрана «Привычки»
+     тоже. Высота доведена до общего правила тап-цели в 44px. */
+  #settings-back {
+    min-height: 44px;
+  }
+
   .qaza-rows,
   .qaza-plan {
     gap: 6px;
@@ -1572,7 +1587,7 @@ body.view-settings #header-actions {
     </nav>
     <div id="header-actions">
       <button id="qaza-btn" class="btn btn-secondary">Каза-намазы</button>
-      <button id="edit-habits-btn" class="btn btn-primary">Редактировать привычки</button>
+      <button id="settings-btn" class="btn btn-secondary">Настройки</button>
     </div>
   </header>
 
@@ -1633,12 +1648,29 @@ body.view-settings #header-actions {
   <!-- Раздел «Настройки»: пока заглушка. Место для цвета фона, экспорта/импорта
        данных и синхронизации — появятся отдельными шагами. -->
   <section id="settings-view" hidden>
-    <div class="qaza-head"><h2>Настройки</h2></div>
+    <div class="qaza-head">
+      <h2>Настройки</h2>
+      <button type="button" id="settings-back" class="btn btn-secondary">← Назад</button>
+    </div>
     <ul id="settings-list">
+      <li><p class="settings-row settings-version" id="settings-version"></p></li>
       <li>
         <button type="button" id="settings-edit-habits" class="settings-row">
           <span>Редактировать привычки</span><span class="settings-chevron">›</span>
         </button>
+      </li>
+      <li>
+        <button type="button" id="settings-export" class="settings-row">
+          <span>Экспорт данных</span><span class="settings-chevron">›</span>
+        </button>
+      </li>
+      <li>
+        <button type="button" id="settings-import" class="settings-row">
+          <span>Импорт данных</span><span class="settings-chevron">›</span>
+        </button>
+      </li>
+      <li>
+        <input type="file" id="settings-import-file" accept=".json,application/json" hidden>
       </li>
       <li>
         <button type="button" id="settings-sync-now" class="settings-row">
@@ -1655,7 +1687,7 @@ body.view-settings #header-actions {
            style="padding:12px 4px;border-bottom:1px solid var(--border)"></p>
       </li>
     </ul>
-    <p class="qaza-summary">Раздел в разработке. Здесь появятся: выбор цвета фона, экспорт/импорт данных, синхронизация.</p>
+    <p class="qaza-summary">Раздел в разработке. Здесь появится выбор цвета фона.</p>
   </section>
 
   <!-- Экран «Привычки»: открывается строкой из Настроек. Своя карточка вместо
@@ -2303,6 +2335,98 @@ function showSyncStatus(message) {
   }, SYNC_STATUS_MS);
 }
 
+/* ---------- Экспорт и импорт данных -------------------------------------- */
+
+// Версия формата резервной копии. Растёт, если меняется состав полей файла.
+const BACKUP_VERSION = 1;
+
+// Что попадает в файл. Метка синхронизации и режим главного экрана — состояние
+// устройства, а не данные, поэтому в копию не входят.
+function buildBackup() {
+  return {
+    version: BACKUP_VERSION,
+    exportedAt: new Date().toISOString(),
+    habits: loadHabits(),
+    records: loadRecords(),
+    qaza: loadQaza(),
+  };
+}
+
+// Скачивание резервной копии через Blob. Дата в имени — локальная, тем же
+// toISODate, что и в записях: UTC-вариант сдвигал бы имя на день назад.
+function exportData() {
+  const blob = new Blob([JSON.stringify(buildBackup(), null, 2)],
+    { type: 'application/json' });
+  const url = URL.createObjectURL(blob);
+
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = 'youplanner-backup-' + toISODate(new Date()) + '.json';
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+}
+
+// Разбор файла копии. Возвращает данные или null, если файл не подходит:
+// непонятный файл не должен затирать рабочие данные.
+function parseBackup(text) {
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch (e) {
+    return null;
+  }
+
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
+  if (!Array.isArray(data.habits)) return null;
+  if (!data.records || typeof data.records !== 'object' || Array.isArray(data.records)) return null;
+  if (data.qaza !== undefined &&
+      (!data.qaza || typeof data.qaza !== 'object' || Array.isArray(data.qaza))) return null;
+
+  return data;
+}
+
+// Замена локальных данных копией. Пишем в localStorage напрямую: saveHabits и
+// saveQaza поставили бы по отправке на каждый ключ, а нужен один PUT на замену.
+// Раздела qaza в файле может не быть — тогда очередь остаётся текущей.
+function applyBackup(data) {
+  localStorage.setItem(STORAGE_KEYS.habits, JSON.stringify(data.habits));
+  localStorage.setItem(STORAGE_KEYS.records, JSON.stringify(data.records));
+  if (data.qaza) localStorage.setItem(QAZA_STORAGE_KEY, JSON.stringify(data.qaza));
+
+  appState.habits = loadHabits();
+  appState.records = loadRecords();
+  qazaState = loadQaza();
+
+  scheduleSync();
+  renderMainView();
+  renderQazaView();
+}
+
+// Импорт выбранного файла. Пока разбор не удался или пользователь не подтвердил
+// замену, текущие данные не трогаются.
+function importData(file) {
+  if (!file) return;
+
+  const reader = new FileReader();
+  reader.onload = function () { onBackupRead(String(reader.result)); };
+  reader.onerror = function () { alert('Не удалось прочитать файл.'); };
+  reader.readAsText(file);
+}
+
+function onBackupRead(text) {
+  const data = parseBackup(text);
+  if (!data) {
+    alert('Не удалось прочитать файл. Это резервная копия YouPlanner?');
+    return;
+  }
+
+  if (!confirm('Импорт заменит все текущие данные. Продолжить?')) return;
+
+  applyBackup(data);
+}
+
 // Сколько каза выполнено в указанный день. Считается по журналу, а не по длине
 // стека: если страница открыта через полночь, в журнале остаются записи прошлого
 // дня, и длина стека дала бы завышенный счётчик.
@@ -2441,6 +2565,11 @@ const HABIT_TYPES = [
   { value: 'number', label: 'Число' },
   { value: 'choice', label: 'Выбор' },
 ];
+
+// Версия приложения для строки в Настройках. Номер живёт здесь, а не в разметке:
+// обновлять его придётся в одном месте.
+const APP_VERSION = '1.0';
+const APP_BUILD = '2026-09-28';
 
 /* --- Вспомогательные функции (не пересекаются с именами data.js) --------- */
 
@@ -2652,6 +2781,17 @@ function bindEvents() {
     habitList.addEventListener('click', onHabitListClick);
   }
 
+  // Раздел «Настройки»: кнопка в шапке ПК и стрелка «Назад» внутри раздела
+  const settingsButton = document.getElementById('settings-btn');
+  if (settingsButton) {
+    settingsButton.addEventListener('click', function () { switchAppView('settings'); });
+  }
+
+  const settingsBack = document.getElementById('settings-back');
+  if (settingsBack) {
+    settingsBack.addEventListener('click', function () { switchAppView('main'); });
+  }
+
   // Экран «Привычки» в настройках
   const settingsEdit = document.getElementById('settings-edit-habits');
   if (settingsEdit) {
@@ -2687,6 +2827,27 @@ function bindEvents() {
     });
   }
 
+  // Экспорт и импорт данных
+  const exportButton = document.getElementById('settings-export');
+  if (exportButton) exportButton.addEventListener('click', exportData);
+
+  const importButton = document.getElementById('settings-import');
+  if (importButton) {
+    importButton.addEventListener('click', function () {
+      document.getElementById('settings-import-file').click();
+    });
+  }
+
+  const importFile = document.getElementById('settings-import-file');
+  if (importFile) {
+    importFile.addEventListener('change', function () {
+      importData(this.files && this.files[0]);
+      // Значение сбрасывается сразу: иначе повторный выбор того же файла
+      // не вызовет change — браузер считает файл уже выбранным
+      this.value = '';
+    });
+  }
+
   const weekPrev = document.getElementById('week-prev');
   if (weekPrev) weekPrev.addEventListener('click', function () { changeWeek(-1); });
 
@@ -2695,9 +2856,6 @@ function bindEvents() {
 
   const weekToday = document.getElementById('week-today');
   if (weekToday) weekToday.addEventListener('click', goToday);
-
-  const editButton = document.getElementById('edit-habits-btn');
-  if (editButton) editButton.addEventListener('click', openModal);
 
   const qazaButton = document.getElementById('qaza-btn');
   if (qazaButton) {
@@ -3205,7 +3363,8 @@ function switchAppView(name) {
   document.getElementById('mobile-day-tabs').hidden = name !== 'main' || !isMobileView();
   document.getElementById('tab-bar').hidden = !isMobileView();
   document.getElementById('week-nav').hidden = name !== 'main';
-  document.getElementById('edit-habits-btn').hidden = name !== 'main';
+  document.getElementById('qaza-btn').hidden = name !== 'main';
+  document.getElementById('settings-btn').hidden = name !== 'main';
 
   // Экран «Привычки» — вложенный в настройки, там же подсвечивается и вкладка
   const tabView = name === 'edit-habits' ? 'settings' : name;
@@ -3233,7 +3392,17 @@ function switchAppView(name) {
     renderHabitsEditList();
   }
 
+  if (name === 'settings') {
+    renderSettingsView();
+  }
+
   window.scrollTo(0, 0);
+}
+
+// Строка версии в Настройках
+function renderSettingsView() {
+  const version = document.getElementById('settings-version');
+  if (version) version.textContent = 'Версия: ' + APP_VERSION + ' · сборка ' + APP_BUILD;
 }
 
 function renderQazaView() {
