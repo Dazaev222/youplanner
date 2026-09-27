@@ -22,8 +22,8 @@
   --surface: #ffffff;
   --surface-alt: #f0f0f5;
   --border: #d9d9e3;
-  --accent: #5b5bd6;        /* фиолетово-синий акцент */
-  --accent-soft: #e7e7fb;
+  --accent: #0062CC;        /* системный синий iOS */
+  --accent-soft: #e6f0fb;
   --success: #1f9d63;
   --danger: #c93a3a;        /* контраст к белому тексту ≈ 5.1:1 */
   --on-accent: #ffffff;     /* цвет текста на фоне --accent */
@@ -896,6 +896,37 @@ body {
   color: var(--text-muted);
 }
 
+/* --- Раздел «Настройки» и нижний таб-бар --------------------------------- */
+/* Таб-бар — элемент телефона: на ПК его нет вовсе */
+#tab-bar {
+  display: none;
+}
+
+/* Скрытие по атрибуту: в медиа-запросе таб-бар получает display:flex,
+   который иначе перебил бы hidden */
+#tab-bar[hidden] {
+  display: none;
+}
+
+#settings-view {
+  margin-top: 20px;
+  padding: 22px 26px 26px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+#settings-view[hidden] {
+  display: none;
+}
+
+/* В каза и настройках шапка действий не нужна — и на ПК, и на телефоне */
+body.view-qaza #header-actions,
+body.view-settings #header-actions {
+  display: none;
+}
+
 /* --- Мобильная вёрстка (телефон) ----------------------------------------- */
 /* Обязательное правило: в медиа-запросе ниже переключатель получает
    display:flex, который иначе перебил бы атрибут hidden. */
@@ -1102,6 +1133,11 @@ body {
     font-size: 17px;
   }
 
+  /* Из каза на телефоне выходим таб-баром — кнопка «Назад» дублирует его */
+  #qaza-back {
+    display: none;
+  }
+
   .qaza-rows,
   .qaza-plan {
     gap: 6px;
@@ -1130,6 +1166,60 @@ body {
 
   .qaza-add-hint {
     font-size: 12px;
+  }
+
+  /* Нижний таб-бар: три раздела, прижат к низу экрана */
+  #tab-bar {
+    display: flex;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    z-index: 50;
+    background: var(--surface);
+    border-top: 1px solid var(--border);
+    padding: 6px 0 calc(6px + env(safe-area-inset-bottom, 0px));
+    justify-content: space-around;
+  }
+
+  #tab-bar[hidden] {
+    display: none;
+  }
+
+  .tab-item {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 2px;
+    padding: 6px 10px;
+    border: 0;
+    background: transparent;
+    color: var(--text-muted);
+    font: inherit;
+    font-size: 11px;
+    cursor: pointer;
+    border-radius: 8px;
+  }
+
+  .tab-item.is-active {
+    color: var(--accent);
+  }
+
+  .tab-item:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* Запас снизу, чтобы таб-бар не накрывал последнюю строку таблицы */
+  #app {
+    padding-bottom: 80px;
+  }
+
+  /* В каза и настройках половины недели не нужны.
+     Шапка действий гасится общим правилом в основном блоке. */
+  body.view-qaza #mobile-day-tabs,
+  body.view-settings #mobile-day-tabs {
+    display: none;
   }
 }
 
@@ -1195,6 +1285,27 @@ body {
       <button id="qaza-undo" class="btn btn-secondary">Отменить последнее</button>
     </div>
   </section>
+
+  <!-- Раздел «Настройки»: пока заглушка. Место для цвета фона, экспорта/импорта
+       данных и синхронизации — появятся отдельными шагами. -->
+  <section id="settings-view" hidden>
+    <div class="qaza-head"><h2>Настройки</h2></div>
+    <p class="qaza-summary">Раздел в разработке. Здесь появятся: выбор цвета фона, экспорт/импорт данных, синхронизация.</p>
+  </section>
+
+  <!-- Нижний таб-бар: переключает разделы. Виден только на телефоне,
+       на ПК скрыт атрибутом hidden и базовым display:none. -->
+  <nav id="tab-bar" hidden>
+    <button type="button" class="tab-item" data-view="main">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="4"></rect><path d="M8 12l3 3 5-6"></path></svg>
+      <span>Главное</span></button>
+    <button type="button" class="tab-item" data-view="qaza">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"></path></svg>
+      <span>Каза</span></button>
+    <button type="button" class="tab-item" data-view="settings">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+      <span>Настройки</span></button>
+  </nav>
 </div>
 
 <!-- Модальное окно редактирования списка привычек -->
@@ -1741,6 +1852,9 @@ const appState = {
   weekStart: null, // Date — понедельник отображаемой недели
 };
 
+// Текущий раздел приложения: 'main' — таблица, 'qaza' — каза, 'settings' — настройки
+let appView = 'main';
+
 // Мобильная вёрстка: -1 не выбрана, 0 Пн–Чт, 1 Пт–Вс
 let mobileDayPage = -1;
 
@@ -1947,6 +2061,10 @@ function init() {
   updateFormFields();
 
   bindEvents();
+
+  // Стартовый раздел ставим тем же переключателем, что и кнопки:
+  // так главная вкладка сразу подсвечена, а таб-бар скрыт на ПК
+  switchAppView('main');
 }
 
 // Все обработчики навешиваются один раз. События внутри таблицы и списка
@@ -1976,10 +2094,22 @@ function bindEvents() {
   if (editButton) editButton.addEventListener('click', openModal);
 
   const qazaButton = document.getElementById('qaza-btn');
-  if (qazaButton) qazaButton.addEventListener('click', openQazaView);
+  if (qazaButton) {
+    qazaButton.addEventListener('click', function () { switchAppView('qaza'); });
+  }
 
   const qazaBack = document.getElementById('qaza-back');
-  if (qazaBack) qazaBack.addEventListener('click', closeQazaView);
+  if (qazaBack) {
+    qazaBack.addEventListener('click', function () { switchAppView('main'); });
+  }
+
+  // Нижний таб-бар: тот же переключатель разделов, что и у кнопок шапки
+  const tabItems = document.querySelectorAll('#tab-bar .tab-item');
+  for (let i = 0; i < tabItems.length; i++) {
+    tabItems[i].addEventListener('click', function () {
+      switchAppView(this.getAttribute('data-view'));
+    });
+  }
 
   const qazaUndoButton = document.getElementById('qaza-undo');
   if (qazaUndoButton) qazaUndoButton.addEventListener('click', onQazaUndo);
@@ -2052,6 +2182,8 @@ function bindEvents() {
     if (now !== lastIsMobile) {
       lastIsMobile = now;
       renderTable();
+      // Ширина сменилась — таб-бар появляется или исчезает вместе с режимом
+      document.getElementById('tab-bar').hidden = !now;
     }
   });
 }
@@ -2328,23 +2460,37 @@ function setHidden(id, hidden) {
   if (element) element.hidden = hidden;
 }
 
-function openQazaView() {
-  if (!qazaState) qazaState = loadQaza();
-  renderQazaView();
+// Переключение разделов. Единая точка входа для таб-бара на телефоне,
+// кнопки «Каза-намазы» и «Назад» на ПК.
+function switchAppView(name) {
+  appView = name;
 
-  setHidden('main', true);
-  setHidden('week-nav', true);
-  setHidden('edit-habits-btn', true);
-  setHidden('qaza-btn', true);
-  setHidden('qaza-view', false);
-}
+  document.getElementById('main').hidden = name !== 'main';
+  document.getElementById('settings-view').hidden = name !== 'settings';
+  document.getElementById('qaza-view').hidden = name !== 'qaza';
+  document.getElementById('mobile-day-tabs').hidden = name !== 'main' || !isMobileView();
+  document.getElementById('tab-bar').hidden = !isMobileView();
+  document.getElementById('week-nav').hidden = name !== 'main';
+  document.getElementById('edit-habits-btn').hidden = name !== 'main';
 
-function closeQazaView() {
-  setHidden('qaza-view', true);
-  setHidden('main', false);
-  setHidden('week-nav', false);
-  setHidden('edit-habits-btn', false);
-  setHidden('qaza-btn', false);
+  document.querySelectorAll('#tab-bar .tab-item').forEach(function (item) {
+    item.classList.toggle('is-active', item.getAttribute('data-view') === name);
+  });
+
+  // Классы на body гасят шапку действий в каза и настройках
+  document.body.classList.toggle('view-qaza', name === 'qaza');
+  document.body.classList.toggle('view-settings', name === 'settings');
+
+  if (name === 'qaza') {
+    if (!qazaState) qazaState = loadQaza();
+    renderQazaView();
+  }
+
+  if (name === 'main') {
+    renderTable();
+  }
+
+  window.scrollTo(0, 0);
 }
 
 function renderQazaView() {
