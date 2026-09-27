@@ -1,0 +1,2824 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <!-- Установка на телефон как отдельного приложения: иконка, имя, цвет строки статуса -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <meta name="apple-mobile-web-app-title" content="Планер">
+  <meta name="theme-color" content="#f4f4f7">
+  <link rel="apple-touch-icon" href="icon-180.png">
+  <link rel="manifest" href="manifest.json">
+  <title>YouPlanner — трекер привычек</title>
+  <style>
+/* YouPlanner — стили. Палитра приложения задана переменными в :root. */
+
+/* --- Палитра --- */
+:root {
+  --bg: #f4f4f7;
+  --text: #1c1c22;          /* контраст к --surface #ffffff ≈ 16.9:1 */
+  --text-muted: #5c5c6e;
+  --surface: #ffffff;
+  --surface-alt: #f0f0f5;
+  --border: #d9d9e3;
+  --accent: #5b5bd6;        /* фиолетово-синий акцент */
+  --accent-soft: #e7e7fb;
+  --success: #1f9d63;
+  --danger: #c93a3a;        /* контраст к белому тексту ≈ 5.1:1 */
+  --on-accent: #ffffff;     /* цвет текста на фоне --accent */
+  --on-danger: #ffffff;     /* цвет текста на фоне --danger */
+  --shadow: 0 8px 24px rgba(20, 20, 40, .12);
+}
+
+/* --- База --- */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+  transition: background-color .15s, color .15s;
+}
+
+/* --- Каркас страницы --- */
+#app {
+  min-width: 1024px;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 0 24px 48px;
+  transition: background-color .15s, color .15s;
+}
+
+/* --- Шапка --- */
+#header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 20px 0 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+#logo {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -.01em;
+  white-space: nowrap;
+}
+
+#week-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#week-label {
+  min-width: 240px;
+  text-align: center;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+#header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* --- Кнопки --- */
+/* Кнопка-пилюля: тот же радиус, что у пилюль выбора намаза во вкладке каза */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 32px;
+  padding: 6px 14px;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  line-height: 1.2;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color .15s, border-color .15s, color .15s,
+    transform .15s ease, box-shadow .15s ease;
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Кнопка чуть приподнимается под курсором — тем же движением, что строки таблицы */
+@media (hover: hover) {
+  .btn:hover {
+    transform: translateY(-1px);
+  }
+}
+
+.btn-primary {
+  background-color: var(--accent);
+  border-color: var(--accent);
+  color: var(--on-accent);
+}
+
+.btn-primary:hover {
+  background-color: var(--accent);
+  filter: brightness(1.08);
+}
+
+.btn-secondary {
+  background-color: var(--surface-alt);
+  border-color: var(--border);
+  color: var(--text);
+}
+
+.btn-secondary:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.btn-danger {
+  background-color: var(--danger);
+  border-color: var(--danger);
+  color: var(--on-danger);
+}
+
+.btn-danger:hover {
+  filter: brightness(1.08);
+}
+
+/* --- Таблица привычек --- */
+/* Строка привычки — отдельная карточка, а не полоса общей сетки. Чтобы у строки
+   появился собственный радиус, нужен border-collapse: separate; он же даёт
+   border-spacing — зазор между карточками. Разметка и JS при этом не меняются. */
+#habits-table {
+  width: 100%;
+  margin-top: 20px;
+  border-collapse: separate;
+  border-spacing: 0 6px;
+  table-layout: fixed;
+}
+
+/* Сцена для 3D-подъёма строк. Перспектива стоит именно на tbody: у таблицы
+   её прямые дети — thead и tbody, а трансформируется строка, и до неё
+   перспектива с уровня таблицы не доходит. */
+#habits-tbody {
+  perspective: 1400px;
+}
+
+#habits-table th,
+#habits-table td {
+  padding: 10px 8px;
+}
+
+#habits-thead th {
+  background-color: var(--surface-alt);
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+  white-space: nowrap;
+}
+
+/* Шапка — такая же карточка со скруглёнными краями, как строки */
+#habits-thead th:first-child {
+  border-top-left-radius: 12px;
+  border-bottom-left-radius: 12px;
+}
+
+#habits-thead th:last-child {
+  border-top-right-radius: 12px;
+  border-bottom-right-radius: 12px;
+}
+
+.habit-col {
+  width: 220px;
+}
+
+/* Первая колонка — текстом влево, в отличие от центрированных дней */
+#habits-table th.habit-col,
+#habits-table td:first-child {
+  padding-left: 16px;
+  text-align: left;
+}
+
+.day-col {
+  width: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.progress-col {
+  width: 80px;
+}
+
+/* Контур карточки собирается из крайних ячеек строки: рамка сверху и снизу
+   у всех, слева — у первой, справа — у последней, там же и радиусы. */
+.habit-row td {
+  background-color: var(--surface);
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  transition: border-color .18s ease;
+}
+
+.habit-row td:first-child {
+  border-left: 1px solid var(--border);
+  border-top-left-radius: 12px;
+  border-bottom-left-radius: 12px;
+}
+
+.habit-row td:last-child {
+  border-right: 1px solid var(--border);
+  border-top-right-radius: 12px;
+  border-bottom-right-radius: 12px;
+}
+
+/* Строка поднимается целиком. Отдельная ячейка движение не повторяет: поднимаются
+   только элементы внутри неё, иначе на одном наведении анимировалось бы слишком много. */
+@media (hover: hover) {
+  .habit-row {
+    transition: transform .2s ease, box-shadow .2s ease;
+  }
+
+  .habit-row:hover {
+    transform: translateZ(16px);
+    box-shadow: var(--shadow);
+  }
+
+  .habit-row:hover td {
+    border-color: var(--accent);
+  }
+}
+
+.habit-name {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.habit-unit {
+  margin-left: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+
+/* --- Ячейки дней --- */
+.cell {
+  text-align: center;
+  vertical-align: middle;
+}
+
+.cell-check {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+  vertical-align: middle;
+  transition: transform .15s ease;
+}
+
+.cell-x {
+  width: 20px;
+  height: 20px;
+  margin: 0 0 0 6px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background-color: var(--surface);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  vertical-align: middle;
+  transition: background-color .15s, border-color .15s, color .15s, transform .15s ease;
+}
+
+.cell-x:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.cell-x.is-active {
+  background-color: var(--danger);
+  border-color: var(--danger);
+  color: var(--on-danger);
+}
+
+/* Поля внутри ячейки — той же формы, что пилюли вкладки каза: скругление,
+   фон --surface-alt, рамка. На фоне карточки строки такие поля читаются. */
+.cell-number,
+.cell-select {
+  padding: 4px 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background-color: var(--surface-alt);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  transition: border-color .15s ease, transform .15s ease;
+}
+
+.cell-number {
+  width: 56px;
+  text-align: center;
+}
+
+.cell-select {
+  width: 100px;
+}
+
+/* Наведение на ячейку поднимает то, с чем в ней работают, а не саму ячейку:
+   подъём коробки разорвал бы контур карточки строки. */
+@media (hover: hover) {
+  .cell:hover .cell-number,
+  .cell:hover .cell-select {
+    border-color: var(--accent);
+    transform: translateY(-1px);
+  }
+
+  .cell:hover .cell-check {
+    transform: scale(1.08);
+  }
+
+  .cell:hover .cell-x {
+    transform: translateY(-1px);
+  }
+}
+
+.cell-number:focus-visible,
+.cell-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* --- Круг прогресса --- */
+.progress-cell {
+  width: 88px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.progress-circle {
+  display: inline-block;
+  width: 64px;
+  height: 64px;
+  vertical-align: middle;
+  transition: transform .2s ease;
+}
+
+/* Дорожка и дуга одной толщины: дуга толще прежней, концы скруглены */
+.progress-track {
+  stroke: var(--border);
+  stroke-width: 6;
+}
+
+.progress-arc {
+  fill: none;
+  stroke-width: 6;
+  stroke-linecap: round;
+  transition: stroke-dashoffset .2s ease;
+}
+
+/* Круг приходит в движение вместе со строкой — но слабее, чтобы не спорить с ней */
+@media (hover: hover) {
+  .habit-row:hover .progress-circle {
+    transform: translateZ(10px);
+  }
+}
+
+.progress-text {
+  fill: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Месячный процент — второй строкой внутри круга */
+.progress-month {
+  fill: var(--text-muted);
+  font-size: 10px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+
+/* --- Модальное окно --- */
+.modal {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+/* Обязательное правило: иначе display:flex перебивает атрибут hidden */
+#habit-modal[hidden] {
+  display: none;
+}
+
+.modal-backdrop {
+  position: absolute;
+  inset: 0;
+  background-color: rgba(0, 0, 0, .45);
+}
+
+.modal-window {
+  position: relative;
+  width: 680px;
+  max-width: calc(100vw - 64px);
+  max-height: 80vh;
+  overflow-y: auto;
+  padding: 22px 26px 26px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background-color: var(--surface);
+  color: var(--text);
+  box-shadow: var(--shadow);
+}
+
+.modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.modal-header h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -.01em;
+}
+
+.modal-body {
+  padding-top: 16px;
+}
+
+.modal-body h3 {
+  margin: 24px 0 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+/* --- Список привычек в модалке --- */
+/* Каждая привычка — такая же карточка, как строка главной таблицы */
+#habit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+#habit-list li {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background-color: var(--surface-alt);
+}
+
+/* Поля лежат на плашке --surface-alt, поэтому сами — --surface */
+#habit-list input,
+#habit-list select {
+  min-height: 32px;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background-color: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+#habit-list input:hover,
+#habit-list select:not(:disabled):hover {
+  border-color: var(--accent);
+}
+
+#habit-list select {
+  width: 120px;
+}
+
+#habit-list select:disabled {
+  background-color: var(--surface-alt);
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+#habit-list input[type="number"] {
+  width: 90px;
+}
+
+/* Имя привычки в строке списка занимает свободное место */
+#habit-list input[type="text"] {
+  flex: 1 1 160px;
+  min-width: 0;
+}
+
+/* --- Форма добавления привычки --- */
+.form-fields {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.form-fields input,
+.form-fields select {
+  min-height: 34px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background-color: var(--surface-alt);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.form-fields input:focus-visible,
+.form-fields select:focus-visible,
+#habit-list input:focus-visible,
+#habit-list select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+#form-name {
+  flex: 1 1 220px;
+}
+
+#form-unit {
+  flex: 1 1 180px;
+}
+
+#form-goal {
+  width: 140px;
+}
+
+.form-error {
+  min-height: 1.2em;
+  margin: 10px 0 0;
+  color: var(--danger);
+  font-size: 13px;
+}
+
+/* Пустой блок ошибки не занимает внимания, но сохраняет высоту */
+.form-error:empty {
+  visibility: hidden;
+}
+
+.form-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.habit-save {
+  margin-left: auto;
+}
+
+/* --- Вкладка «Каза-намазы» --- */
+
+/* display у этих элементов перебивает атрибут hidden, поэтому правило нужно явно */
+#qaza-view[hidden],
+#main[hidden],
+#week-nav[hidden],
+#qaza-start-block[hidden],
+.btn[hidden] {
+  display: none;
+}
+
+#qaza-view {
+  margin-top: 20px;
+  padding: 22px 26px 26px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background-color: var(--surface);
+  box-shadow: var(--shadow);
+  animation: qaza-view-in .22s ease-out;
+}
+
+/* Появление вкладки: только сдвиг и прозрачность — их дёшево анимировать */
+@keyframes qaza-view-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+.qaza-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+.qaza-head h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -.01em;
+}
+
+.qaza-summary {
+  margin: 16px 0 0;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.qaza-subtitle {
+  margin: 24px 0 12px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+/* Список пяти намазов с остатками */
+.qaza-rows,
+.qaza-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  /* Сцена для лёгкого 3D-подъёма карточек при наведении */
+  perspective: 900px;
+}
+
+.qaza-row,
+.qaza-plan-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 11px 14px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background-color: var(--surface-alt);
+  transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
+}
+
+.qaza-plan-item {
+  justify-content: space-between;
+}
+
+/* Подъём карточки при наведении. Только там, где есть настоящий курсор:
+   на тач-устройствах hover «залипает» после касания. */
+@media (hover: hover) {
+  .qaza-row:hover,
+  .qaza-plan-item:hover {
+    transform: translateZ(14px) rotateX(1.2deg);
+    box-shadow: var(--shadow);
+    border-color: var(--accent);
+  }
+}
+
+/* Текущий намаз: цвет плюс слово «сейчас» — информация не только цветом */
+.qaza-row.is-cursor,
+.qaza-plan-item.is-current {
+  border-color: var(--accent);
+  background-color: var(--accent-soft);
+}
+
+.qaza-row-name,
+.qaza-plan-name {
+  flex: 1 1 auto;
+  font-weight: 500;
+}
+
+.qaza-row-mark,
+.qaza-start-mark,
+.qaza-add-mark {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background-color: var(--accent);
+  color: var(--on-accent);
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: .02em;
+}
+
+.qaza-count {
+  min-width: 64px;
+  text-align: right;
+  font-size: 17px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Намаз с нулевым остатком выпадает из очереди */
+.qaza-row.is-empty .qaza-count {
+  color: var(--text-muted);
+  font-weight: 400;
+}
+
+/* Выбор намаза пилюлями: блок старта и блок ручного добавления устроены одинаково */
+.qaza-start,
+.qaza-add {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.qaza-start-option,
+.qaza-add-option {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 13px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background-color: var(--surface-alt);
+  cursor: pointer;
+  transition: border-color .15s, background-color .15s,
+    transform .18s ease, box-shadow .18s ease;
+}
+
+@media (hover: hover) {
+  .qaza-start-option:hover,
+  .qaza-add-option:hover {
+    border-color: var(--accent);
+    transform: translateZ(8px);
+    box-shadow: var(--shadow);
+  }
+}
+
+/* Цвет плюс слово-пометка — выбор не передаётся только цветом */
+.qaza-start-option.is-cursor,
+.qaza-add-option.is-picked {
+  border-color: var(--accent);
+  background-color: var(--accent-soft);
+}
+
+/* Радио скрыто визуально, но остаётся фокусируемым с клавиатуры */
+.qaza-start-radio,
+.qaza-add-radio {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  border: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+.qaza-start-radio:focus-visible + .qaza-start-name,
+.qaza-add-radio:focus-visible + .qaza-add-name {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+}
+
+.qaza-start-name,
+.qaza-add-name {
+  font-size: 13px;
+}
+
+/* Надпись «Начать с: …» над планом */
+.qaza-plan-start {
+  margin: 0 0 12px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* Превью следующих пунктов плана: без кнопки, приглушённые */
+.qaza-plan-next {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.qaza-note {
+  margin: 16px 0 0;
+  color: var(--text-muted);
+}
+
+.qaza-actions {
+  margin-top: 16px;
+}
+
+/* Блок ручного добавления пропущенного намаза */
+.qaza-add-hint {
+  max-width: 68ch;
+  margin: 12px 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.qaza-add-actions {
+  margin-top: 12px;
+}
+
+/* Анимация — украшение, а не смысл: при системном запрете движения её убираем.
+   Правило общее для главной страницы и вкладки каза. */
+@media (prefers-reduced-motion: reduce) {
+  #qaza-view {
+    animation: none;
+  }
+
+  .btn,
+  .habit-row,
+  .habit-row td,
+  .cell-number,
+  .cell-select,
+  .cell-check,
+  .cell-x,
+  .progress-circle,
+  .progress-arc,
+  .qaza-row,
+  .qaza-plan-item,
+  .qaza-start-option,
+  .qaza-add-option {
+    transition: none;
+  }
+
+  .btn:hover,
+  .habit-row:hover,
+  .habit-row:hover .progress-circle,
+  .cell:hover .cell-number,
+  .cell:hover .cell-select,
+  .cell:hover .cell-check,
+  .cell:hover .cell-x,
+  .qaza-row:hover,
+  .qaza-plan-item:hover,
+  .qaza-start-option:hover,
+  .qaza-add-option:hover {
+    transform: none;
+  }
+}
+
+.btn:disabled {
+  opacity: .55;
+  cursor: not-allowed;
+}
+
+.btn-secondary:disabled:hover {
+  border-color: var(--border);
+  color: var(--text);
+}
+
+/* Ячейка каза в таблице: только чтение, значение приходит со вкладки */
+.cell-qaza {
+  display: inline-block;
+  min-width: 24px;
+  color: var(--text);
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cell-qaza.is-empty {
+  color: var(--text-muted);
+}
+
+/* --- Мобильная вёрстка (телефон) ----------------------------------------- */
+/* Обязательное правило: в медиа-запросе ниже переключатель получает
+   display:flex, который иначе перебил бы атрибут hidden. */
+#mobile-day-tabs[hidden] {
+  display: none;
+}
+
+/* ПК-вёрстка не меняется: все правила ниже действуют только на узком экране.
+   Порог 700px совпадает с isMobileView() в скрипте. */
+@media (max-width: 700px) {
+  /* Каркас: снимаем минимальную ширину ПК-версии и убираем боковые поля */
+  #app {
+    min-width: 0;
+    padding: 0 12px 32px;
+  }
+
+  /* Переключатель половин недели */
+  #mobile-day-tabs {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
+  #mobile-day-tabs .btn {
+    flex: 1 1 auto;
+  }
+
+  /* Активная половина: цвет плюс фон — состояние видно и без оттенка */
+  #mobile-day-tabs .btn.is-active {
+    background-color: var(--accent-soft);
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  /* Шапка в столбик: логотип, подпись недели, действия */
+  #header {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 10px;
+    padding: 14px 0 12px;
+  }
+
+  #logo {
+    text-align: center;
+    white-space: normal;
+    font-size: 18px;
+  }
+
+  #week-nav {
+    flex-wrap: wrap;
+    justify-content: center;
+    gap: 6px;
+  }
+
+  /* Подпись недели встаёт первой строкой на всю ширину */
+  #week-label {
+    order: -1;
+    width: 100%;
+    min-width: 0;
+    font-size: 13px;
+  }
+
+  #header-actions {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 6px;
+  }
+
+  #header-actions .btn {
+    width: 100%;
+  }
+
+  /* Таблица: дни компактнее, столбец привычки уже */
+  #habits-table {
+    margin-top: 12px;
+    border-spacing: 0 5px;
+  }
+
+  #habits-table th,
+  #habits-table td {
+    padding: 7px 2px;
+  }
+
+  #habits-table th.habit-col,
+  #habits-table td:first-child {
+    padding-left: 8px;
+  }
+
+  #habits-thead th {
+    font-size: 11px;
+  }
+
+  /* Ширина подобрана по тесному случаю: четыре дня на экране 320px.
+     При ней галочка и «✗» остаются в одной строке. */
+  .habit-col {
+    width: 84px;
+  }
+
+  .habit-name {
+    font-size: 13px;
+  }
+
+  .habit-unit {
+    margin-left: 4px;
+    font-size: 11px;
+  }
+
+  /* Поля ячеек — на всю ширину колонки, иначе вылезают за карточку */
+  .cell-number,
+  .cell-select {
+    width: 100%;
+    min-width: 0;
+    padding: 3px 2px;
+    font-size: 11px;
+  }
+
+  .cell-check {
+    width: 16px;
+    height: 16px;
+  }
+
+  .cell-x {
+    width: 15px;
+    height: 15px;
+    margin-left: 2px;
+    font-size: 10px;
+  }
+
+  /* Круг уменьшаем габаритами: viewBox масштабирует содержимое пропорционально */
+  .progress-col,
+  .progress-cell {
+    width: 54px;
+  }
+
+  .progress-circle {
+    width: 46px;
+    height: 46px;
+  }
+
+  /* Модалка: почти во всю ширину, с запасом по высоте */
+  .modal-window {
+    width: auto;
+    max-width: calc(100vw - 24px);
+    max-height: 92vh;
+    padding: 16px 14px 20px;
+    border-radius: 12px;
+  }
+
+  .modal-header h2 {
+    font-size: 17px;
+  }
+
+  .modal-body h3 {
+    margin: 18px 0 10px;
+  }
+
+  /* Поля формы — в столбик, на всю ширину */
+  .form-fields {
+    flex-direction: column;
+  }
+
+  .form-fields input,
+  .form-fields select,
+  #form-name,
+  #form-unit,
+  #form-goal {
+    width: 100%;
+    flex: 0 0 auto;
+  }
+
+  /* Строка списка привычек тоже в столбик */
+  #habit-list li {
+    flex-direction: column;
+    align-items: stretch;
+    padding: 10px;
+  }
+
+  /* flex: 0 0 auto — иначе flex-basis из ПК-правил задал бы высоту поля */
+  #habit-list input[type="text"],
+  #habit-list input[type="number"],
+  #habit-list select {
+    width: 100%;
+    flex: 0 0 auto;
+  }
+
+  .form-actions .btn {
+    flex: 1 1 auto;
+  }
+
+  /* Вкладка каза: меньше паддингов, шапка в столбик */
+  #qaza-view {
+    margin-top: 12px;
+    padding: 14px 12px 18px;
+    border-radius: 12px;
+  }
+
+  .qaza-head {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .qaza-head h2 {
+    font-size: 17px;
+  }
+
+  .qaza-rows,
+  .qaza-plan {
+    gap: 6px;
+  }
+
+  .qaza-row,
+  .qaza-plan-item {
+    gap: 8px;
+    padding: 9px 10px;
+  }
+
+  .qaza-start-option,
+  .qaza-add-option {
+    gap: 6px;
+    padding: 7px 10px;
+  }
+
+  .qaza-count {
+    min-width: 40px;
+    font-size: 15px;
+  }
+
+  .qaza-subtitle {
+    margin: 18px 0 10px;
+  }
+
+  .qaza-add-hint {
+    font-size: 12px;
+  }
+}
+
+  </style>
+</head>
+<body>
+<!-- Разметка страницы YouPlanner. Только содержимое <body>: шапка, таблица привычек, модалка. -->
+<div id="app">
+  <header id="header">
+    <div id="logo">YouPlanner</div>
+    <nav id="week-nav">
+      <button id="week-prev" class="btn btn-secondary" aria-label="Предыдущая неделя">‹</button>
+      <span id="week-label"></span>
+      <button id="week-next" class="btn btn-secondary" aria-label="Следующая неделя">›</button>
+      <button id="week-today" class="btn btn-secondary">Сегодня</button>
+    </nav>
+    <div id="header-actions">
+      <button id="qaza-btn" class="btn btn-secondary">Каза-намазы</button>
+      <button id="edit-habits-btn" class="btn btn-primary">Редактировать привычки</button>
+    </div>
+  </header>
+
+  <main id="main">
+    <!-- Переключатель половин недели для телефона. На ПК скрыт атрибутом hidden,
+         поэтому в потоке не участвует; показывает его только медиа-запрос. -->
+    <div id="mobile-day-tabs" hidden>
+      <button type="button" id="day-tab-1" class="btn btn-secondary">Пн–Чт</button>
+      <button type="button" id="day-tab-2" class="btn btn-secondary">Пт–Вс</button>
+    </div>
+    <table id="habits-table">
+      <thead id="habits-thead"></thead>
+      <tbody id="habits-tbody"></tbody>
+    </table>
+  </main>
+
+  <!-- Вкладка «Каза-намазы»: очередь каза по пяти намазам -->
+  <section id="qaza-view" hidden>
+    <div class="qaza-head">
+      <h2>Каза-намазы</h2>
+      <button id="qaza-back" class="btn btn-secondary">← Назад</button>
+    </div>
+    <p id="qaza-summary" class="qaza-summary"></p>
+    <div id="qaza-remaining" class="qaza-rows"></div>
+    <section id="qaza-start-block">
+      <h3 class="qaza-subtitle">Откуда продолжаем?</h3>
+      <div id="qaza-start" class="qaza-start" role="radiogroup" aria-label="Откуда продолжаем"></div>
+    </section>
+    <h3 class="qaza-subtitle">План на сегодня</h3>
+    <p id="qaza-plan-start" class="qaza-plan-start"></p>
+    <div id="qaza-plan" class="qaza-plan"></div>
+    <p id="qaza-note" class="qaza-note" hidden></p>
+    <section id="qaza-add-block">
+      <h3 class="qaza-subtitle">Добавить пропущенный намаз</h3>
+      <div id="qaza-add" class="qaza-add" role="radiogroup" aria-label="Какой намаз добавить"></div>
+      <p class="qaza-add-hint">Выберите намаз и нажмите «Добавить»: остаток вырастет на 1,
+        запись уйдёт в историю с пометкой «добавлено вручную», счётчик дня не изменится.
+        Курсор очереди останется на месте.</p>
+      <div class="qaza-add-actions">
+        <button type="button" id="qaza-add-btn" class="btn btn-primary" disabled>Добавить</button>
+      </div>
+    </section>
+    <div class="qaza-actions">
+      <button id="qaza-undo" class="btn btn-secondary">Отменить последнее</button>
+    </div>
+  </section>
+</div>
+
+<!-- Модальное окно редактирования списка привычек -->
+<div id="habit-modal" class="modal" hidden>
+  <div class="modal-backdrop" data-modal-close></div>
+  <div class="modal-window" role="dialog" aria-modal="true" aria-labelledby="modal-title">
+    <div class="modal-header">
+      <h2 id="modal-title">Редактировать привычки</h2>
+      <button id="modal-close" class="btn btn-secondary" data-modal-close aria-label="Закрыть">✕</button>
+    </div>
+    <div class="modal-body">
+      <ul id="habit-list"></ul>
+      <form id="habit-form" novalidate>
+        <h3>Новая привычка</h3>
+        <div class="form-fields">
+          <input id="form-name" type="text" placeholder="Название" required>
+          <select id="form-type">
+            <option value="boolean">Да / Нет</option>
+            <option value="number">Число</option>
+            <option value="choice">Выбор</option>
+          </select>
+          <input id="form-unit" type="text" placeholder="Единица (стр., мин, раз)">
+          <input id="form-goal" type="number" min="1" step="1" placeholder="Цель (для числа)">
+        </div>
+        <p id="form-error" class="form-error" role="alert"></p>
+        <div class="form-actions">
+          <button id="form-submit" type="submit" class="btn btn-primary">Добавить</button>
+          <button id="form-cancel" type="button" class="btn btn-secondary">Сбросить</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+
+  <script>
+/* YouPlanner — слой данных.
+   Файл склеивается с ui.js в общий тег script, поэтому функции объявлены
+   в глобальной области. Никаких внешних загрузок и обёрток-IIFE. */
+
+// Ключи localStorage
+const STORAGE_KEYS = {
+  habits: 'youplanner.habits',
+  records: 'youplanner.records',
+};
+
+// 11 привычек по умолчанию (порядок и значения — из спеки, п.5)
+const DEFAULT_HABITS = [
+  { id: 'h1', name: 'Фаджр', type: 'boolean', unit: '', goal: null },
+  { id: 'h2', name: 'Зухр', type: 'boolean', unit: '', goal: null },
+  { id: 'h3', name: 'Аср', type: 'boolean', unit: '', goal: null },
+  { id: 'h4', name: 'Магриб', type: 'boolean', unit: '', goal: null },
+  { id: 'h5', name: 'Иша', type: 'boolean', unit: '', goal: null },
+  { id: 'h6', name: 'Каза', type: 'number', unit: 'раз', goal: 3 },
+  { id: 'h7', name: 'Спорт', type: 'choice', unit: '', goal: null },
+  { id: 'h8', name: 'Коран', type: 'number', unit: 'стр.', goal: 5 },
+  { id: 'h9', name: 'Работа с текстами', type: 'number', unit: 'мин', goal: 10 },
+  { id: 'h10', name: 'Чтение книги', type: 'number', unit: 'стр.', goal: 2 },
+  { id: 'h11', name: 'Таблицы', type: 'boolean', unit: '', goal: null },
+];
+
+/* ---------- Чтение и запись localStorage ---------- */
+
+// Возвращает список привычек. Если ключа нет или JSON битый —
+// записывает дефолты и возвращает их копию.
+function loadHabits() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.habits);
+    if (!raw) throw new Error('нет данных');
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) throw new Error('не массив');
+    return parsed;
+  } catch (e) {
+    const defaults = DEFAULT_HABITS.map(function (h) {
+      return { id: h.id, name: h.name, type: h.type, unit: h.unit, goal: h.goal };
+    });
+    saveHabits(defaults);
+    return defaults;
+  }
+}
+
+function saveHabits(habits) {
+  localStorage.setItem(STORAGE_KEYS.habits, JSON.stringify(habits));
+}
+
+// Возвращает объект записей. Битый JSON или не-объект → пустой объект.
+function loadRecords() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.records);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return parsed;
+  } catch (e) {
+    return {};
+  }
+}
+
+function saveRecords(records) {
+  localStorage.setItem(STORAGE_KEYS.records, JSON.stringify(records));
+}
+
+/* ---------- Доступ к отдельным записям ---------- */
+
+// Значение привычки в конкретный день или undefined, если записи нет
+function getRecord(date, habitId) {
+  const records = loadRecords();
+  const day = records[date];
+  if (!day) return undefined;
+  return Object.prototype.hasOwnProperty.call(day, habitId) ? day[habitId] : undefined;
+}
+
+// Запись значения. undefined/null/'' — удаление записи.
+// Значения 0 и false значимы и сохраняются.
+function setRecord(date, habitId, value) {
+  const records = loadRecords();
+  const isDelete = value === undefined || value === null || value === '';
+
+  if (isDelete) {
+    const day = records[date];
+    if (!day || !Object.prototype.hasOwnProperty.call(day, habitId)) return;
+    delete day[habitId];
+    // Если день опустел — удаляем и ключ даты
+    if (Object.keys(day).length === 0) delete records[date];
+  } else {
+    if (!records[date]) records[date] = {};
+    records[date][habitId] = value;
+  }
+
+  saveRecords(records);
+}
+
+// Есть ли хотя бы одна запись у привычки
+function hasRecords(habitId) {
+  const records = loadRecords();
+  const dates = Object.keys(records);
+  for (let i = 0; i < dates.length; i++) {
+    if (Object.prototype.hasOwnProperty.call(records[dates[i]], habitId)) return true;
+  }
+  return false;
+}
+
+/* ---------- CRUD привычек ---------- */
+
+// Добавляет привычку, id генерируется автоматически
+function addHabit(habit) {
+  const habits = loadHabits();
+  const newHabit = {
+    id: 'h' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
+    name: habit.name,
+    type: habit.type,
+    unit: habit.unit || '',
+    goal: habit.goal === undefined ? null : habit.goal,
+  };
+  habits.push(newHabit);
+  saveHabits(habits);
+  return newHabit;
+}
+
+// Меняет поля привычки. Неизвестный id → null. id менять нельзя.
+function updateHabit(id, patch) {
+  const habits = loadHabits();
+  for (let i = 0; i < habits.length; i++) {
+    if (habits[i].id !== id) continue;
+    const merged = Object.assign({}, habits[i], patch, { id: habits[i].id });
+    habits[i] = merged;
+    saveHabits(habits);
+    return merged;
+  }
+  return null;
+}
+
+// Удаляет привычку и вычищает все её значения из записей
+function removeHabit(id) {
+  const habits = loadHabits().filter(function (h) { return h.id !== id; });
+  saveHabits(habits);
+
+  const records = loadRecords();
+  const dates = Object.keys(records);
+  let changed = false;
+  for (let i = 0; i < dates.length; i++) {
+    const day = records[dates[i]];
+    if (!Object.prototype.hasOwnProperty.call(day, id)) continue;
+    delete day[id];
+    changed = true;
+    if (Object.keys(day).length === 0) delete records[dates[i]];
+  }
+  if (changed) saveRecords(records);
+}
+
+/* ---------- Расчёт прогресса ---------- */
+
+// Процент выполнения привычки за набор дат. Может быть больше 100.
+// База — все дни периода, включая пустые: непроставленный день даёт 0.
+function calcProgress(habit, dates) {
+  if (!dates || dates.length === 0) return 0;
+
+  // Веса вариантов ответа для типа "choice"
+  const weights = { 'да': 1, 'частично': 0.5, 'нет': 0, 'отдых': 0 };
+  const base = dates.length;
+  let sum = 0;
+
+  for (let i = 0; i < dates.length; i++) {
+    const value = getRecord(dates[i], habit.id);
+    if (value === undefined) continue;
+
+    if (habit.type === 'boolean') {
+      sum += value === true ? 1 : 0;
+    } else if (habit.type === 'choice') {
+      sum += Object.prototype.hasOwnProperty.call(weights, value) ? weights[value] : 0;
+    } else if (habit.type === 'number') {
+      const num = Number(value);
+      sum += isNaN(num) ? 0 : num;
+    } else {
+      sum += value === true ? 1 : 0;
+    }
+  }
+
+  if (habit.type === 'number') {
+    if (!habit.goal || habit.goal <= 0) return 0;
+    return (sum / base) / habit.goal * 100;
+  }
+  return sum / base * 100;
+}
+
+/* ---------- Работа с датами (локальное время, без UTC) ---------- */
+
+// Date → 'YYYY-MM-DD' по локальным компонентам. UTC-сериализация запрещена
+// (даёт сдвиг на день), поэтому дата собирается из getFullYear/getMonth/getDate.
+function toISODate(d) {
+  const year = d.getFullYear();
+  const month = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return year + '-' + month + '-' + day;
+}
+
+// 'YYYY-MM-DD' → Date в локальной зоне
+function parseISODate(s) {
+  const parts = String(s).split('-');
+  const year = parseInt(parts[0], 10);
+  const month = parseInt(parts[1], 10) - 1;
+  const day = parseInt(parts[2], 10);
+  return new Date(year, month, day);
+}
+
+// Новая дата, сдвинутая на n дней (n может быть отрицательным)
+function addDays(d, n) {
+  return new Date(
+    d.getFullYear(),
+    d.getMonth(),
+    d.getDate() + n,
+    d.getHours(),
+    d.getMinutes(),
+    d.getSeconds(),
+    d.getMilliseconds()
+  );
+}
+
+// Понедельник недели этой даты, время 00:00
+function getWeekStart(d) {
+  const copy = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
+  const day = (copy.getDay() + 6) % 7; // 0 — понедельник, 6 — воскресенье
+  return addDays(copy, -day);
+}
+
+// Все даты месяца в формате 'YYYY-MM-DD'. month — 0-based.
+function getMonthDates(year, month) {
+  const dates = [];
+  const cursor = new Date(year, month, 1);
+  while (cursor.getMonth() === month) {
+    dates.push(toISODate(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return dates;
+}
+
+// Даты месяца с 1-го числа по сегодня включительно — знаменатель месячного
+// прогресса. Для месяца, который уже закончился, — все его дни;
+// для месяца, который ещё не начался, — пустой массив.
+function getMonthDatesToToday(year, month) {
+  const now = new Date();
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  const first = new Date(year, month, 1);
+  const lastDay = new Date(year, month + 1, 0);
+  const end = lastDay < today ? lastDay : today;
+  if (end < first) return [];
+
+  const dates = [];
+  for (let day = 1; day <= end.getDate(); day++) {
+    dates.push(toISODate(new Date(year, month, day)));
+  }
+  return dates;
+}
+
+/* ---------- Каза-намазы: состояние очереди ---------- */
+
+const QAZA_STORAGE_KEY = 'youplanner.qaza';
+
+// Привычка, которая показывает счётчик каза за день. Id из спеки трекера:
+// дефолтные привычки имеют стабильные id h1…h11.
+const QAZA_HABIT_ID = 'h6';
+
+// Дневная цель — ориентир, а не жёсткий лимит
+const QAZA_DAILY_GOAL = 3;
+
+// Порядок обхода очереди: Фаджр → Зухр → Аср → Магриб → Иша → снова Фаджр
+const NAMAZ_ORDER = ['fajr', 'zuhr', 'asr', 'maghrib', 'isha'];
+const NAMAZ_LABELS = {
+  fajr: 'Фаджр',
+  zuhr: 'Зухр',
+  asr: 'Аср',
+  maghrib: 'Магриб',
+  isha: 'Иша',
+};
+
+// Версия схемы состояния. 2 — стартовый курсор перестал быть жёстким нулём
+// и задаётся вручную в блоке «Откуда продолжаем?».
+// 3 — запись истории получила поле source (обычное выполнение или ручное добавление).
+const QAZA_VERSION = 3;
+
+// Источник записи в истории. Ручные записи не считаются выполнением:
+// они увеличивают остаток, но не счётчик каза за день.
+const QAZA_SOURCE_DONE = 'done';
+const QAZA_SOURCE_MANUAL = 'manual';
+
+// Магриб (индекс 3) — откуда продолжается очередь при начальных данных:
+// сегодня уже выполнены Фаджр, Магриб и Иша.
+const QAZA_DEFAULT_CURSOR = 3;
+
+// Начальные данные: 1530 каза, по 306 на намаз. Сегодня уже выполнены
+// Фаджр, Магриб и Иша, поэтому у них 305.
+const DEFAULT_QAZA = {
+  version: QAZA_VERSION,
+  cursor: QAZA_DEFAULT_CURSOR,
+  remaining: { fajr: 305, zuhr: 306, asr: 306, maghrib: 305, isha: 305 },
+  history: [],
+};
+
+// Копия состояния каза с проверкой типов. Возвращает новые объекты,
+// чтобы правки никогда не задели константу DEFAULT_QAZA.
+function copyQaza(source) {
+  const remaining = {};
+  for (let i = 0; i < NAMAZ_ORDER.length; i++) {
+    const key = NAMAZ_ORDER[i];
+    const value = source && source.remaining ? source.remaining[key] : undefined;
+    remaining[key] = Number.isFinite(value) && value > 0 ? Math.floor(value) : 0;
+  }
+
+  const history = [];
+  if (source && Array.isArray(source.history)) {
+    for (let i = 0; i < source.history.length; i++) {
+      const entry = source.history[i];
+      if (entry && NAMAZ_ORDER.indexOf(entry.namaz) !== -1 &&
+          typeof entry.date === 'string') {
+        history.push({
+          namaz: entry.namaz,
+          date: entry.date,
+          // Записи версий 1–2 поля не имеют: они все были выполнениями
+          source: entry.source === QAZA_SOURCE_MANUAL ? QAZA_SOURCE_MANUAL : QAZA_SOURCE_DONE,
+        });
+      }
+    }
+  }
+
+  let cursor = source && Number.isInteger(source.cursor) ? source.cursor : 0;
+  if (cursor < 0 || cursor >= NAMAZ_ORDER.length) cursor = 0;
+
+  return { version: QAZA_VERSION, cursor: cursor, remaining: remaining, history: history };
+}
+
+// Следующий по кругу индекс с ненулевым остатком. Поиск начинается с from + 1,
+// сам from не проверяется. Если ненулевых нет вовсе — возвращается from.
+function nextQazaIndex(qaza, from) {
+  const total = NAMAZ_ORDER.length;
+  for (let step = 1; step <= total; step++) {
+    const index = (from + step) % total;
+    if (qaza.remaining[NAMAZ_ORDER[index]] > 0) return index;
+  }
+  return from;
+}
+
+// План на сегодня: до трёх намазов по кругу от курсора, нулевые пропускаются.
+// Нигде не сохраняется — считается заново на каждый рендер.
+function getQazaPlan(qaza) {
+  const total = NAMAZ_ORDER.length;
+  const plan = [];
+  for (let step = 0; step < total && plan.length < QAZA_DAILY_GOAL; step++) {
+    const index = (qaza.cursor + step) % total;
+    if (qaza.remaining[NAMAZ_ORDER[index]] > 0) plan.push(index);
+  }
+  return plan;
+}
+
+// Сумма остатков по всем пяти намазам
+function qazaTotalRemaining(qaza) {
+  let sum = 0;
+  for (let i = 0; i < NAMAZ_ORDER.length; i++) {
+    sum += qaza.remaining[NAMAZ_ORDER[i]];
+  }
+  return sum;
+}
+
+// Состояние каза. При отсутствии ключа или битом JSON пишет начальные данные.
+// История обрезается до сегодняшнего дня: стек нужен только для отмены,
+// поэтому он не растёт бесконечно.
+function loadQaza() {
+  const today = toISODate(new Date());
+  try {
+    const raw = localStorage.getItem(QAZA_STORAGE_KEY);
+    if (!raw) throw new Error('нет данных');
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object') throw new Error('не объект');
+
+    const qaza = copyQaza(parsed);
+
+    // Состояние прежней версии ставило стартовый курсор на Фаджр, который уже
+    // выполнен. Правим только нетронутую очередь: если выполнения есть, курсор
+    // осмысленный и трогать его нельзя.
+    if (parsed.version === 1 && qaza.history.length === 0) {
+      qaza.cursor = QAZA_DEFAULT_CURSOR;
+    }
+
+    qaza.history = qaza.history.filter(function (entry) {
+      return entry.date === today;
+    });
+
+    // Курсор обязан указывать на намаз с остатком > 0
+    if (qaza.remaining[NAMAZ_ORDER[qaza.cursor]] === 0) {
+      qaza.cursor = nextQazaIndex(qaza, qaza.cursor);
+    }
+
+    saveQaza(qaza);
+    return qaza;
+  } catch (e) {
+    const fresh = copyQaza(DEFAULT_QAZA);
+    saveQaza(fresh);
+    return fresh;
+  }
+}
+
+function saveQaza(qaza) {
+  localStorage.setItem(QAZA_STORAGE_KEY, JSON.stringify(qaza));
+}
+
+// Сколько каза выполнено в указанный день. Считается по журналу, а не по длине
+// стека: если страница открыта через полночь, в журнале остаются записи прошлого
+// дня, и длина стека дала бы завышенный счётчик.
+// Ручные добавления пропусков в счётчик не входят: намаз не выполнен, а вспомнен.
+function qazaDoneCount(qaza, date) {
+  let count = 0;
+  for (let i = 0; i < qaza.history.length; i++) {
+    const entry = qaza.history[i];
+    if (entry.date === date && entry.source !== QAZA_SOURCE_MANUAL) count += 1;
+  }
+  return count;
+}
+
+// Выполнение текущего намаза: остаток уменьшается, курсор сдвигается дальше.
+// Счётчик каза за сегодня пишется в youplanner.records как привычка h6 —
+// это единственное место, откуда его читают прогресс-круги таблицы.
+function markQazaDone(qaza, today) {
+  const key = NAMAZ_ORDER[qaza.cursor];
+  if (!key || qaza.remaining[key] <= 0) return qaza;
+
+  qaza.remaining[key] -= 1;
+  qaza.history.push({ namaz: key, date: today, source: QAZA_SOURCE_DONE });
+  setRecord(today, QAZA_HABIT_ID, qazaDoneCount(qaza, today));
+  qaza.cursor = nextQazaIndex(qaza, qaza.cursor);
+  saveQaza(qaza);
+  return qaza;
+}
+
+// Ручное добавление пропущенного намаза: «вспомнил, что не сделал».
+// Остаток растёт, а счётчик дня и курсор очереди остаются на месте —
+// очередь продолжается с того намаза, на котором стояла.
+function addMissedQaza(qaza, key, today) {
+  if (NAMAZ_ORDER.indexOf(key) === -1) return qaza;
+
+  qaza.remaining[key] += 1;
+  qaza.history.push({ namaz: key, date: today, source: QAZA_SOURCE_MANUAL });
+
+  // Если очередь была исчерпана, курсор стоял на нулевом остатке.
+  // Возвращаем инвариант «курсор указывает на намаз с остатком > 0».
+  if (qaza.remaining[NAMAZ_ORDER[qaza.cursor]] === 0) {
+    qaza.cursor = nextQazaIndex(qaza, qaza.cursor);
+  }
+
+  saveQaza(qaza);
+  return qaza;
+}
+
+// Отмена последней записи за сегодня. Отменять вчерашнее нельзя,
+// поэтому при пустой или вчерашней истории функция ничего не делает.
+// Откат ручного добавления возвращает только остаток: курсор оно не двигало,
+// а счётчик дня его не учитывал.
+function undoQazaDone(qaza, today) {
+  if (qaza.history.length === 0) return qaza;
+
+  const last = qaza.history[qaza.history.length - 1];
+  if (last.date !== today) return qaza;
+
+  qaza.history.pop();
+
+  if (last.source === QAZA_SOURCE_MANUAL) {
+    // Ручное добавление остаток увеличивало — откат его уменьшает.
+    // Курсора и счётчика дня оно не касалось, значит и здесь они на месте.
+    if (qaza.remaining[last.namaz] !== undefined) qaza.remaining[last.namaz] -= 1;
+  } else {
+    qaza.remaining[last.namaz] += 1;
+
+    qaza.cursor = NAMAZ_ORDER.indexOf(last.namaz);
+    if (qaza.cursor < 0) qaza.cursor = 0;
+
+    // Ноль записывается как значимое значение, а не как удаление записи
+    setRecord(today, QAZA_HABIT_ID, qazaDoneCount(qaza, today));
+  }
+
+  // Курсор не должен указывать на намаз с нулевым остатком
+  if (qaza.remaining[NAMAZ_ORDER[qaza.cursor]] === 0) {
+    qaza.cursor = nextQazaIndex(qaza, qaza.cursor);
+  }
+
+  saveQaza(qaza);
+  return qaza;
+}
+
+/* ==========================================================================
+   YouPlanner — логика интерфейса (ui.js)
+
+   Файл склеивается с data.js в один общий тег script (см. assemble.js), поэтому
+   это не модуль и не IIFE: все имена объявляются в глобальной области видимости.
+   Функции слоя данных только ВЫЗЫВАЮТСЯ, но никогда не переобъявляются.
+
+   Ключевая архитектурная особенность: ячейки таблицы перерисовываются целиком
+   (renderTable), поэтому обработчики событий навешиваются ОДИН РАЗ на
+   #habits-table и #habit-list — делегирование. Иначе после перерисовки
+   слушатели на ячейках терялись бы.
+   ========================================================================== */
+
+/* --- Состояние приложения ------------------------------------------------ */
+
+const appState = {
+  habits: [],      // Habit[]
+  records: {},     // кэш youplanner.records
+  weekStart: null, // Date — понедельник отображаемой недели
+};
+
+// Мобильная вёрстка: -1 не выбрана, 0 Пн–Чт, 1 Пт–Вс
+let mobileDayPage = -1;
+
+/* --- Константы ----------------------------------------------------------- */
+
+// Геометрия прогресс-круга: радиус 24, длина окружности 2 * π * 24 ≈ 150.796
+const CIRCLE_RADIUS = 27;
+const CIRCLE_LENGTH = 2 * Math.PI * CIRCLE_RADIUS;
+const CIRCLE_CENTER = 32;
+const CIRCLE_SIZE = 64;
+
+// Месяцы: именительный падеж — для заголовка, родительный — для диапазона дней
+const MONTHS_NOMINATIVE = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
+  'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
+const MONTHS_GENITIVE = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+  'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
+const MONTHS_SHORT = ['янв', 'фев', 'мар', 'апр', 'май', 'июн',
+  'июл', 'авг', 'сент', 'окт', 'ноя', 'дек'];
+
+// Варианты значения для привычек типа choice (пустая опция = «нет записи»)
+const CHOICE_OPTIONS = ['да', 'нет', 'частично', 'отдых'];
+
+// Доступные типы привычек для формы
+const HABIT_TYPES = [
+  { value: 'boolean', label: 'Да / Нет' },
+  { value: 'number', label: 'Число' },
+  { value: 'choice', label: 'Выбор' },
+];
+
+/* --- Вспомогательные функции (не пересекаются с именами data.js) --------- */
+
+// Экранирование текста перед вставкой в innerHTML
+function escapeHtml(value) {
+  return String(value === null || value === undefined ? '' : value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+// Двузначное число: 7 -> '07'
+function pad2(value) {
+  return String(value).padStart(2, '0');
+}
+
+// Безопасное значение habitId для CSS-селектора
+function cssEscape(value) {
+  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
+    return CSS.escape(String(value));
+  }
+  return String(value).replace(/["\\]/g, '\\$&');
+}
+
+// Разбор строки разметки в первый элемент (использует DocumentFragment template)
+function parseFirstElement(html) {
+  const template = document.createElement('template');
+  template.innerHTML = html;
+  return template.content.firstElementChild;
+}
+
+// Привычка из текущего состояния по id
+function findHabit(habitId) {
+  for (let i = 0; i < appState.habits.length; i++) {
+    if (appState.habits[i].id === habitId) return appState.habits[i];
+  }
+  return null;
+}
+
+// Даты отображаемой недели: понедельник и шесть следующих дней
+function getWeekDates(weekStart) {
+  const dates = [];
+  for (let i = 0; i < 7; i++) dates.push(toISODate(addDays(weekStart, i)));
+  return dates;
+}
+
+// Прогресс привычки за отображаемую неделю. Знаменатель всегда 7 дней,
+// поэтому с каждым новым понедельником круг естественно обнуляется.
+function weekPercent(habit) {
+  const weekStart = appState.weekStart;
+  if (!weekStart) return 0;
+  return calcProgress(habit, getWeekDates(weekStart));
+}
+
+// Прогресс привычки за месяц: с 1-го числа по сегодня включительно
+function monthPercent(habit) {
+  const weekStart = appState.weekStart;
+  if (!weekStart) return 0;
+  const dates = getMonthDatesToToday(weekStart.getFullYear(), weekStart.getMonth());
+  return calcProgress(habit, dates);
+}
+
+// Сравнение значений записи (undefined = записи нет)
+function sameValue(a, b) {
+  return a === b;
+}
+
+/* --- Разметка (строки, чтобы собрать таблицу одним присвоением) ---------- */
+
+// Опции выпадающего списка типов привычек
+function typeOptionsMarkup(current) {
+  let html = '';
+  for (let i = 0; i < HABIT_TYPES.length; i++) {
+    const type = HABIT_TYPES[i];
+    html += '<option value="' + type.value + '"' +
+      (type.value === current ? ' selected' : '') + '>' + type.label + '</option>';
+  }
+  return html;
+}
+
+// Опции выпадающего списка значений ячейки choice
+function choiceOptionsMarkup(current) {
+  let html = '<option value=""' + (current === '' ? ' selected' : '') + '>—</option>';
+  for (let i = 0; i < CHOICE_OPTIONS.length; i++) {
+    const option = CHOICE_OPTIONS[i];
+    html += '<option value="' + option + '"' +
+      (option === current ? ' selected' : '') + '>' + option + '</option>';
+  }
+  return html;
+}
+
+// Разметка одной ячейки дня: <td class="cell" data-habit-id data-date>…</td>
+function cellMarkup(habit, date) {
+  const value = getRecord(date, habit.id);
+  const dataAttrs = ' data-habit-id="' + escapeHtml(habit.id) + '"' +
+    ' data-date="' + escapeHtml(date) + '"';
+  let inner = '';
+
+  if (habit.type === 'boolean') {
+    // Чекбокс = true, кнопка «✗» = false, пусто = записи нет
+    const checked = value === true ? ' checked' : '';
+    const xActive = value === false ? ' is-active' : '';
+    inner =
+      '<input type="checkbox" class="cell-check"' + dataAttrs + checked +
+      ' aria-label="Выполнено">' +
+      '<button type="button" class="cell-x' + xActive + '"' + dataAttrs +
+      ' aria-label="Не выполнено">✗</button>';
+  } else if (habit.id === QAZA_HABIT_ID) {
+    // Каза ведётся во вкладке «Каза-намазы», ячейка только показывает счётчик дня
+    inner = qazaCellMarkup(date);
+  } else if (habit.type === 'number') {
+    const text = typeof value === 'number' ? String(value) : '';
+    inner = '<input type="number" class="cell-number" min="0" step="1"' + dataAttrs +
+      ' value="' + escapeHtml(text) + '" aria-label="Значение">';
+  } else {
+    const current = typeof value === 'string' ? value : '';
+    inner = '<select class="cell-select"' + dataAttrs + ' aria-label="Значение">' +
+      choiceOptionsMarkup(current) + '</select>';
+  }
+
+  return '<td class="cell"' + dataAttrs + '>' + inner + '</td>';
+}
+
+// SVG-круг прогресса. percent — недельный процент (может быть больше 100),
+// дуга при этом обрезается по 100%. monthPct — месячный процент, выводится
+// второй строкой внутри круга.
+function circleMarkup(percent, habitId, monthPct) {
+  const raw = Number(percent);
+  const safe = isFinite(raw) ? raw : 0;
+  const clamped = Math.min(Math.max(safe, 0), 100);
+  const dashoffset = CIRCLE_LENGTH * (1 - clamped / 100);
+  // Цвет ставим инлайновым стилем, чтобы он перебивал возможные правила CSS
+  const strokeStyle = safe >= 100 ? 'stroke:var(--success)' : 'stroke:var(--accent)';
+  const label = Math.round(safe) + '%';
+
+  const monthRaw = Number(monthPct);
+  const monthLabel = 'М: ' + Math.round(isFinite(monthRaw) ? monthRaw : 0) + '%';
+
+  const idAttr = habitId === null || habitId === undefined
+    ? '' : ' data-habit-id="' + escapeHtml(habitId) + '"';
+
+  return '<svg class="progress-circle" viewBox="0 0 ' + CIRCLE_SIZE + ' ' + CIRCLE_SIZE + '"' +
+    ' width="' + CIRCLE_SIZE + '" height="' + CIRCLE_SIZE + '"' +
+    ' role="img" aria-label="Неделя ' + escapeHtml(label) +
+    ', месяц ' + escapeHtml(monthLabel) + '"' + idAttr + '>' +
+    '<circle class="progress-track" cx="' + CIRCLE_CENTER + '" cy="' + CIRCLE_CENTER + '"' +
+    ' r="' + CIRCLE_RADIUS + '" fill="none" stroke="var(--border)" stroke-width="5"></circle>' +
+    '<circle class="progress-arc" cx="' + CIRCLE_CENTER + '" cy="' + CIRCLE_CENTER + '"' +
+    ' r="' + CIRCLE_RADIUS + '" fill="none" stroke-width="5" stroke-linecap="round"' +
+    ' style="' + strokeStyle + '"' +
+    ' stroke-dasharray="' + CIRCLE_LENGTH.toFixed(3) + '"' +
+    ' stroke-dashoffset="' + dashoffset.toFixed(3) + '"' +
+    ' transform="rotate(-90 ' + CIRCLE_CENTER + ' ' + CIRCLE_CENTER + ')"></circle>' +
+    '<text x="' + CIRCLE_CENTER + '" y="27" class="progress-text" text-anchor="middle"' +
+    ' dominant-baseline="central">' + escapeHtml(label) + '</text>' +
+    '<text x="' + CIRCLE_CENTER + '" y="41" class="progress-month" text-anchor="middle"' +
+    ' dominant-baseline="central">' + escapeHtml(monthLabel) + '</text>' +
+    '</svg>';
+}
+
+/* --- Инициализация ------------------------------------------------------- */
+
+function init() {
+  appState.habits = loadHabits();
+  appState.records = loadRecords();
+  appState.weekStart = getWeekStart(new Date());
+
+  // Начальные данные каза записываются при первом запуске, а не при открытии
+  // вкладки: так состояние очереди существует до первого показа
+  qazaState = loadQaza();
+
+  renderHeader();
+  renderTable();
+  updateFormFields();
+
+  bindEvents();
+}
+
+// Все обработчики навешиваются один раз. События внутри таблицы и списка
+// привычек — делегированные, поэтому перерисовка не теряет слушатели.
+function bindEvents() {
+  const table = document.getElementById('habits-table');
+  if (table) {
+    table.addEventListener('change', onTableChange);
+    table.addEventListener('click', onTableClick);
+  }
+
+  const habitList = document.getElementById('habit-list');
+  if (habitList) {
+    habitList.addEventListener('click', onHabitListClick);
+  }
+
+  const weekPrev = document.getElementById('week-prev');
+  if (weekPrev) weekPrev.addEventListener('click', function () { changeWeek(-1); });
+
+  const weekNext = document.getElementById('week-next');
+  if (weekNext) weekNext.addEventListener('click', function () { changeWeek(1); });
+
+  const weekToday = document.getElementById('week-today');
+  if (weekToday) weekToday.addEventListener('click', goToday);
+
+  const editButton = document.getElementById('edit-habits-btn');
+  if (editButton) editButton.addEventListener('click', openModal);
+
+  const qazaButton = document.getElementById('qaza-btn');
+  if (qazaButton) qazaButton.addEventListener('click', openQazaView);
+
+  const qazaBack = document.getElementById('qaza-back');
+  if (qazaBack) qazaBack.addEventListener('click', closeQazaView);
+
+  const qazaUndoButton = document.getElementById('qaza-undo');
+  if (qazaUndoButton) qazaUndoButton.addEventListener('click', onQazaUndo);
+
+  const qazaPlanBox = document.getElementById('qaza-plan');
+  if (qazaPlanBox) qazaPlanBox.addEventListener('click', onQazaDone);
+
+  const qazaStartBox = document.getElementById('qaza-start');
+  if (qazaStartBox) qazaStartBox.addEventListener('change', onQazaStartChange);
+
+  const qazaAddBox = document.getElementById('qaza-add');
+  if (qazaAddBox) qazaAddBox.addEventListener('change', onQazaAddPick);
+
+  const qazaAddButton = document.getElementById('qaza-add-btn');
+  if (qazaAddButton) qazaAddButton.addEventListener('click', onQazaAddSubmit);
+
+  // Кнопка закрытия и подложка помечены атрибутом data-modal-close
+  const closers = document.querySelectorAll('[data-modal-close]');
+  for (let i = 0; i < closers.length; i++) {
+    closers[i].addEventListener('click', closeModal);
+  }
+  const modalClose = document.getElementById('modal-close');
+  if (modalClose) modalClose.addEventListener('click', closeModal);
+
+  // Escape закрывает модалку
+  document.addEventListener('keydown', function (event) {
+    if (event.key !== 'Escape') return;
+    const modal = document.getElementById('habit-modal');
+    if (modal && !modal.hidden) closeModal();
+  });
+
+  const form = document.getElementById('habit-form');
+  if (form) form.addEventListener('submit', onFormSubmit);
+
+  const formType = document.getElementById('form-type');
+  if (formType) formType.addEventListener('change', updateFormFields);
+
+  const formCancel = document.getElementById('form-cancel');
+  if (formCancel) {
+    formCancel.addEventListener('click', function () {
+      if (form) form.reset();
+      updateFormFields();
+      setFormError('');
+    });
+  }
+
+  // Переключатель половин недели на телефоне
+  const dayTabFirst = document.getElementById('day-tab-1');
+  if (dayTabFirst) {
+    dayTabFirst.addEventListener('click', function () {
+      mobileDayPage = 0;
+      renderTable();
+    });
+  }
+
+  const dayTabSecond = document.getElementById('day-tab-2');
+  if (dayTabSecond) {
+    dayTabSecond.addEventListener('click', function () {
+      mobileDayPage = 1;
+      renderTable();
+    });
+  }
+
+  // Смена ширины окна переводит таблицу в другой режим: набор дней разный.
+  // В iOS Safari сворачивание адресной строки тоже шлёт resize, режим при этом
+  // не меняется — перерисовываем только на настоящей смене режима.
+  let lastIsMobile = isMobileView();
+  window.addEventListener('resize', function () {
+    const now = isMobileView();
+    if (now !== lastIsMobile) {
+      lastIsMobile = now;
+      renderTable();
+    }
+  });
+}
+
+/* --- Шапка и таблица ----------------------------------------------------- */
+
+// Подпись недели: «Сентябрь 2026 · 7–13 сентября» либо
+// «31 авг – 6 сент 2026», если неделя пересекает границу месяца.
+function renderHeader() {
+  const label = document.getElementById('week-label');
+  if (!label || !appState.weekStart) return;
+
+  const weekStart = appState.weekStart;
+  const weekEnd = addDays(weekStart, 6);
+  const dayStart = weekStart.getDate();
+  const dayEnd = weekEnd.getDate();
+  const monthStart = weekStart.getMonth();
+  const monthEnd = weekEnd.getMonth();
+  const yearStart = weekStart.getFullYear();
+  const yearEnd = weekEnd.getFullYear();
+
+  let text;
+  if (monthStart === monthEnd && yearStart === yearEnd) {
+    text = MONTHS_NOMINATIVE[monthStart] + ' ' + yearStart +
+      ' · ' + dayStart + '–' + dayEnd + ' ' + MONTHS_GENITIVE[monthStart];
+  } else {
+    text = dayStart + ' ' + MONTHS_SHORT[monthStart] + ' – ' +
+      dayEnd + ' ' + MONTHS_SHORT[monthEnd] + ' ' + yearEnd;
+  }
+
+  label.textContent = text;
+}
+
+/* --- Мобильная вёрстка --------------------------------------------------- */
+
+// Порог тот же, что у медиа-запроса в стилях: ширина узкого телефона
+function isMobileView() {
+  return window.matchMedia('(max-width: 700px)').matches;
+}
+
+// Индексы дней недели (0 — понедельник), попадающие в текущий вид.
+// На ПК это вся неделя, на телефоне — выбранная половина.
+function getVisibleDays() {
+  if (!isMobileView()) return [0, 1, 2, 3, 4, 5, 6];
+  return mobileDayPage === 1 ? [4, 5, 6] : [0, 1, 2, 3];
+}
+
+// Первый выбор половины: показываем ту, где сегодняшний день.
+// Дальше выбор пользователя не перебиваем.
+function initMobileDayPage() {
+  if (mobileDayPage !== -1) return;
+  const d = new Date().getDay(); // 0 — воскресенье, 1–6 — понедельник…суббота
+  mobileDayPage = (d >= 1 && d <= 4) ? 0 : 1;
+}
+
+// Переключатель половин виден только в мобильном режиме;
+// активная кнопка показывает текущую половину
+function updateMobileTabs() {
+  const box = document.getElementById('mobile-day-tabs');
+  if (box) box.hidden = !isMobileView();
+
+  const tab1 = document.getElementById('day-tab-1');
+  const tab2 = document.getElementById('day-tab-2');
+  if (tab1) tab1.classList.toggle('is-active', mobileDayPage === 0);
+  if (tab2) tab2.classList.toggle('is-active', mobileDayPage === 1);
+}
+
+// Полная перерисовка шапки и тела таблицы.
+// Разметка собирается строками и вставляется через DocumentFragment
+// (<template>.content) — одно присвоение innerHTML на контейнер и одна
+// вставка в живой DOM, чтобы уложиться в 50 мс.
+function renderTable() {
+  const weekStart = appState.weekStart;
+  if (!weekStart) return;
+
+  initMobileDayPage();
+
+  // Даты отображаемых дней недели: на ПК это вся неделя,
+  // на телефоне — выбранная половина (Пн–Чт или Пт–Вс)
+  const visibleDays = getVisibleDays();
+  const dates = [];
+  for (let i = 0; i < visibleDays.length; i++) {
+    const day = addDays(weekStart, visibleDays[i]);
+    dates.push(new Date(day.getFullYear(), day.getMonth(), day.getDate()));
+  }
+
+  let thead = '<tr><th class="habit-col">Привычка</th>';
+  for (let i = 0; i < dates.length; i++) {
+    thead += '<th class="day-col">' + pad2(dates[i].getDate()) + '.' +
+      pad2(dates[i].getMonth() + 1) + '</th>';
+  }
+  thead += '<th class="progress-col">Прогресс</th></tr>';
+
+  // В круге — прогресс за неделю, второй строкой — за месяц
+  let tbody = '';
+  for (let h = 0; h < appState.habits.length; h++) {
+    const habit = appState.habits[h];
+    tbody += '<tr class="habit-row" data-habit-id="' + escapeHtml(habit.id) + '">';
+    tbody += '<td class="habit-cell"><span class="habit-name">' + escapeHtml(habit.name) + '</span>';
+    if (habit.unit) {
+      tbody += '<span class="habit-unit">(' + escapeHtml(habit.unit) + ')</span>';
+    }
+    tbody += '</td>';
+    for (let i = 0; i < dates.length; i++) {
+      tbody += cellMarkup(habit, toISODate(dates[i]));
+    }
+    tbody += '<td class="progress-cell">' +
+      circleMarkup(weekPercent(habit), habit.id, monthPercent(habit)) + '</td>';
+    tbody += '</tr>';
+  }
+
+  const headTemplate = document.createElement('template');
+  headTemplate.innerHTML = thead;
+  const bodyTemplate = document.createElement('template');
+  bodyTemplate.innerHTML = tbody;
+
+  const theadEl = document.getElementById('habits-thead');
+  const tbodyEl = document.getElementById('habits-tbody');
+  if (theadEl) theadEl.replaceChildren(headTemplate.content);
+  if (tbodyEl) tbodyEl.replaceChildren(bodyTemplate.content);
+
+  updateMobileTabs();
+}
+
+// Одна ячейка дня. Возвращает HTMLElement (разбирается из той же разметки,
+// что использует renderTable, — единый источник правды).
+function renderCell(habit, date) {
+  return parseFirstElement(cellMarkup(habit, date));
+}
+
+// Прогресс-круг. Возвращает SVGElement.
+function renderCircle(percent, monthPct) {
+  return parseFirstElement(circleMarkup(percent, null, monthPct));
+}
+
+/* --- Делегированные обработчики таблицы ---------------------------------- */
+
+function onTableChange(event) {
+  const target = event.target;
+  if (!target || !target.classList || typeof target.closest !== 'function') return;
+
+  const cell = target.closest('td.cell');
+  if (!cell) return;
+
+  const habitId = cell.getAttribute('data-habit-id');
+  const date = cell.getAttribute('data-date');
+  const habit = findHabit(habitId);
+  if (!habit || !date) return;
+
+  const current = getRecord(date, habitId);
+
+  // boolean: галочка = true, снятая галочка = удаление записи
+  if (target.classList.contains('cell-check')) {
+    const value = target.checked ? true : undefined;
+    if (sameValue(current, value)) {
+      syncBooleanCell(cell, current);
+      return;
+    }
+    onCellChange(habit, date, value);
+    syncBooleanCell(cell, value);
+    return;
+  }
+
+  // choice: пустая опция = удаление записи
+  if (target.classList.contains('cell-select')) {
+    const value = target.value === '' ? undefined : target.value;
+    if (sameValue(current, value)) return;
+    onCellChange(habit, date, value);
+    return;
+  }
+
+  // number: '' -> удаление, 0 — значимое значение, отрицательное/NaN -> удаление
+  if (target.classList.contains('cell-number')) {
+    let value;
+    if (target.value === '') {
+      value = undefined;
+    } else {
+      const parsed = Number(target.value);
+      value = (isFinite(parsed) && parsed >= 0) ? parsed : undefined;
+    }
+    if (sameValue(current, value)) return;
+    onCellChange(habit, date, value);
+  }
+}
+
+function onTableClick(event) {
+  const target = event.target;
+  if (!target || typeof target.closest !== 'function') return;
+
+  const button = target.closest('.cell-x');
+  if (!button) return;
+
+  const cell = button.closest('td.cell');
+  if (!cell) return;
+
+  const habitId = cell.getAttribute('data-habit-id');
+  const date = cell.getAttribute('data-date');
+  const habit = findHabit(habitId);
+  if (!habit || !date) return;
+
+  // Повторный клик по «✗» сбрасывает запись в «пусто»
+  const current = getRecord(date, habitId);
+  const value = current === false ? undefined : false;
+
+  onCellChange(habit, date, value);
+  syncBooleanCell(cell, value);
+}
+
+// Синхронизация вида boolean-ячейки после изменения
+function syncBooleanCell(cell, value) {
+  if (!cell) return;
+  const check = cell.querySelector('.cell-check');
+  const cross = cell.querySelector('.cell-x');
+  if (check) check.checked = value === true;
+  if (cross) cross.classList.toggle('is-active', value === false);
+}
+
+/* --- Изменение значения ячейки ------------------------------------------- */
+
+// Записывает значение и обновляет ТОЛЬКО круг своей строки — без renderTable()
+function onCellChange(habit, date, value) {
+  if (!habit) return;
+  setRecord(date, habit.id, value);
+  appState.records = loadRecords();
+  updateRowCircle(habit.id);
+}
+
+// Перерисовка круга одной строки (полная перерисовка таблицы не нужна)
+function updateRowCircle(habitId) {
+  let habit = findHabit(habitId);
+  if (!habit) {
+    appState.habits = loadHabits();
+    habit = findHabit(habitId);
+  }
+  if (!habit || !appState.weekStart) return;
+
+  const row = document.querySelector(
+    '#habits-tbody tr.habit-row[data-habit-id="' + cssEscape(habitId) + '"]'
+  );
+  if (!row) return;
+
+  const cell = row.querySelector('.progress-cell');
+  if (!cell) return;
+
+  cell.innerHTML = circleMarkup(weekPercent(habit), habit.id, monthPercent(habit));
+}
+
+/* --- Навигация по неделям ------------------------------------------------ */
+
+function changeWeek(delta) {
+  appState.weekStart = addDays(appState.weekStart, delta * 7);
+  renderHeader();
+  renderTable();
+}
+
+function goToday() {
+  appState.weekStart = getWeekStart(new Date());
+  renderHeader();
+  renderTable();
+}
+
+/* --- Вкладка «Каза-намазы» ----------------------------------------------- */
+
+// Состояние очереди каза. Заполняется в init(), дальше меняется только вкладкой.
+let qazaState = null;
+
+// Намаз, выбранный в блоке ручного добавления. Живёт только в интерфейсе
+// и не сохраняется: это ещё не решение, а подготовка к нажатию «Добавить».
+let qazaAddPick = null;
+
+// Показ и скрытие элемента по id
+function setHidden(id, hidden) {
+  const element = document.getElementById(id);
+  if (element) element.hidden = hidden;
+}
+
+function openQazaView() {
+  if (!qazaState) qazaState = loadQaza();
+  renderQazaView();
+
+  setHidden('main', true);
+  setHidden('week-nav', true);
+  setHidden('edit-habits-btn', true);
+  setHidden('qaza-btn', true);
+  setHidden('qaza-view', false);
+}
+
+function closeQazaView() {
+  setHidden('qaza-view', true);
+  setHidden('main', false);
+  setHidden('week-nav', false);
+  setHidden('edit-habits-btn', false);
+  setHidden('qaza-btn', false);
+}
+
+function renderQazaView() {
+  if (!qazaState) return;
+
+  const total = qazaTotalRemaining(qazaState);
+
+  const summary = document.getElementById('qaza-summary');
+  if (summary) {
+    summary.textContent = 'Осталось всего: ' + total +
+      ' · Цель: ' + QAZA_DAILY_GOAL + ' намаза в день';
+  }
+
+  // Когда очередь исчерпана, выбирать стартовый намаз не из чего
+  setHidden('qaza-start-block', total === 0);
+
+  renderQazaRemaining();
+  renderQazaStart();
+  renderQazaPlan();
+  renderQazaAdd();
+}
+
+// Выбор намаза для ручного добавления: пять радио в виде пилюль, как в блоке
+// «Откуда продолжаем?». По умолчанию не выбрано ничего — программа не берётся
+// угадывать, какой именно намаз человек забыл.
+function renderQazaAdd() {
+  const box = document.getElementById('qaza-add');
+  const button = document.getElementById('qaza-add-btn');
+
+  // Подтверждать нечего, пока намаз не выбран
+  if (button) button.disabled = qazaAddPick === null;
+  if (!box) return;
+
+  let html = '';
+  for (let i = 0; i < NAMAZ_ORDER.length; i++) {
+    const isPicked = i === qazaAddPick;
+
+    html += '<label class="qaza-add-option' + (isPicked ? ' is-picked' : '') + '">' +
+      '<input type="radio" class="qaza-add-radio" name="qaza-add" value="' + i + '"' +
+      (isPicked ? ' checked' : '') + '>' +
+      '<span class="qaza-add-name">' + escapeHtml(NAMAZ_LABELS[NAMAZ_ORDER[i]]) + '</span>' +
+      (isPicked ? '<span class="qaza-add-mark">выбран</span>' : '') +
+      '</label>';
+  }
+
+  box.innerHTML = html;
+}
+
+// Выбор намаза в блоке добавления: только подсветка, состояние очереди не трогается.
+// Обработчик делегирован на #qaza-add, потому что список перерисовывается.
+function onQazaAddPick(event) {
+  const target = event && event.target;
+  if (!target || !target.classList || !target.classList.contains('qaza-add-radio')) return;
+
+  const index = parseInt(target.value, 10);
+  if (!Number.isInteger(index) || index < 0 || index >= NAMAZ_ORDER.length) return;
+
+  qazaAddPick = index;
+  renderQazaAdd();
+  restoreQazaRadioFocus('qaza-add', 'qaza-add-radio');
+}
+
+// Подтверждение добавления: остаток выбранного намаза растёт на единицу,
+// счётчик дня и курсор очереди остаются на месте.
+function onQazaAddSubmit() {
+  if (qazaAddPick === null) return;
+
+  addMissedQaza(qazaState, NAMAZ_ORDER[qazaAddPick], toISODate(new Date()));
+
+  // После добавления выбор сбрасывается: повторное нажатие не должно
+  // записать тот же намаз второй раз
+  qazaAddPick = null;
+  afterQazaChange();
+}
+
+// Выбор стартового намаза: пять радио. Текущий помечен рамкой и словом «сейчас»,
+// чтобы выбор не передавался только цветом.
+function renderQazaStart() {
+  const box = document.getElementById('qaza-start');
+  if (!box) return;
+
+  let html = '';
+  for (let i = 0; i < NAMAZ_ORDER.length; i++) {
+    const isCursor = i === qazaState.cursor;
+
+    html += '<label class="qaza-start-option' + (isCursor ? ' is-cursor' : '') + '">' +
+      '<input type="radio" class="qaza-start-radio" name="qaza-start" value="' + i + '"' +
+      (isCursor ? ' checked' : '') + '>' +
+      '<span class="qaza-start-name">' + escapeHtml(NAMAZ_LABELS[NAMAZ_ORDER[i]]) + '</span>' +
+      (isCursor ? '<span class="qaza-start-mark">сейчас</span>' : '') +
+      '</label>';
+  }
+
+  box.innerHTML = html;
+}
+
+// Смена стартового намаза: курсор переставляется и план пересчитывается.
+// Обработчик делегирован на #qaza-start, потому что список перерисовывается.
+function onQazaStartChange(event) {
+  const target = event && event.target;
+  if (!target || !target.classList || !target.classList.contains('qaza-start-radio')) return;
+
+  const index = parseInt(target.value, 10);
+  if (!Number.isInteger(index) || index < 0 || index >= NAMAZ_ORDER.length) return;
+
+  qazaState.cursor = index;
+
+  // Курсор обязан указывать на намаз с остатком > 0
+  if (qazaState.remaining[NAMAZ_ORDER[index]] === 0) {
+    qazaState.cursor = nextQazaIndex(qazaState, index);
+  }
+
+  saveQaza(qazaState);
+  renderQazaView();
+  restoreQazaRadioFocus('qaza-start', 'qaza-start-radio');
+}
+
+// Перерисовка списка радио уносит фокус вместе со старыми узлами, и обход
+// стрелками обрывается. Возвращаем фокус на выбранный вариант.
+// На мышиный клик это не влияет: :focus-visible тогда не срабатывает.
+function restoreQazaRadioFocus(boxId, radioClass) {
+  const box = document.getElementById(boxId);
+  if (!box) return;
+
+  const checked = box.querySelector('.' + radioClass + ':checked');
+  if (checked) checked.focus({ preventScroll: true });
+}
+
+// Список пяти намазов с остатками. Текущий помечен рамкой и словом «сейчас»,
+// чтобы информация не передавалась только цветом.
+function renderQazaRemaining() {
+  const box = document.getElementById('qaza-remaining');
+  if (!box) return;
+
+  let html = '';
+  for (let i = 0; i < NAMAZ_ORDER.length; i++) {
+    const key = NAMAZ_ORDER[i];
+    const isCursor = i === qazaState.cursor;
+    const isEmpty = qazaState.remaining[key] === 0;
+
+    html += '<div class="qaza-row' + (isCursor ? ' is-cursor' : '') +
+      (isEmpty ? ' is-empty' : '') + '">' +
+      '<span class="qaza-row-name">' + escapeHtml(NAMAZ_LABELS[key]) + '</span>' +
+      (isCursor ? '<span class="qaza-row-mark">сейчас</span>' : '') +
+      '<span class="qaza-count">' + qazaState.remaining[key] + '</span>' +
+      '</div>';
+  }
+
+  box.innerHTML = html;
+}
+
+// План на сегодня. Кнопка «Выполнено» есть только у первого пункта:
+// очередь строго последовательная, перепрыгнуть её нельзя.
+function renderQazaPlan() {
+  const box = document.getElementById('qaza-plan');
+  const note = document.getElementById('qaza-note');
+  const undo = document.getElementById('qaza-undo');
+  const startLabel = document.getElementById('qaza-plan-start');
+  if (!box) return;
+
+  const today = toISODate(new Date());
+  const plan = getQazaPlan(qazaState);
+
+  if (undo) {
+    const last = qazaState.history[qazaState.history.length - 1];
+    undo.disabled = !last || last.date !== today;
+  }
+
+  if (plan.length === 0) {
+    box.innerHTML = '';
+    if (startLabel) {
+      startLabel.hidden = true;
+      startLabel.textContent = '';
+    }
+    if (note) {
+      note.hidden = false;
+      note.textContent = 'Все каза выполнены. Остатков не осталось.';
+    }
+    return;
+  }
+
+  if (note) {
+    note.hidden = true;
+    note.textContent = '';
+  }
+
+  // Всегда видно, откуда программа отсчитывает план
+  if (startLabel) {
+    startLabel.hidden = false;
+    startLabel.textContent = 'Начать с: ' + NAMAZ_LABELS[NAMAZ_ORDER[qazaState.cursor]];
+  }
+
+  let html = '';
+  for (let i = 0; i < plan.length; i++) {
+    const key = NAMAZ_ORDER[plan[i]];
+    const isCurrent = i === 0;
+
+    html += '<div class="qaza-plan-item' + (isCurrent ? ' is-current' : '') + '">' +
+      '<span class="qaza-plan-name">' + escapeHtml(NAMAZ_LABELS[key]) + '</span>' +
+      (isCurrent
+        ? '<button type="button" id="qaza-done" class="btn btn-primary">Выполнено</button>'
+        : '<span class="qaza-plan-next">дальше</span>') +
+      '</div>';
+  }
+
+  box.innerHTML = html;
+}
+
+// Нажатие «Выполнено». Обработчик делегирован на #qaza-plan, потому что
+// содержимое плана перерисовывается целиком.
+function onQazaDone(event) {
+  const target = event && event.target;
+  if (!target || typeof target.closest !== 'function') return;
+  if (!target.closest('#qaza-done')) return;
+
+  markQazaDone(qazaState, toISODate(new Date()));
+  afterQazaChange();
+}
+
+function onQazaUndo() {
+  undoQazaDone(qazaState, toISODate(new Date()));
+  afterQazaChange();
+}
+
+// Общая часть после изменения очереди: перерисовать вкладку, ячейки каза
+// и прогресс-круг строки h6 в таблице
+function afterQazaChange() {
+  appState.records = loadRecords();
+  renderQazaView();
+  updateQazaCells();
+  updateRowCircle(QAZA_HABIT_ID);
+}
+
+// Разметка ячейки каза: число выполненных за день либо прочерк
+function qazaCellMarkup(date) {
+  const value = getRecord(date, QAZA_HABIT_ID);
+  const isEmpty = typeof value !== 'number';
+  return '<span class="cell-qaza' + (isEmpty ? ' is-empty' : '') + '">' +
+    escapeHtml(isEmpty ? '—' : String(value)) + '</span>';
+}
+
+// Обновление ячеек каза во всех днях отображаемой недели
+function updateQazaCells() {
+  const cells = document.querySelectorAll(
+    '#habits-tbody td.cell[data-habit-id="' + cssEscape(QAZA_HABIT_ID) + '"]'
+  );
+  for (let i = 0; i < cells.length; i++) {
+    const date = cells[i].getAttribute('data-date');
+    if (!date) continue;
+    cells[i].innerHTML = qazaCellMarkup(date);
+  }
+}
+
+/* --- Модальное окно ------------------------------------------------------ */
+
+function openModal() {
+  appState.habits = loadHabits();
+  appState.records = loadRecords();
+  renderHabitList();
+  const modal = document.getElementById('habit-modal');
+  if (modal) modal.hidden = false;
+}
+
+function closeModal() {
+  const modal = document.getElementById('habit-modal');
+  if (modal) modal.hidden = true;
+  setFormError('');
+}
+
+// Список привычек в модалке. События делегированы на #habit-list.
+function renderHabitList() {
+  const list = document.getElementById('habit-list');
+  if (!list) return;
+
+  let html = '';
+  for (let i = 0; i < appState.habits.length; i++) {
+    const habit = appState.habits[i];
+    // У каза тип задаётся вкладкой «Каза-намазы» и заблокирован всегда;
+    // у остальных — только если по привычке уже есть записи
+    const isQaza = habit.id === QAZA_HABIT_ID;
+    const locked = isQaza || hasRecords(habit.id);
+    const lockedTitle = isQaza
+      ? 'Тип каза задаётся вкладкой «Каза-намазы»'
+      : 'Тип нельзя изменить: по привычке уже есть записи';
+    const lockedAttr = locked
+      ? ' disabled title="' + lockedTitle + '"'
+      : '';
+    const goalValue = habit.goal === null || habit.goal === undefined
+      ? '' : String(habit.goal);
+
+    html += '<li class="habit-item" data-habit-id="' + escapeHtml(habit.id) + '">' +
+      '<input type="text" class="habit-edit-name" value="' + escapeHtml(habit.name) +
+      '" aria-label="Название">' +
+      '<select class="habit-type"' + lockedAttr + ' aria-label="Тип">' +
+      typeOptionsMarkup(habit.type) + '</select>' +
+      '<input type="text" class="habit-edit-unit" value="' + escapeHtml(habit.unit || '') +
+      '" placeholder="Ед." aria-label="Единица измерения">' +
+      '<input type="number" class="habit-edit-goal" min="1" step="1" value="' +
+      escapeHtml(goalValue) + '" placeholder="Цель" aria-label="Цель">' +
+      '<button type="button" class="btn btn-secondary habit-save">Сохранить</button>' +
+      // У каза кнопки удаления нет: удалив привычку, синхронизацию не восстановить
+      (isQaza ? '' : '<button type="button" class="btn btn-danger habit-delete">Удалить</button>') +
+      '</li>';
+  }
+
+  list.innerHTML = html;
+}
+
+// Делегированный обработчик кнопок «Сохранить» и «Удалить» в списке
+function onHabitListClick(event) {
+  const target = event.target;
+  if (!target || typeof target.closest !== 'function') return;
+
+  const item = target.closest('li[data-habit-id]');
+  if (!item) return;
+
+  const habitId = item.getAttribute('data-habit-id');
+  const habit = findHabit(habitId);
+  if (!habit) return;
+
+  if (target.closest('.habit-delete')) {
+    if (!window.confirm('Удалить привычку «' + habit.name + '» и все её записи?')) return;
+    removeHabit(habitId);
+    appState.habits = loadHabits();
+    appState.records = loadRecords();
+    setFormError('');
+    renderHabitList();
+    renderTable();
+    return;
+  }
+
+  if (target.closest('.habit-save')) {
+    const data = readHabitItem(item);
+    const result = validateHabitForm(data, habitId);
+    if (!result.ok) {
+      setFormError(result.error);
+      return;
+    }
+    const patch = { name: data.name.trim(), unit: data.unit, goal: data.goal };
+    // Тип меняем только у привычки без записей
+    if (!hasRecords(habitId)) patch.type = data.type;
+
+    updateHabit(habitId, patch);
+    appState.habits = loadHabits();
+    appState.records = loadRecords();
+    setFormError('');
+    renderHabitList();
+    renderTable();
+  }
+}
+
+// Данные одной строки списка привычек
+function readHabitItem(item) {
+  const nameField = item.querySelector('.habit-edit-name');
+  const typeField = item.querySelector('.habit-type');
+  const unitField = item.querySelector('.habit-edit-unit');
+  const goalField = item.querySelector('.habit-edit-goal');
+
+  const type = typeField ? typeField.value : 'boolean';
+  const unit = unitField ? unitField.value.trim() : '';
+  const goalText = goalField ? goalField.value.trim() : '';
+
+  return {
+    name: nameField ? nameField.value : '',
+    type: type,
+    unit: type === 'number' ? unit : '',
+    goal: type === 'number' ? Number(goalText) : null,
+  };
+}
+
+/* --- Форма добавления привычки ------------------------------------------- */
+
+function setFormError(message) {
+  const error = document.getElementById('form-error');
+  if (error) error.textContent = message || '';
+}
+
+// Поля unit и goal имеют смысл только для числового типа
+function updateFormFields() {
+  const typeField = document.getElementById('form-type');
+  const unitField = document.getElementById('form-unit');
+  const goalField = document.getElementById('form-goal');
+  const isNumber = !!typeField && typeField.value === 'number';
+  if (unitField) unitField.hidden = !isNumber;
+  if (goalField) goalField.hidden = !isNumber;
+}
+
+function onFormSubmit(event) {
+  event.preventDefault();
+
+  const nameField = document.getElementById('form-name');
+  const typeField = document.getElementById('form-type');
+  const unitField = document.getElementById('form-unit');
+  const goalField = document.getElementById('form-goal');
+
+  const type = typeField ? typeField.value : 'boolean';
+  const data = {
+    name: nameField ? nameField.value : '',
+    type: type,
+    unit: unitField ? unitField.value.trim() : '',
+    goal: type === 'number' && goalField ? Number(goalField.value.trim()) : null,
+  };
+
+  const result = validateHabitForm(data);
+  if (!result.ok) {
+    setFormError(result.error);
+    return;
+  }
+
+  addHabit({
+    name: data.name.trim(),
+    type: data.type,
+    unit: data.type === 'number' ? data.unit : '',
+    goal: data.goal,
+  });
+
+  appState.habits = loadHabits();
+  appState.records = loadRecords();
+  setFormError('');
+
+  const form = document.getElementById('habit-form');
+  if (form) form.reset();
+  updateFormFields();
+
+  renderHabitList();
+  renderTable();
+}
+
+// validateHabitForm(data, excludeId) -> { ok: true } | { ok: false, error }
+// excludeId позволяет не считать саму привычку дубликатом при редактировании.
+function validateHabitForm(data, excludeId) {
+  const skipId = excludeId !== undefined && excludeId !== null
+    ? excludeId
+    : (data && data.excludeId !== undefined ? data.excludeId : null);
+
+  const name = (data && data.name ? String(data.name) : '').trim();
+  if (name === '') {
+    return { ok: false, error: 'Введите название привычки' };
+  }
+
+  const habits = loadHabits();
+  const lowerName = name.toLowerCase();
+  for (let i = 0; i < habits.length; i++) {
+    if (habits[i].id === skipId) continue;
+    if (String(habits[i].name).trim().toLowerCase() === lowerName) {
+      return { ok: false, error: 'Привычка с названием «' + name + '» уже существует' };
+    }
+  }
+
+  if (data && data.type === 'number') {
+    const goal = data.goal;
+    const isInteger = typeof goal === 'number' && isFinite(goal) &&
+      Math.floor(goal) === goal && goal > 0;
+    if (!isInteger) {
+      return { ok: false, error: 'Цель должна быть целым числом больше 0' };
+    }
+    if (!(data.unit ? String(data.unit) : '').trim()) {
+      return { ok: false, error: 'Укажите единицу измерения для числовой привычки' };
+    }
+  }
+
+  return { ok: true };
+}
+
+
+    document.addEventListener('DOMContentLoaded', init);
+
+// Регистрация service worker для офлайн-работы.
+// По file:// регистрация невозможна — ошибку молча глотаем, страница работает как обычно.
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', function () {
+    navigator.serviceWorker.register('./sw.js').catch(function () {});
+  });
+}
+  </script>
+</body>
+</html>
