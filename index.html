@@ -2136,6 +2136,9 @@ function saveQaza(qaza) {
 const FIREBASE_URL = 'https://youplanner-5c2f5-default-rtdb.firebaseio.com/youplanner-a7x9k2';
 const SYNC_TS_KEY = 'youplanner.sync.ts';
 
+// Сколько версий узла держим в /backups.json
+const BACKUP_LIMIT = 10;
+
 // Отправка после правки откладывается: серия тапов по клеткам даёт один PUT
 const SYNC_DEBOUNCE_MS = 1500;
 // Сколько держится надпись о ручной синхронизации
@@ -2234,11 +2237,48 @@ function syncToCloud() {
     syncing = false;
   }
 
-  return fetch(FIREBASE_URL + '.json', {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: body,
-  }).catch(function () {});
+  // Сначала копия, потом запись: сбой копирования данные всё равно отправит
+  return Promise.resolve()
+    .then(backupCloudSnapshot)
+    .catch(function () {})
+    .then(function () {
+      return fetch(FIREBASE_URL + '.json', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: body,
+      });
+    })
+    .catch(function () {});
+}
+
+// Кладёт наверх копию того, что сейчас лежит на сервере: запись затирает
+// чужой снимок, и без копии его не вернуть. Свежая версия сверху, всего не
+// больше BACKUP_LIMIT — самая старая уходит. Пустой узел копировать нечего.
+function backupCloudSnapshot() {
+  return fetch(FIREBASE_URL + '.json')
+    .then(function (response) {
+      if (!response.ok) throw new Error('нет ответа');
+      return response.json();
+    })
+    .then(function (previous) {
+      if (!previous || typeof previous !== 'object') return null;
+
+      return fetch(FIREBASE_URL + '/backups.json')
+        .then(function (response) {
+          if (!response.ok) throw new Error('нет ответа');
+          return response.json();
+        })
+        .then(function (list) {
+          const items = Array.isArray(list) ? list : [];
+          items.unshift(previous);
+          return fetch(FIREBASE_URL + '/backups.json', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(items.slice(0, BACKUP_LIMIT)),
+          });
+        });
+    })
+    .catch(function () {});
 }
 
 // Отложенная отправка: несколько правок подряд дают один PUT
