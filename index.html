@@ -606,6 +606,7 @@ body {
 #main[hidden],
 #week-nav[hidden],
 #qaza-start-block[hidden],
+#habits-edit-view[hidden],
 .btn[hidden] {
   display: none;
 }
@@ -938,6 +939,186 @@ body {
   display: none;
 }
 
+/* Строка-переход в списке настроек */
+#settings-list {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.settings-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 14px;
+  border: 0;
+  border-bottom: 1px solid var(--border);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-row:hover {
+  color: var(--accent);
+}
+
+.settings-chevron {
+  color: var(--text-muted);
+  font-size: 20px;
+  line-height: 1;
+}
+
+/* --- Экран «Привычки» ---------------------------------------------------- */
+/* Та же карточка, что у вкладки каза */
+#habits-edit-view {
+  margin-top: 20px;
+  padding: 22px 26px 26px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background-color: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+#habits-edit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Строка привычки: заголовок всегда виден, поля раскрываются по тапу */
+.habit-row-edit {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background-color: var(--surface-alt);
+  overflow: hidden;
+}
+
+.habit-row-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 16px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Имя занимает всё свободное место, тип прижат к шеврону справа */
+.habit-row-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.habit-row-type {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.habit-row-chevron {
+  color: var(--text-muted);
+  font-size: 20px;
+  line-height: 1;
+  transition: transform .15s;
+}
+
+.habit-row-edit.is-open .habit-row-chevron {
+  transform: rotate(90deg);
+}
+
+.habit-row-body {
+  display: none;
+  padding: 14px 16px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.habit-row-body label {
+  display: block;
+  margin-bottom: 8px;
+}
+
+/* Скрытая обёртка иначе осталась бы видимой: у label задан display: block */
+.habit-row-body label[hidden] {
+  display: none;
+}
+
+.habit-row-body label > span {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.habit-row-body input,
+.habit-row-body select {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background-color: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+}
+
+.habit-row-body input:focus-visible,
+.habit-row-body select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.habit-row-body select:disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.habit-row-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* В модалке пустая ошибка держит высоту, чтобы форма не прыгала;
+   в строке это лишняя полоса — текст появляется и сдвигает кнопки */
+.habit-row-body .form-error:empty {
+  display: none;
+}
+
+/* Кнопки экрана — под правило 44px; в строках ещё и на всю ширину */
+#habits-edit-view .btn {
+  min-height: 44px;
+  font-size: 14px;
+}
+
+.habit-row-body .btn {
+  width: 100%;
+}
+
+#habits-edit-add {
+  width: 100%;
+}
+
 /* В каза и настройках шапка действий не нужна — и на ПК, и на телефоне */
 body.view-qaza #header-actions,
 body.view-settings #header-actions {
@@ -1089,6 +1270,11 @@ body.view-settings #header-actions {
     display: none;
   }
 
+  /* Привычки на телефоне правятся отдельным экраном из настроек */
+  #edit-habits-btn {
+    display: none;
+  }
+
   /* Таблица: дни компактнее, столбец привычки уже */
   #habits-table {
     margin-top: 12px;
@@ -1156,13 +1342,25 @@ body.view-settings #header-actions {
     height: 46px;
   }
 
-  /* Модалка: почти во всю ширину, с запасом по высоте */
+  /* Модалка на телефоне — во весь экран */
   .modal-window {
-    width: auto;
-    max-width: calc(100vw - 24px);
-    max-height: 92vh;
-    padding: 16px 14px 20px;
-    border-radius: 12px;
+    width: 100vw;
+    max-width: none;
+    height: 100vh;
+    max-height: none;
+    /* верхний отступ переехал в шапку: иначе прокрученный текст
+       просвечивает в полосе над прилипшей шапкой */
+    padding: 0 14px 20px;
+    border-radius: 0;
+  }
+
+  /* Шапка держится сверху при прокрутке формы */
+  .modal-header {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    padding-top: 16px;
+    background-color: var(--surface);
   }
 
   .modal-header h2 {
@@ -1221,6 +1419,39 @@ body.view-settings #header-actions {
 
   .qaza-head h2 {
     font-size: 17px;
+  }
+
+  /* Экран «Привычки»: компактнее карточки каза */
+  #habits-edit-view {
+    margin-top: 12px;
+    padding: 14px;
+    border-radius: 12px;
+  }
+
+  /* Кнопка «Назад» слева, заголовок — во всю оставшуюся ширину */
+  #habits-edit-view .qaza-head {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    align-items: center;
+    gap: 10px;
+  }
+
+  #habits-edit-view .qaza-head h2 {
+    font-size: 17px;
+  }
+
+  #habits-edit-back {
+    min-width: 40px;
+  }
+
+  /* Список привычек свёрнут: поля раскрывает только активная строка.
+     Селектор — .habit-row-edit, чтобы .is-open не пересекался с таблицей */
+  .habit-row-body {
+    display: none;
+  }
+
+  .habit-row-edit.is-open .habit-row-body {
+    display: block;
   }
 
   /* Из каза на телефоне выходим таб-баром — кнопка «Назад» дублирует его */
@@ -1300,9 +1531,22 @@ body.view-settings #header-actions {
     outline-offset: 2px;
   }
 
-  /* Запас снизу, чтобы таб-бар не накрывал последнюю строку таблицы */
+  /* Запас снизу, чтобы таб-бар не накрывал последнюю строку таблицы или
+     карточку. 67px — высота таб-бара без безопасного отступа; сам отступ
+     добавлен здесь же, поэтому между контентом и таб-баром остаётся
+     12–16px независимо от модели телефона. */
   #app {
-    padding-bottom: 80px;
+    padding-bottom: calc(67px + env(safe-area-inset-bottom, 0px));
+  }
+
+  /* Дополнительный зазор под контент — на случай, когда последний элемент
+     упирается в самый низ своей колонки */
+  #main {
+    padding-bottom: 8px;
+  }
+
+  #day-cards {
+    padding-bottom: 8px;
   }
 
   /* В каза и настройках половины недели не нужны.
@@ -1390,7 +1634,27 @@ body.view-settings #header-actions {
        данных и синхронизации — появятся отдельными шагами. -->
   <section id="settings-view" hidden>
     <div class="qaza-head"><h2>Настройки</h2></div>
+    <ul id="settings-list">
+      <li>
+        <button type="button" id="settings-edit-habits" class="settings-row">
+          <span>Редактировать привычки</span><span class="settings-chevron">›</span>
+        </button>
+      </li>
+    </ul>
     <p class="qaza-summary">Раздел в разработке. Здесь появятся: выбор цвета фона, экспорт/импорт данных, синхронизация.</p>
+  </section>
+
+  <!-- Экран «Привычки»: открывается строкой из Настроек. Своя карточка вместо
+       модалки — на телефоне список привычек занимает отдельный экран. -->
+  <section id="habits-edit-view" hidden>
+    <div class="qaza-head">
+      <button type="button" id="habits-edit-back" class="btn btn-secondary">←</button>
+      <h2>Привычки</h2>
+    </div>
+    <ul id="habits-edit-list"></ul>
+    <div class="qaza-actions">
+      <button type="button" id="habits-edit-add" class="btn btn-primary">+ Добавить привычку</button>
+    </div>
   </section>
 
   <!-- Нижний таб-бар: переключает разделы. Виден только на телефоне,
@@ -2069,6 +2333,14 @@ function typeOptionsMarkup(current) {
   return html;
 }
 
+// Подпись типа привычки для экрана «Привычки»
+function habitTypeLabel(type) {
+  for (let i = 0; i < HABIT_TYPES.length; i++) {
+    if (HABIT_TYPES[i].value === type) return HABIT_TYPES[i].label;
+  }
+  return '';
+}
+
 // Опции выпадающего списка значений ячейки choice
 function choiceOptionsMarkup(current) {
   let html = '<option value=""' + (current === '' ? ' selected' : '') + '>—</option>';
@@ -2183,6 +2455,26 @@ function bindEvents() {
   const habitList = document.getElementById('habit-list');
   if (habitList) {
     habitList.addEventListener('click', onHabitListClick);
+  }
+
+  // Экран «Привычки» в настройках
+  const settingsEdit = document.getElementById('settings-edit-habits');
+  if (settingsEdit) {
+    settingsEdit.addEventListener('click', function () { switchAppView('edit-habits'); });
+  }
+
+  const habitsEditBack = document.getElementById('habits-edit-back');
+  if (habitsEditBack) {
+    habitsEditBack.addEventListener('click', function () { switchAppView('settings'); });
+  }
+
+  const habitsEditAdd = document.getElementById('habits-edit-add');
+  if (habitsEditAdd) habitsEditAdd.addEventListener('click', openModal);
+
+  const habitsEditList = document.getElementById('habits-edit-list');
+  if (habitsEditList) {
+    habitsEditList.addEventListener('click', onHabitsEditClick);
+    habitsEditList.addEventListener('change', onHabitsEditChange);
   }
 
   const weekPrev = document.getElementById('week-prev');
@@ -2692,19 +2984,23 @@ function switchAppView(name) {
 
   document.getElementById('main').hidden = name !== 'main';
   document.getElementById('settings-view').hidden = name !== 'settings';
+  document.getElementById('habits-edit-view').hidden = name !== 'edit-habits';
   document.getElementById('qaza-view').hidden = name !== 'qaza';
   document.getElementById('mobile-day-tabs').hidden = name !== 'main' || !isMobileView();
   document.getElementById('tab-bar').hidden = !isMobileView();
   document.getElementById('week-nav').hidden = name !== 'main';
   document.getElementById('edit-habits-btn').hidden = name !== 'main';
 
+  // Экран «Привычки» — вложенный в настройки, там же подсвечивается и вкладка
+  const tabView = name === 'edit-habits' ? 'settings' : name;
   document.querySelectorAll('#tab-bar .tab-item').forEach(function (item) {
-    item.classList.toggle('is-active', item.getAttribute('data-view') === name);
+    item.classList.toggle('is-active', item.getAttribute('data-view') === tabView);
   });
 
   // Классы на body гасят шапку действий в каза и настройках
+  const isSettings = name === 'settings' || name === 'edit-habits';
   document.body.classList.toggle('view-qaza', name === 'qaza');
-  document.body.classList.toggle('view-settings', name === 'settings');
+  document.body.classList.toggle('view-settings', isSettings);
 
   if (name === 'qaza') {
     if (!qazaState) qazaState = loadQaza();
@@ -2713,6 +3009,12 @@ function switchAppView(name) {
 
   if (name === 'main') {
     renderMainView();
+  }
+
+  if (name === 'edit-habits') {
+    appState.habits = loadHabits();
+    appState.records = loadRecords();
+    renderHabitsEditList();
   }
 
   window.scrollTo(0, 0);
@@ -2986,6 +3288,8 @@ function closeModal() {
   const modal = document.getElementById('habit-modal');
   if (modal) modal.hidden = true;
   setFormError('');
+  // После добавления привычки список на экране «Привычки» устарел
+  renderHabitsEditList();
 }
 
 // Список привычек в модалке. События делегированы на #habit-list.
@@ -3070,12 +3374,155 @@ function onHabitListClick(event) {
   }
 }
 
-// Данные одной строки списка привычек
-function readHabitItem(item) {
-  const nameField = item.querySelector('.habit-edit-name');
-  const typeField = item.querySelector('.habit-type');
-  const unitField = item.querySelector('.habit-edit-unit');
-  const goalField = item.querySelector('.habit-edit-goal');
+/* --- Экран «Привычки» (настройки, телефон) ------------------------------- */
+
+// Строки-аккордеоны: поля раскрываются тапом по заголовку
+function renderHabitsEditList() {
+  const list = document.getElementById('habits-edit-list');
+  if (!list) return;
+
+  let html = '';
+  for (let i = 0; i < appState.habits.length; i++) {
+    const habit = appState.habits[i];
+    const isQaza = habit.id === QAZA_HABIT_ID;
+    const locked = isQaza || hasRecords(habit.id);
+    const lockedTitle = isQaza
+      ? 'Тип каза задаётся вкладкой «Каза-намазы»'
+      : 'Тип нельзя изменить: по привычке уже есть записи';
+    const lockedAttr = locked
+      ? ' disabled title="' + lockedTitle + '"'
+      : '';
+    const isNumber = habit.type === 'number';
+    const numberHidden = isNumber ? '' : ' hidden';
+    const goalValue = habit.goal === null || habit.goal === undefined
+      ? '' : String(habit.goal);
+
+    html += '<li class="habit-row-edit" data-habit-id="' + escapeHtml(habit.id) + '">' +
+      '<button type="button" class="habit-row-head">' +
+        '<span class="habit-row-name">' + escapeHtml(habit.name) + '</span>' +
+        '<span class="habit-row-type">' + escapeHtml(habitTypeLabel(habit.type)) + '</span>' +
+        '<span class="habit-row-chevron">›</span>' +
+      '</button>' +
+      '<div class="habit-row-body">' +
+        '<label><span>Название</span>' +
+          '<input type="text" class="edit-name" value="' + escapeHtml(habit.name) + '">' +
+        '</label>' +
+        '<label><span>Тип</span>' +
+          '<select class="edit-type"' + lockedAttr + '>' +
+          typeOptionsMarkup(habit.type) + '</select>' +
+        '</label>' +
+        '<label class="edit-number-field"' + numberHidden + '><span>Единица измерения</span>' +
+          '<input type="text" class="edit-unit" value="' + escapeHtml(habit.unit || '') +
+          '" placeholder="Ед.">' +
+        '</label>' +
+        '<label class="edit-number-field"' + numberHidden + '><span>Цель</span>' +
+          '<input type="number" class="edit-goal" min="1" step="1" value="' +
+          escapeHtml(goalValue) + '" placeholder="Цель">' +
+        '</label>' +
+        '<p class="form-error" role="alert"></p>' +
+        '<div class="habit-row-actions">' +
+          '<button type="button" class="btn btn-primary edit-save">Сохранить</button>' +
+          // У каза удаления нет: удалив привычку, синхронизацию не восстановить
+          (isQaza ? '' : '<button type="button" class="btn btn-danger edit-delete">Удалить</button>') +
+        '</div>' +
+      '</div>' +
+      '</li>';
+  }
+
+  list.innerHTML = html;
+}
+
+// Ошибка показывается внутри раскрытой строки — форма модалки здесь не видна
+function setRowError(item, message) {
+  const error = item.querySelector('.form-error');
+  if (error) error.textContent = message || '';
+}
+
+// Делегированный обработчик экрана «Привычки»
+function onHabitsEditClick(event) {
+  const target = event.target;
+  if (!target || typeof target.closest !== 'function') return;
+
+  if (target.closest('.habit-row-head')) {
+    const row = target.closest('.habit-row-edit');
+    if (!row) return;
+    const wasOpen = row.classList.contains('is-open');
+    // Открыта не более одной строки: раскрытие закрывает соседей
+    const siblings = row.parentNode.children;
+    for (let i = 0; i < siblings.length; i++) {
+      siblings[i].classList.remove('is-open');
+    }
+    if (!wasOpen) row.classList.add('is-open');
+    return;
+  }
+
+  const item = target.closest('li[data-habit-id]');
+  if (!item) return;
+
+  const habitId = item.getAttribute('data-habit-id');
+  const habit = findHabit(habitId);
+  if (!habit) return;
+
+  if (target.closest('.edit-delete')) {
+    if (!window.confirm('Удалить привычку «' + habit.name + '» и все её записи?')) return;
+    removeHabit(habitId);
+    appState.habits = loadHabits();
+    appState.records = loadRecords();
+    renderHabitsEditList();
+    renderMainView();
+    return;
+  }
+
+  if (target.closest('.edit-save')) {
+    const data = readHabitItem(item, EDIT_ROW_SELECTORS);
+    const result = validateHabitForm(data, habitId);
+    if (!result.ok) {
+      setRowError(item, result.error);
+      return;
+    }
+    const patch = { name: data.name.trim(), unit: data.unit, goal: data.goal };
+    // Тип меняем только у привычки без записей
+    if (!hasRecords(habitId)) patch.type = data.type;
+
+    updateHabit(habitId, patch);
+    appState.habits = loadHabits();
+    appState.records = loadRecords();
+    renderHabitsEditList();
+    renderMainView();
+  }
+}
+
+// Поля «Единица» и «Цель» нужны только числовому типу
+function onHabitsEditChange(event) {
+  const field = event.target;
+  if (!field || !field.classList || !field.classList.contains('edit-type')) return;
+
+  const item = field.closest('li[data-habit-id]');
+  if (!item) return;
+
+  const isNumber = field.value === 'number';
+  const fields = item.querySelectorAll('.edit-number-field');
+  for (let i = 0; i < fields.length; i++) {
+    fields[i].hidden = !isNumber;
+  }
+}
+
+// Селекторы строки экрана «Привычки» — имена классов отличаются от модалки
+const EDIT_ROW_SELECTORS = {
+  name: '.edit-name',
+  type: '.edit-type',
+  unit: '.edit-unit',
+  goal: '.edit-goal',
+};
+
+// Данные одной строки списка привычек.
+// cls переопределяет селекторы: в модалке и на экране «Привычки» они разные.
+function readHabitItem(item, cls) {
+  const sel = cls || {};
+  const nameField = item.querySelector(sel.name || '.habit-edit-name');
+  const typeField = item.querySelector(sel.type || '.habit-type');
+  const unitField = item.querySelector(sel.unit || '.habit-edit-unit');
+  const goalField = item.querySelector(sel.goal || '.habit-edit-goal');
 
   const type = typeField ? typeField.value : 'boolean';
   const unit = unitField ? unitField.value.trim() : '';
