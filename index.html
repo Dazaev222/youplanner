@@ -896,6 +896,23 @@ body {
   color: var(--text-muted);
 }
 
+/* --- Переключатель «День / Неделя» и карточки дня ------------------------ */
+/* Оба — принадлежность телефона: на ПК их нет, там всегда таблица недели */
+#main-view-switch {
+  display: none;
+}
+
+#day-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+#day-cards[hidden] {
+  display: none;
+}
+
 /* --- Раздел «Настройки» и нижний таб-бар --------------------------------- */
 /* Таб-бар — элемент телефона: на ПК его нет вовсе */
 #tab-bar {
@@ -961,6 +978,74 @@ body.view-settings #header-actions {
     color: var(--accent);
   }
 
+  /* Переключатель «День / Неделя»: два сегмента на общей подложке */
+  #main-view-switch {
+    display: flex;
+    gap: 0;
+    margin-bottom: 12px;
+    padding: 3px;
+    border-radius: 10px;
+    background: var(--surface-alt);
+  }
+
+  .view-switch-btn {
+    flex: 1 1 auto;
+    min-height: 44px;
+    padding: 6px 12px;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 14px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+
+  .view-switch-btn.is-active {
+    background: var(--surface);
+    color: var(--text);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, .08);
+  }
+
+  /* Карточка привычки в режиме «День» */
+  .day-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    min-height: 60px;
+    padding: 14px 16px;
+    border: 1px solid var(--border);
+    border-radius: 14px;
+    background: var(--surface);
+  }
+
+  .day-card-name {
+    flex: 1 1 auto;
+    font-size: 16px;
+    font-weight: 500;
+  }
+
+  .day-card-unit {
+    margin-left: 6px;
+    font-size: 13px;
+    font-weight: 400;
+    color: var(--text-muted);
+  }
+
+  .day-card-controls {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  /* В карточке контролы крупнее табличных: палец вместо курсора */
+  .day-card .cell-check { width: 30px; height: 30px; }
+  .day-card .cell-x { width: 30px; height: 30px; font-size: 14px; }
+  .day-card .cell-number { width: 72px; min-height: 40px; padding: 8px 10px; font-size: 15px; }
+  .day-card .cell-select { width: 120px; min-height: 40px; padding: 8px 10px; font-size: 15px; }
+  .day-card .cell-qaza { font-size: 17px; font-weight: 600; }
+
   /* Шапка в столбик: логотип, подпись недели, действия */
   #header {
     flex-direction: column;
@@ -997,6 +1082,11 @@ body.view-settings #header-actions {
 
   #header-actions .btn {
     width: 100%;
+  }
+
+  /* На телефоне каза открывается таб-баром — кнопка в шапке лишняя */
+  #qaza-btn {
+    display: none;
   }
 
   /* Таблица: дни компактнее, столбец привычки уже */
@@ -1243,6 +1333,16 @@ body.view-settings #header-actions {
   </header>
 
   <main id="main">
+    <!-- Переключатель «День / Неделя». На ПК скрыт атрибутом hidden,
+         показывает его только медиа-запрос -->
+    <div id="main-view-switch" role="radiogroup" aria-label="Режим отображения">
+      <button type="button" class="view-switch-btn is-active" data-view="day">День</button>
+      <button type="button" class="view-switch-btn" data-view="week">Неделя</button>
+    </div>
+
+    <!-- Режим «День»: по карточке на привычку за сегодня -->
+    <div id="day-cards" hidden></div>
+
     <!-- Переключатель половин недели для телефона. На ПК скрыт атрибутом hidden,
          поэтому в потоке не участвует; показывает его только медиа-запрос. -->
     <div id="mobile-day-tabs" hidden>
@@ -1858,6 +1958,10 @@ let appView = 'main';
 // Мобильная вёрстка: -1 не выбрана, 0 Пн–Чт, 1 Пт–Вс
 let mobileDayPage = -1;
 
+// Режим главного экрана на телефоне: 'day' — карточки за сегодня,
+// 'week' — привычная таблица недели. Выбор переживает перезапуск.
+let mainView = localStorage.getItem('youplanner.mainView') || 'day';
+
 /* --- Константы ----------------------------------------------------------- */
 
 // Геометрия прогресс-круга: радиус 24, длина окружности 2 * π * 24 ≈ 150.796
@@ -2057,7 +2161,7 @@ function init() {
   qazaState = loadQaza();
 
   renderHeader();
-  renderTable();
+  renderMainView();
   updateFormFields();
 
   bindEvents();
@@ -2156,6 +2260,25 @@ function bindEvents() {
     });
   }
 
+  // Переключатель «День / Неделя». Выбор запоминается на будущие запуски
+  const switchBox = document.getElementById('main-view-switch');
+  if (switchBox) {
+    switchBox.addEventListener('click', function (event) {
+      const btn = event.target.closest('.view-switch-btn');
+      if (!btn) return;
+      mainView = btn.getAttribute('data-view');
+      localStorage.setItem('youplanner.mainView', mainView);
+      renderMainView();
+    });
+  }
+
+  // Карточки дня: те же обработчики, что у таблицы
+  const dayBox = document.getElementById('day-cards');
+  if (dayBox) {
+    dayBox.addEventListener('change', onTableChange);
+    dayBox.addEventListener('click', onTableClick);
+  }
+
   // Переключатель половин недели на телефоне
   const dayTabFirst = document.getElementById('day-tab-1');
   if (dayTabFirst) {
@@ -2181,7 +2304,7 @@ function bindEvents() {
     const now = isMobileView();
     if (now !== lastIsMobile) {
       lastIsMobile = now;
-      renderTable();
+      renderMainView();
       // Ширина сменилась — таб-бар появляется или исчезает вместе с режимом
       document.getElementById('tab-bar').hidden = !now;
     }
@@ -2249,6 +2372,95 @@ function updateMobileTabs() {
   const tab2 = document.getElementById('day-tab-2');
   if (tab1) tab1.classList.toggle('is-active', mobileDayPage === 0);
   if (tab2) tab2.classList.toggle('is-active', mobileDayPage === 1);
+}
+
+/* --- Режим «День» -------------------------------------------------------- */
+
+// Карточки дня — мобильный режим: на ПК и в режиме «Неделя» его нет
+function isMainDayView() {
+  return isMobileView() && mainView === 'day';
+}
+
+// Единая точка перерисовки главного экрана: выбирает между карточками дня
+// и таблицей недели и приводит видимость блоков в соответствие режиму
+function renderMainView() {
+  const switchBox = document.getElementById('main-view-switch');
+  if (switchBox) {
+    switchBox.hidden = !isMobileView();
+    switchBox.querySelectorAll('.view-switch-btn').forEach(function (btn) {
+      btn.classList.toggle('is-active', btn.getAttribute('data-view') === mainView);
+    });
+  }
+
+  const dayBox = document.getElementById('day-cards');
+  const tabs = document.getElementById('mobile-day-tabs');
+  const weekNav = document.getElementById('week-nav');
+  const table = document.getElementById('habits-table');
+
+  if (isMainDayView()) {
+    if (dayBox) dayBox.hidden = false;
+    if (tabs) tabs.hidden = true;
+    if (weekNav) weekNav.hidden = true;
+    if (table) table.hidden = true;
+    renderDayCards();
+  } else {
+    if (dayBox) dayBox.hidden = true;
+    if (tabs) tabs.hidden = !isMobileView();
+    if (weekNav) weekNav.hidden = false;
+    if (table) table.hidden = false;
+    renderTable();
+  }
+}
+
+// По карточке на привычку за сегодня. Контролы те же, что в ячейках таблицы,
+// но крупнее — размеры заданы правилами .day-card .cell-* в медиа-запросе.
+function renderDayCards() {
+  const box = document.getElementById('day-cards');
+  if (!box) return;
+
+  const today = toISODate(new Date());
+  let html = '';
+
+  for (let h = 0; h < appState.habits.length; h++) {
+    const habit = appState.habits[h];
+    let inner = '';
+
+    if (habit.type === 'boolean') {
+      const value = getRecord(today, habit.id);
+      const checked = value === true ? ' checked' : '';
+      const xActive = value === false ? ' is-active' : '';
+      inner = '<div class="day-card-controls">' +
+        '<input type="checkbox" class="cell-check" data-habit-id="' + escapeHtml(habit.id) +
+        '" data-date="' + today + '"' + checked + ' aria-label="Выполнено">' +
+        '<button type="button" class="cell-x' + xActive + '" data-habit-id="' +
+        escapeHtml(habit.id) + '" data-date="' + today + '" aria-label="Не выполнено">✗</button>' +
+        '</div>';
+    } else if (habit.id === QAZA_HABIT_ID) {
+      // Каза ведётся во вкладке, карточка только показывает счётчик дня
+      inner = '<div class="day-card-controls">' + qazaCellMarkup(today) + '</div>';
+    } else if (habit.type === 'number') {
+      const value = getRecord(today, habit.id);
+      const text = typeof value === 'number' ? String(value) : '';
+      inner = '<div class="day-card-controls">' +
+        '<input type="number" class="cell-number" min="0" step="1" data-habit-id="' +
+        escapeHtml(habit.id) + '" data-date="' + today + '" value="' + escapeHtml(text) +
+        '" aria-label="Значение"></div>';
+    } else {
+      const value = getRecord(today, habit.id);
+      const current = typeof value === 'string' ? value : '';
+      inner = '<div class="day-card-controls">' +
+        '<select class="cell-select" data-habit-id="' + escapeHtml(habit.id) +
+        '" data-date="' + today + '" aria-label="Значение">' +
+        choiceOptionsMarkup(current) + '</select></div>';
+    }
+
+    html += '<div class="day-card">' +
+      '<div class="day-card-name">' + escapeHtml(habit.name) +
+      (habit.unit ? '<span class="day-card-unit">(' + escapeHtml(habit.unit) + ')</span>' : '') +
+      '</div>' + inner + '</div>';
+  }
+
+  box.innerHTML = html;
 }
 
 // Полная перерисовка шапки и тела таблицы.
@@ -2321,15 +2533,28 @@ function renderCircle(percent, monthPct) {
 
 /* --- Делегированные обработчики таблицы ---------------------------------- */
 
+// Контейнер ячейки: в таблице это <td class="cell">, в режиме «День» — блок
+// управления карточки. Нужен, чтобы после изменения обновить оба контрола
+// boolean-ячейки (галочку и «✗»).
+function cellContainer(target) {
+  return target.closest('td.cell') || target.closest('.day-card-controls');
+}
+
+// data-habit-id и data-date в таблице стоят на <td>, а в карточке — на самом
+// контроле, поэтому читаем их с контейнера, а при отсутствии — с цели события.
+function cellData(container, target, name) {
+  return container.getAttribute(name) || target.getAttribute(name);
+}
+
 function onTableChange(event) {
   const target = event.target;
   if (!target || !target.classList || typeof target.closest !== 'function') return;
 
-  const cell = target.closest('td.cell');
+  const cell = cellContainer(target);
   if (!cell) return;
 
-  const habitId = cell.getAttribute('data-habit-id');
-  const date = cell.getAttribute('data-date');
+  const habitId = cellData(cell, target, 'data-habit-id');
+  const date = cellData(cell, target, 'data-date');
   const habit = findHabit(habitId);
   if (!habit || !date) return;
 
@@ -2376,11 +2601,11 @@ function onTableClick(event) {
   const button = target.closest('.cell-x');
   if (!button) return;
 
-  const cell = button.closest('td.cell');
+  const cell = cellContainer(button);
   if (!cell) return;
 
-  const habitId = cell.getAttribute('data-habit-id');
-  const date = cell.getAttribute('data-date');
+  const habitId = cellData(cell, button, 'data-habit-id');
+  const date = cellData(cell, button, 'data-date');
   const habit = findHabit(habitId);
   if (!habit || !date) return;
 
@@ -2487,7 +2712,7 @@ function switchAppView(name) {
   }
 
   if (name === 'main') {
-    renderTable();
+    renderMainView();
   }
 
   window.scrollTo(0, 0);
@@ -2742,6 +2967,9 @@ function updateQazaCells() {
     if (!date) continue;
     cells[i].innerHTML = qazaCellMarkup(date);
   }
+
+  // В режиме «День» таблица скрыта — обновляем ещё и карточки
+  if (isMainDayView()) renderDayCards();
 }
 
 /* --- Модальное окно ------------------------------------------------------ */
@@ -2818,7 +3046,7 @@ function onHabitListClick(event) {
     appState.records = loadRecords();
     setFormError('');
     renderHabitList();
-    renderTable();
+    renderMainView();
     return;
   }
 
@@ -2838,7 +3066,7 @@ function onHabitListClick(event) {
     appState.records = loadRecords();
     setFormError('');
     renderHabitList();
-    renderTable();
+    renderMainView();
   }
 }
 
@@ -2916,7 +3144,7 @@ function onFormSubmit(event) {
   updateFormFields();
 
   renderHabitList();
-  renderTable();
+  renderMainView();
 }
 
 // validateHabitForm(data, excludeId) -> { ok: true } | { ok: false, error }
