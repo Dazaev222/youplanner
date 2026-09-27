@@ -1640,6 +1640,20 @@ body.view-settings #header-actions {
           <span>Редактировать привычки</span><span class="settings-chevron">›</span>
         </button>
       </li>
+      <li>
+        <button type="button" id="settings-sync-now" class="settings-row">
+          <span>Обновить с сервера</span><span class="settings-chevron">›</span>
+        </button>
+      </li>
+      <li>
+        <button type="button" id="settings-sync-push" class="settings-row">
+          <span>Отправить на сервер</span><span class="settings-chevron">›</span>
+        </button>
+      </li>
+      <li>
+        <p id="settings-sync-status" class="qaza-summary"
+           style="padding:12px 4px;border-bottom:1px solid var(--border)"></p>
+      </li>
     </ul>
     <p class="qaza-summary">Раздел в разработке. Здесь появятся: выбор цвета фона, экспорт/импорт данных, синхронизация.</p>
   </section>
@@ -1752,6 +1766,7 @@ function loadHabits() {
 
 function saveHabits(habits) {
   localStorage.setItem(STORAGE_KEYS.habits, JSON.stringify(habits));
+  scheduleSync();
 }
 
 // Возвращает объект записей. Битый JSON или не-объект → пустой объект.
@@ -1799,6 +1814,7 @@ function setRecord(date, habitId, value) {
   }
 
   saveRecords(records);
+  scheduleSync();
 }
 
 // Есть ли хотя бы одна запись у привычки
@@ -1857,6 +1873,7 @@ function removeHabit(id) {
     if (Object.keys(day).length === 0) delete records[dates[i]];
   }
   if (changed) saveRecords(records);
+  scheduleSync();
 }
 
 /* ---------- Расчёт прогресса ---------- */
@@ -2111,6 +2128,139 @@ function loadQaza() {
 
 function saveQaza(qaza) {
   localStorage.setItem(QAZA_STORAGE_KEY, JSON.stringify(qaza));
+  scheduleSync();
+}
+
+/* ---------- Синхронизация с Firebase (REST, без SDK) --------------------- */
+
+const FIREBASE_URL = 'https://youplanner-5c2f5-default-rtdb.firebaseio.com/youplanner-a7x9k2';
+const SYNC_TS_KEY = 'youplanner.sync.ts';
+
+// Отправка после правки откладывается: серия тапов по клеткам даёт один PUT
+const SYNC_DEBOUNCE_MS = 1500;
+// Сколько держится надпись о ручной синхронизации
+const SYNC_STATUS_MS = 2000;
+
+let syncTimer = null;
+let syncStatusTimer = null;
+// Идёт обмен с сервером. Свои же сохранения в этот момент не должны ставить
+// встречную отправку: loadQaza() зовёт saveQaza(), а syncToCloud() зовёт
+// loadQaza() — без флага каждая отправка планировала бы следующую.
+let syncing = false;
+
+// Время последней известной версии данных. Больше — свежее.
+function syncTs() {
+  return Number(localStorage.getItem(SYNC_TS_KEY)) || 0;
+}
+
+// Раздел с данными: непустой список или непустой объект.
+function hasData(value) {
+  if (!value || typeof value !== 'object') return false;
+  return Array.isArray(value) ? value.length > 0 : Object.keys(value).length > 0;
+}
+
+// Применяет данные с сервера. Пишем прямо в localStorage: saveHabits/saveQaza
+// поставили бы отправку и вернули бы на сервер только что полученное.
+// Пустой раздел на сервере не затирает непустой локальный: это след неполного
+// снимка, а не осознанное удаление — иначе чужая пустая копия съест записи.
+function applyCloudData(data, ts) {
+  syncing = true;
+  try {
+    // Снимок локального берём под флагом: loadHabits/loadQaza при первом
+    // прогоне пишут дефолты и иначе поставили бы отправку
+    const local = { habits: loadHabits(), records: loadRecords(), qaza: loadQaza() };
+
+    if (Array.isArray(data.habits) && (hasData(data.habits) || !hasData(local.habits))) {
+      localStorage.setItem(STORAGE_KEYS.habits, JSON.stringify(data.habits));
+    }
+    if (data.records && typeof data.records === 'object' &&
+        (hasData(data.records) || !hasData(local.records))) {
+      localStorage.setItem(STORAGE_KEYS.records, JSON.stringify(data.records));
+    }
+    if (data.qaza && typeof data.qaza === 'object' &&
+        (hasData(data.qaza) || !hasData(local.qaza))) {
+      localStorage.setItem(QAZA_STORAGE_KEY, JSON.stringify(data.qaza));
+    }
+    localStorage.setItem(SYNC_TS_KEY, String(ts));
+
+    appState.habits = loadHabits();
+    appState.records = loadRecords();
+    qazaState = loadQaza();
+  } finally {
+    syncing = false;
+  }
+
+  renderMainView();
+  renderQazaView();
+}
+
+// Забирает данные с сервера. Промис разрешается true, если на сервере пусто —
+// тогда init отправляет наверх локальную копию.
+// Ошибки сети глотаем: приложение работает на локальных данных.
+function syncFromCloud() {
+  return fetch(FIREBASE_URL + '.json')
+    .then(function (response) {
+      if (!response.ok) throw new Error('нет ответа');
+      return response.json();
+    })
+    .then(function (data) {
+      if (!data || typeof data !== 'object') return true;
+
+      const serverTs = Number(data.updatedAt) || 0;
+      if (serverTs <= syncTs()) return false;
+
+      applyCloudData(data, serverTs);
+      return false;
+    })
+    .catch(function () { return false; });
+}
+
+// Отправляет локальные данные наверх. Ключ времени пишется до запроса: ответ
+// на свой же PUT не должен выглядеть новее локальной копии.
+function syncToCloud() {
+  const ts = Date.now();
+  localStorage.setItem(SYNC_TS_KEY, String(ts));
+
+  let body;
+  syncing = true;
+  try {
+    body = JSON.stringify({
+      habits: loadHabits(),
+      records: loadRecords(),
+      qaza: loadQaza(),
+      updatedAt: ts,
+    });
+  } finally {
+    syncing = false;
+  }
+
+  return fetch(FIREBASE_URL + '.json', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: body,
+  }).catch(function () {});
+}
+
+// Отложенная отправка: несколько правок подряд дают один PUT
+function scheduleSync() {
+  if (syncing) return;
+  if (syncTimer) clearTimeout(syncTimer);
+  syncTimer = setTimeout(function () {
+    syncTimer = null;
+    syncToCloud();
+  }, SYNC_DEBOUNCE_MS);
+}
+
+// Надпись под кнопками ручной синхронизации гаснет сама
+function showSyncStatus(message) {
+  const status = document.getElementById('settings-sync-status');
+  if (!status) return;
+  status.textContent = message;
+  if (syncStatusTimer) clearTimeout(syncStatusTimer);
+  syncStatusTimer = setTimeout(function () {
+    syncStatusTimer = null;
+    status.textContent = '';
+  }, SYNC_STATUS_MS);
 }
 
 // Сколько каза выполнено в указанный день. Считается по журналу, а не по длине
@@ -2441,6 +2591,11 @@ function init() {
   // Стартовый раздел ставим тем же переключателем, что и кнопки:
   // так главная вкладка сразу подсвечена, а таб-бар скрыт на ПК
   switchAppView('main');
+
+  // Пустой сервер заполняем своей копией, иначе забираем то, что там новее
+  syncFromCloud().then(function (serverEmpty) {
+    if (serverEmpty) syncToCloud();
+  });
 }
 
 // Все обработчики навешиваются один раз. События внутри таблицы и списка
@@ -2475,6 +2630,21 @@ function bindEvents() {
   if (habitsEditList) {
     habitsEditList.addEventListener('click', onHabitsEditClick);
     habitsEditList.addEventListener('change', onHabitsEditChange);
+  }
+
+  // Ручная синхронизация из настроек
+  const syncNow = document.getElementById('settings-sync-now');
+  if (syncNow) {
+    syncNow.addEventListener('click', function () {
+      syncFromCloud().then(function () { showSyncStatus('Обновлено'); });
+    });
+  }
+
+  const syncPush = document.getElementById('settings-sync-push');
+  if (syncPush) {
+    syncPush.addEventListener('click', function () {
+      syncToCloud().then(function () { showSyncStatus('Отправлено'); });
+    });
   }
 
   const weekPrev = document.getElementById('week-prev');
@@ -2529,6 +2699,12 @@ function bindEvents() {
   }
   const modalClose = document.getElementById('modal-close');
   if (modalClose) modalClose.addEventListener('click', closeModal);
+
+  // Возврат к вкладке — повод проверить, нет ли на сервере свежих данных
+  document.addEventListener('visibilitychange', function () {
+    if (document.visibilityState === 'hidden') return;
+    syncFromCloud();
+  });
 
   // Escape закрывает модалку
   document.addEventListener('keydown', function (event) {
