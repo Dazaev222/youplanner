@@ -914,6 +914,296 @@ body {
   display: none;
 }
 
+/* --- Вкладка «Задачи» ---------------------------------------------------- */
+
+/* display у элемента перебил бы атрибут hidden */
+#tasks-view[hidden] {
+  display: none;
+}
+
+/* Кнопка в шапке ПК: на телефоне её заменяет таб-бар. Пара к display нужна
+   своя: id-правило сильнее общего .btn[hidden] из блока каза, поэтому без
+   него кнопка оставалась бы нарисованной внутри вкладки задач. */
+#tasks-btn {
+  display: inline-flex;
+}
+
+#tasks-btn[hidden] {
+  display: none;
+}
+
+#tasks-view {
+  margin-top: 20px;
+  padding: 22px 26px 26px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+/* Полоса «‹ месяц ›» над сеткой календаря */
+#calendar-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0 12px;
+}
+
+#calendar-label {
+  font-weight: 600;
+  font-size: 15px;
+  text-transform: capitalize;
+}
+
+/* Ширина ограничена: квадратные ячейки на всю ширину карточки ПК раздували
+   месяц до тысячи пикселей по высоте. На телефоне предел не мешает. */
+#calendar-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px 0;
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+.cal-dow {
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-muted);
+  padding: 6px 0;
+}
+
+/* День — круглая кнопка; точка-маркер внутри неё */
+.cal-day {
+  position: relative;
+  aspect-ratio: 1/1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  border-radius: 50%;
+}
+
+.cal-day.is-outside {
+  color: var(--text-muted);
+  opacity: .45;
+}
+
+.cal-day.is-today {
+  font-weight: 600;
+}
+
+.cal-day.is-selected {
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.cal-day.is-selected .cal-marker {
+  background: var(--on-accent) !important;
+}
+
+.cal-marker {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+}
+
+.cal-marker.is-red {
+  background: #dc2626;
+}
+
+.cal-marker.is-green {
+  background: #16a34a;
+}
+
+.cal-marker.is-blue {
+  background: var(--accent);
+}
+
+/* Запас снизу — под висящую кнопку «＋»: у прокрученного до конца списка
+   последняя строка должна оставаться целой. Отступ одинаков на ПК и телефоне. */
+#tasks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+  padding-bottom: 80px;
+}
+
+.task-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  /* Справа — место под висящую кнопку «＋»: без него она накрывала бы
+     время и флаг у строк, которые проходят через её полосу при скролле. */
+  padding-right: 56px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-alt);
+}
+
+.task-check {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.task-text {
+  flex: 1 1 auto;
+  font-size: 15px;
+}
+
+.task-time {
+  font-size: 13px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.task-flag {
+  font-size: 16px;
+  line-height: 1;
+}
+
+.task-flag.is-high {
+  color: #dc2626;
+}
+
+.task-flag.is-low {
+  color: #16a34a;
+}
+
+/* Круглая кнопка «＋» — над таб-баром, чтобы не перекрывать его */
+#task-add-btn {
+  position: fixed;
+  right: 16px;
+  bottom: 88px;
+  z-index: 40;
+  width: 56px;
+  height: 56px;
+  border-radius: 50%;
+  border: 0;
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 28px;
+  line-height: 1;
+  cursor: pointer;
+  box-shadow: 0 4px 16px rgba(0, 98, 204, .35);
+}
+
+#task-add-btn:disabled {
+  background: var(--text-muted);
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* Нижняя форма новой задачи. На ПК — окошко по центру, на телефоне —
+   панель, прижатая к низу экрана (см. медиа-запрос). */
+.sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+}
+
+.sheet[hidden] {
+  display: none;
+}
+
+/* Фон только затемняется, без размытия: сквозь шторку должно читаться,
+   что за форма, — календарь и заголовок остаются различимыми. */
+.sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, .25);
+}
+
+.sheet-panel {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 420px;
+  max-width: calc(100vw - 32px);
+  padding: 16px;
+  background: var(--surface);
+  border-radius: 16px;
+  box-shadow: 0 8px 32px rgba(0, 0, 0, .18);
+}
+
+.sheet-grip {
+  display: none;
+}
+
+.sheet-input {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  font: inherit;
+  font-size: 17px;
+  padding: 8px 0;
+  color: var(--text);
+}
+
+.sheet-input:focus {
+  outline: none;
+}
+
+.sheet-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 0;
+  border-top: 1px solid var(--border);
+  margin-top: 8px;
+}
+
+.sheet-tool {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.sheet-time {
+  margin-left: auto;
+  border: 0;
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 13px;
+}
+
+.sheet-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.sheet-actions .btn {
+  flex: 1 1 auto;
+  min-height: 44px;
+}
+
+#settings-tasks-note {
+  margin: 12px 0 0;
+}
+
 /* --- Раздел «Настройки» и нижний таб-бар --------------------------------- */
 /* Таб-бар — элемент телефона: на ПК его нет вовсе */
 #tab-bar {
@@ -1564,6 +1854,56 @@ body.view-settings #header-actions {
     padding-bottom: 8px;
   }
 
+  /* Вкладка «Задачи»: кнопка в шапке уступает место таб-бару */
+  #tasks-btn {
+    display: none;
+  }
+
+  #tasks-view {
+    padding: 14px 14px 20px;
+    margin-top: 12px;
+  }
+
+  #tasks-view .qaza-head {
+    display: block;
+  }
+
+  #tasks-view .qaza-head h2 {
+    font-size: 17px;
+  }
+
+  /* Кнопка «＋» поднята над таб-баром с учётом безопасного отступа */
+  #task-add-btn {
+    bottom: calc(88px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .cal-day {
+    font-size: 15px;
+  }
+
+  /* Форма задачи на телефоне выезжает снизу во всю ширину */
+  .sheet-panel {
+    position: absolute;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    top: auto;
+    transform: none;
+    width: auto;
+    max-width: none;
+    border-radius: 20px 20px 0 0;
+    padding: 10px 16px calc(16px + env(safe-area-inset-bottom, 0px));
+  }
+
+  .sheet-grip {
+    display: block;
+    width: 36px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--border);
+    margin: 0 auto 12px;
+  }
+
   /* В каза и настройках половины недели не нужны.
      Шапка действий гасится общим правилом в основном блоке. */
   body.view-qaza #mobile-day-tabs,
@@ -1587,6 +1927,7 @@ body.view-settings #header-actions {
     </nav>
     <div id="header-actions">
       <button id="qaza-btn" class="btn btn-secondary">Каза-намазы</button>
+      <button id="tasks-btn" class="btn btn-secondary">Задачи</button>
       <button id="settings-btn" class="btn btn-secondary">Настройки</button>
     </div>
   </header>
@@ -1645,6 +1986,21 @@ body.view-settings #header-actions {
     </div>
   </section>
 
+  <!-- Вкладка «Задачи»: календарь месяца и список задач выбранного дня -->
+  <section id="tasks-view" hidden>
+    <div class="qaza-head"><h2>Задачи</h2></div>
+    <div id="calendar-head">
+      <button type="button" id="calendar-prev" class="btn btn-secondary">‹</button>
+      <span id="calendar-label"></span>
+      <button type="button" id="calendar-next" class="btn btn-secondary">›</button>
+    </div>
+    <div id="calendar-grid"></div>
+    <h3 class="qaza-subtitle" id="tasks-day-label"></h3>
+    <div id="tasks-list"></div>
+    <p id="tasks-empty" class="qaza-summary" hidden>Нет задач на этот день</p>
+    <button type="button" id="task-add-btn" aria-label="Новая задача">+</button>
+  </section>
+
   <!-- Раздел «Настройки»: пока заглушка. Место для цвета фона, экспорта/импорта
        данных и синхронизации — появятся отдельными шагами. -->
   <section id="settings-view" hidden>
@@ -1654,6 +2010,7 @@ body.view-settings #header-actions {
     </div>
     <ul id="settings-list">
       <li><p class="settings-row settings-version" id="settings-version"></p></li>
+      <li><p id="settings-tasks-note" class="qaza-summary">Задачи не входят в резервную копию. Синхронизация задач — в разработке.</p></li>
       <li>
         <button type="button" id="settings-edit-habits" class="settings-row">
           <span>Редактировать привычки</span><span class="settings-chevron">›</span>
@@ -1712,6 +2069,16 @@ body.view-settings #header-actions {
     <button type="button" class="tab-item" data-view="qaza">
       <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"></path></svg>
       <span>Каза</span></button>
+    <button type="button" class="tab-item" data-view="tasks">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <rect x="3" y="4" width="18" height="17" rx="3"></rect>
+        <path d="M3 9h18"></path>
+        <path d="M8 2v4"></path>
+        <path d="M16 2v4"></path>
+        <text x="12" y="18" text-anchor="middle" font-size="7" font-weight="700" fill="currentColor" stroke="none">17</text>
+      </svg>
+      <span>Задачи</span>
+    </button>
     <button type="button" class="tab-item" data-view="settings">
       <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
       <span>Настройки</span></button>
@@ -1750,6 +2117,33 @@ body.view-settings #header-actions {
   </div>
 </div>
 
+<!-- Форма новой задачи: на ПК окошко по центру, на телефоне — панель снизу -->
+<div id="task-sheet" class="sheet" hidden>
+  <div class="sheet-backdrop" data-task-sheet-close></div>
+  <div class="sheet-panel" role="dialog" aria-modal="true">
+    <div class="sheet-grip"></div>
+    <input type="text" id="task-sheet-text" class="sheet-input" placeholder="Что бы вы хотели сделать?" maxlength="120">
+    <div class="sheet-toolbar">
+      <button type="button" id="task-sheet-date" class="sheet-tool">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <rect x="3" y="4" width="18" height="17" rx="3"></rect><path d="M3 9h18"></path><path d="M8 2v4"></path><path d="M16 2v4"></path>
+        </svg>
+        <span id="task-sheet-date-label">Сегодня</span>
+      </button>
+      <button type="button" id="task-sheet-priority" class="sheet-tool" aria-label="Приоритет">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 21V4"></path><path d="M4 4h13l-2 4 2 4H4"></path>
+        </svg>
+      </button>
+      <input type="time" id="task-sheet-time" class="sheet-time" aria-label="Время">
+    </div>
+    <div class="sheet-actions">
+      <button type="button" class="btn btn-secondary" data-task-sheet-close>Отмена</button>
+      <button type="button" id="task-sheet-save" class="btn btn-primary">Добавить</button>
+    </div>
+  </div>
+</div>
+
   <script>
 /* YouPlanner — слой данных.
    Файл склеивается с ui.js в общий тег script, поэтому функции объявлены
@@ -1759,6 +2153,7 @@ body.view-settings #header-actions {
 const STORAGE_KEYS = {
   habits: 'youplanner.habits',
   records: 'youplanner.records',
+  tasks: 'youplanner.tasks',
 };
 
 // 11 привычек по умолчанию (порядок и значения — из спеки, п.5)
@@ -1816,6 +2211,45 @@ function loadRecords() {
 
 function saveRecords(records) {
   localStorage.setItem(STORAGE_KEYS.records, JSON.stringify(records));
+}
+
+/* ---------- Задачи ---------- */
+
+// Возвращает список задач. Битый JSON или не-массив → пустой список;
+// ключ при чтении не создаётся — как у записей.
+function loadTasks() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.tasks);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [];
+    return parsed;
+  } catch (e) {
+    return [];
+  }
+}
+
+// Задачи не входят ни в резервную копию, ни в синхронизацию,
+// поэтому scheduleSync здесь не зовётся.
+function saveTasks(tasks) {
+  localStorage.setItem(STORAGE_KEYS.tasks, JSON.stringify(tasks));
+}
+
+// Дописывает задачу в конец списка. id — время плюс случайный хвост:
+// одного Date.now() мало, у двух задач подряд он совпадёт.
+function addTask(fields) {
+  const tasks = loadTasks();
+  const task = {
+    id: 't' + Date.now() + Math.random().toString(36).slice(2, 6),
+    text: fields.text,
+    date: fields.date,
+    time: fields.time,
+    priority: fields.priority,
+    done: fields.done,
+    createdAt: fields.createdAt,
+  };
+  tasks.push(task);
+  saveTasks(tasks);
 }
 
 /* ---------- Доступ к отдельным записям ---------- */
@@ -2890,6 +3324,41 @@ function bindEvents() {
   const qazaAddButton = document.getElementById('qaza-add-btn');
   if (qazaAddButton) qazaAddButton.addEventListener('click', onQazaAddSubmit);
 
+  // Вкладка «Задачи»: кнопка в шапке ПК и таб-бар (таб-бар — общим циклом выше)
+  const tasksButton = document.getElementById('tasks-btn');
+  if (tasksButton) {
+    tasksButton.addEventListener('click', function () { switchAppView('tasks'); });
+  }
+
+  const calendarPrev = document.getElementById('calendar-prev');
+  if (calendarPrev) calendarPrev.addEventListener('click', function () { changeCalendarMonth(-1); });
+
+  const calendarNext = document.getElementById('calendar-next');
+  if (calendarNext) calendarNext.addEventListener('click', function () { changeCalendarMonth(1); });
+
+  // Ячейки перерисовываются при каждом рендере, поэтому слушаем сетку целиком
+  const calendarGrid = document.getElementById('calendar-grid');
+  if (calendarGrid) calendarGrid.addEventListener('click', onCalendarClick);
+
+  const taskAddButton = document.getElementById('task-add-btn');
+  if (taskAddButton) taskAddButton.addEventListener('click', openTaskSheet);
+
+  const taskSaveButton = document.getElementById('task-sheet-save');
+  if (taskSaveButton) taskSaveButton.addEventListener('click', saveTaskFromSheet);
+
+  const taskSheetText = document.getElementById('task-sheet-text');
+  if (taskSheetText) {
+    taskSheetText.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter') saveTaskFromSheet();
+    });
+  }
+
+  // Подложка и «Отмена» помечены атрибутом data-task-sheet-close
+  const taskSheetClosers = document.querySelectorAll('[data-task-sheet-close]');
+  for (let i = 0; i < taskSheetClosers.length; i++) {
+    taskSheetClosers[i].addEventListener('click', closeTaskSheet);
+  }
+
   // Кнопка закрытия и подложка помечены атрибутом data-modal-close
   const closers = document.querySelectorAll('[data-modal-close]');
   for (let i = 0; i < closers.length; i++) {
@@ -2898,17 +3367,28 @@ function bindEvents() {
   const modalClose = document.getElementById('modal-close');
   if (modalClose) modalClose.addEventListener('click', closeModal);
 
-  // Возврат к вкладке — повод проверить, нет ли на сервере свежих данных
+  // Уход со вкладки — повод не потерять неотправленную правку: если она есть
+  // (syncTimer стоит), debounce снимаем и отправляем сразу — приложение могут
+  // закрыть раньше, чем истекут его 1.5с. Без правки не делаем ничего: иначе
+  // каждое переключение вкладки клало бы в /backups.json одинаковый снимок и
+  // вытесняло настоящую историю. Возврат — повод проверить, нет ли свежих.
   document.addEventListener('visibilitychange', function () {
-    if (document.visibilityState === 'hidden') return;
+    if (document.visibilityState === 'hidden') {
+      if (!syncTimer) return;
+      clearTimeout(syncTimer);
+      syncTimer = null;
+      syncToCloud();
+      return;
+    }
     syncFromCloud();
   });
 
-  // Escape закрывает модалку
+  // Escape закрывает модалку привычек и форму задачи
   document.addEventListener('keydown', function (event) {
     if (event.key !== 'Escape') return;
     const modal = document.getElementById('habit-modal');
     if (modal && !modal.hidden) closeModal();
+    closeTaskSheet();
   });
 
   const form = document.getElementById('habit-form');
@@ -3336,6 +3816,219 @@ function goToday() {
   renderTable();
 }
 
+/* --- Вкладка «Задачи» ---------------------------------------------------- */
+
+// День, выбранный в календаре. При открытии вкладки — сегодняшний.
+let selectedTaskDate = toISODate(new Date());
+
+// Отображаемый месяц календаря. Первым показываем текущий.
+let calendarYear = new Date().getFullYear();
+let calendarMonth = new Date().getMonth();
+
+// Подписи столбцов календаря
+const CAL_DOW = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
+
+// Больше десяти несделанных задач на день брать не даём
+const TASK_DAY_LIMIT = 10;
+
+// Маркер дня в календаре: красный — есть несделанное важное, зелёный — есть
+// несделанное обычное, синий — всё сделанное. null — задач на день нет.
+function getDayMarker(date) {
+  const tasks = loadTasks().filter(function (t) { return t.date === date; });
+  if (!tasks.length) return null;
+  if (tasks.some(function (t) { return !t.done && t.priority === 'high'; })) return 'red';
+  if (tasks.some(function (t) { return !t.done && t.priority === 'low'; })) return 'green';
+  if (tasks.every(function (t) { return t.done; })) return 'blue';
+  return null;
+}
+
+// Сетка месяца: 7 подписей дней недели и 42 ячейки — с понедельника недели,
+// в которую попал первый день. Ячейки соседних месяцев помечены is-outside.
+function renderCalendar() {
+  const grid = document.getElementById('calendar-grid');
+  if (!grid) return;
+
+  const label = document.getElementById('calendar-label');
+  if (label) label.textContent = MONTHS_NOMINATIVE[calendarMonth] + ' ' + calendarYear;
+
+  const today = toISODate(new Date());
+  const start = getWeekStart(new Date(calendarYear, calendarMonth, 1));
+
+  let html = '';
+  for (let i = 0; i < CAL_DOW.length; i++) {
+    html += '<div class="cal-dow">' + CAL_DOW[i] + '</div>';
+  }
+
+  for (let i = 0; i < 42; i++) {
+    const date = addDays(start, i);
+    const iso = toISODate(date);
+
+    const classes = ['cal-day'];
+    if (date.getMonth() !== calendarMonth) classes.push('is-outside');
+    if (iso === today) classes.push('is-today');
+    if (iso === selectedTaskDate) classes.push('is-selected');
+
+    const marker = getDayMarker(iso);
+    html += '<button type="button" class="' + classes.join(' ') + '" data-date="' + iso + '">' +
+      '<span>' + date.getDate() + '</span>' +
+      (marker ? '<span class="cal-marker is-' + marker + '"></span>' : '') +
+      '</button>';
+  }
+
+  grid.innerHTML = html;
+}
+
+// Порядок внутри группы: со временем по возрастанию, затем без времени
+// по порядку создания
+function compareTasks(a, b) {
+  if (a.time && b.time) {
+    if (a.time === b.time) return 0;
+    return a.time < b.time ? -1 : 1;
+  }
+  if (a.time) return -1;
+  if (b.time) return 1;
+  return (a.createdAt || 0) - (b.createdAt || 0);
+}
+
+function taskRowHtml(task) {
+  return '<div class="task-row' + (task.done ? ' is-done' : '') + '" data-task-id="' + escapeHtml(task.id) + '">' +
+    '<input type="checkbox" class="task-check"' + (task.done ? ' checked' : '') + '>' +
+    '<span class="task-text">' + escapeHtml(task.text) + '</span>' +
+    (task.time ? '<span class="task-time">' + escapeHtml(task.time) + '</span>' : '') +
+    '<span class="task-flag is-' + task.priority + '">⚑</span>' +
+    '</div>';
+}
+
+// Подпись выбранного дня: у сегодняшнего год не показываем — он лишний
+function formatTaskDay(iso) {
+  const date = parseISODate(iso);
+  const text = date.getDate() + ' ' + MONTHS_GENITIVE[date.getMonth()];
+  if (iso === toISODate(new Date())) return 'Сегодня, ' + text;
+  return text + ' ' + date.getFullYear();
+}
+
+// Задачи выбранного дня: сначала несделанные важные, затем обычные — в каждой
+// группе со временем по возрастанию, потом без времени по порядку создания.
+// Выполненные уходят в конец списка.
+function renderTasks() {
+  const list = document.getElementById('tasks-list');
+  if (!list) return;
+
+  const tasks = loadTasks().filter(function (t) { return t.date === selectedTaskDate; });
+  const active = tasks.filter(function (t) { return !t.done; });
+  const done = tasks.filter(function (t) { return t.done; });
+  const high = active.filter(function (t) { return t.priority === 'high'; }).sort(compareTasks);
+  const low = active.filter(function (t) { return t.priority === 'low'; }).sort(compareTasks);
+  const ordered = high.concat(low, done);
+
+  list.innerHTML = ordered.map(taskRowHtml).join('');
+
+  const label = document.getElementById('tasks-day-label');
+  if (label) label.textContent = formatTaskDay(selectedTaskDate);
+
+  const empty = document.getElementById('tasks-empty');
+  if (empty) empty.hidden = ordered.length > 0;
+}
+
+// Кнопка «＋» гаснет, когда на день уже набралось десять несделанных задач
+function updateAddButton() {
+  const button = document.getElementById('task-add-btn');
+  if (!button) return;
+  const pending = loadTasks().filter(function (t) {
+    return t.date === selectedTaskDate && !t.done;
+  }).length;
+  button.disabled = pending >= TASK_DAY_LIMIT;
+}
+
+function renderTasksView() {
+  renderCalendar();
+  renderTasks();
+  updateAddButton();
+}
+
+/* --- Форма новой задачи -------------------------------------------------- */
+
+function openTaskSheet() {
+  const sheet = document.getElementById('task-sheet');
+  if (!sheet) return;
+
+  const text = document.getElementById('task-sheet-text');
+  const time = document.getElementById('task-sheet-time');
+  const label = document.getElementById('task-sheet-date-label');
+  if (text) text.value = '';
+  if (time) time.value = '';
+
+  if (label) {
+    if (selectedTaskDate === toISODate(new Date())) {
+      label.textContent = 'Сегодня';
+    } else {
+      const date = parseISODate(selectedTaskDate);
+      label.textContent = pad2(date.getDate()) + '.' + pad2(date.getMonth() + 1);
+    }
+  }
+
+  sheet.hidden = false;
+
+  // Фокус ставим после показа: у скрытого поля его не отобрать
+  setTimeout(function () {
+    if (!text) return;
+    text.focus();
+    text.scrollIntoView({ block: 'center' });
+  }, 100);
+}
+
+function closeTaskSheet() {
+  const sheet = document.getElementById('task-sheet');
+  if (sheet) sheet.hidden = true;
+}
+
+// Приоритет выводится из времени: задача со временем — важная.
+// Без времени значение не выбирается вручную, кнопка приоритета не работает.
+function saveTaskFromSheet() {
+  const button = document.getElementById('task-sheet-save');
+  const text = document.getElementById('task-sheet-text');
+  if (!button || !text) return;
+
+  if (button.disabled) return;
+  const value = text.value.trim();
+  if (!value) return;
+
+  button.disabled = true;
+
+  const timeInput = document.getElementById('task-sheet-time');
+  const time = (timeInput && timeInput.value) || null;
+
+  addTask({
+    text: value,
+    date: selectedTaskDate,
+    time: time,
+    priority: time ? 'high' : 'low',
+    done: false,
+    createdAt: Date.now(),
+  });
+
+  closeTaskSheet();
+  button.disabled = false;
+  renderTasksView();
+}
+
+// Перелистывание месяца. Выбранным днём становится первое число нового
+// месяца: так список всегда показывает то, что видно на экране.
+function changeCalendarMonth(delta) {
+  const month = new Date(calendarYear, calendarMonth + delta, 1);
+  calendarYear = month.getFullYear();
+  calendarMonth = month.getMonth();
+  selectedTaskDate = toISODate(month);
+  renderTasksView();
+}
+
+function onCalendarClick(event) {
+  const cell = event.target.closest('.cal-day');
+  if (!cell) return;
+  selectedTaskDate = cell.getAttribute('data-date');
+  renderTasksView();
+}
+
 /* --- Вкладка «Каза-намазы» ----------------------------------------------- */
 
 // Состояние очереди каза. Заполняется в init(), дальше меняется только вкладкой.
@@ -3360,11 +4053,15 @@ function switchAppView(name) {
   document.getElementById('settings-view').hidden = name !== 'settings';
   document.getElementById('habits-edit-view').hidden = name !== 'edit-habits';
   document.getElementById('qaza-view').hidden = name !== 'qaza';
+  document.getElementById('tasks-view').hidden = name !== 'tasks';
   document.getElementById('mobile-day-tabs').hidden = name !== 'main' || !isMobileView();
   document.getElementById('tab-bar').hidden = !isMobileView();
   document.getElementById('week-nav').hidden = name !== 'main';
   document.getElementById('qaza-btn').hidden = name !== 'main';
+  document.getElementById('tasks-btn').hidden = name !== 'main';
   document.getElementById('settings-btn').hidden = name !== 'main';
+  // Кнопка «＋» принадлежит вкладке задач: вне неё она бы висела поверх
+  document.getElementById('task-add-btn').hidden = name !== 'tasks';
 
   // Экран «Привычки» — вложенный в настройки, там же подсвечивается и вкладка
   const tabView = name === 'edit-habits' ? 'settings' : name;
@@ -3394,6 +4091,10 @@ function switchAppView(name) {
 
   if (name === 'settings') {
     renderSettingsView();
+  }
+
+  if (name === 'tasks') {
+    renderTasksView();
   }
 
   window.scrollTo(0, 0);
