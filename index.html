@@ -3567,11 +3567,13 @@ function bindEvents() {
   // Галочка в панели формы — второй путь сохранения, короче меню «⋯»
   const taskSaveInline = document.getElementById('task-sheet-save-inline');
   if (taskSaveInline) {
-    taskSaveInline.addEventListener('click', function () {
-      closeTaskSheet();
-      saveTaskFromSheet();
-    });
+    // Форму закрывает сам saveTaskFromSheet: если закрыть её здесь, он
+    // увидит editingTaskId === null и создаст дубликат вместо правки
+    taskSaveInline.addEventListener('click', saveTaskFromSheet);
   }
+
+  const taskSheetTime = document.getElementById('task-sheet-time');
+  if (taskSheetTime) taskSheetTime.addEventListener('change', updateTaskSaveInline);
 
   // Клавиатура меняет visualViewport, а не resize окна
   if (window.visualViewport) {
@@ -4218,6 +4220,11 @@ function renderTasksView() {
 // id правимой задачи. null — форма открыта на новую задачу.
 let editingTaskId = null;
 
+// Текст и время на момент открытия формы правки. Галочка сохранения в панели
+// активна только при отличии от снимка: иначе «ввёл и стёр» выглядел бы как
+// изменение. У новой задачи снимка нет — там решает непустое поле.
+let originalFormState = null;
+
 // Приоритет, выбранный в форме, и признак «человек выбрал его в это
 // открытие формы». Второй флаг нужен, чтобы правка текста не сбрасывала
 // ручной выбор, сделанный раньше: см. manualPriority в saveTaskFromSheet.
@@ -4242,6 +4249,11 @@ function openTaskSheet(id) {
 
   if (text) text.value = task ? task.text : '';
   if (time) time.value = task && task.time ? task.time : '';
+
+  // Снимок берём с полей, а не с задачи: сравнение идёт с тем, что видно
+  originalFormState = task
+    ? { text: (text ? text.value : '').trim(), time: time ? time.value : '' }
+    : null;
 
   formPriority = task ? task.priority : 'low';
   updatePriorityIcon();
@@ -4276,12 +4288,26 @@ function closeTaskSheet() {
   document.documentElement.style.setProperty('--keyboard-offset', '0px');
 }
 
-// Галочка в панели формы активна, только когда есть что сохранять
+// Галочка в панели формы. На новой задаче её зажигает непустой текст,
+// на правке — отличие от снимка: сохранять нечего, пока ничего не изменил.
+// Приоритет в сравнение не входит: его меняют отдельным меню.
 function updateTaskSaveInline() {
   const button = document.getElementById('task-sheet-save-inline');
   const text = document.getElementById('task-sheet-text');
+  const time = document.getElementById('task-sheet-time');
   if (!button || !text) return;
-  button.disabled = text.value.trim() === '';
+
+  const value = text.value.trim();
+  let enabled;
+  if (editingTaskId === null) {
+    enabled = value.length > 0;
+  } else {
+    enabled = !!originalFormState &&
+      (value !== originalFormState.text ||
+        (time ? time.value : '') !== originalFormState.time);
+  }
+
+  button.disabled = !enabled;
 }
 
 // Приоритет выводится из времени, если человек его не выбирал. Выбор в меню
