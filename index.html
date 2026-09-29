@@ -996,6 +996,12 @@ body {
   opacity: .45;
 }
 
+/* Прошедший день: задача на него не встанет, дата уедет на год вперёд.
+   Правило стоит до .is-selected — выбранный день важнее приглушения. */
+.cal-day.is-past {
+  color: var(--text-muted);
+}
+
 .cal-day.is-today {
   font-weight: 600;
 }
@@ -4439,6 +4445,19 @@ function dateChipValue(offset) {
   return toISODate(nextMonday(today));
 }
 
+// Прошедший день задаче не годится: дата уезжает на год вперёд, пока не
+// станет сегодняшней или будущей (14.09.2026 при сегодня 29.09.2026 →
+// 14.09.2027). Год прибавляется, а не день: так сохраняется число и месяц.
+function rollToFuture(iso) {
+  const today = toISODate(new Date());
+  if (iso >= today) return iso;
+  const date = parseISODate(iso);
+  while (toISODate(date) < today) {
+    date.setFullYear(date.getFullYear() + 1);
+  }
+  return toISODate(date);
+}
+
 // Подпись даты в панели формы: «Сегодня» / «Завтра» / «дд.мм»
 function taskDateLabel(iso) {
   const today = toISODate(new Date());
@@ -4474,7 +4493,10 @@ function openTaskSheet(id) {
   const task = editingTaskId === null ? null
     : loadTasks().find(function (t) { return t.id === editingTaskId; });
 
-  formDate = task ? task.date : selectedTaskDate;
+  // Прошедший день задаче не годится — ни выбранный в календаре вкладки,
+  // ни свой собственный у старой задачи: форма открывается уже со сдвинутой
+  // датой, поэтому и снимок, и сохранение работают с ней же.
+  formDate = rollToFuture(task ? task.date : selectedTaskDate);
   formTime = task && task.time ? task.time : null;
 
   const text = document.getElementById('task-sheet-text');
@@ -4562,6 +4584,16 @@ function saveTaskFromSheet() {
   }).length;
 
   if (editingTaskId === null) {
+    // День вкладки в прошлом: форма открылась уже со сдвинутой на год датой,
+    // и перенос не должен остаться молчаливым. Дата формы сверяется со сдвигом
+    // выбранного дня — если человек выбрал другой день в пикере, он его видел.
+    const rolledSelected = rollToFuture(selectedTaskDate);
+    if (rolledSelected !== selectedTaskDate && formDate === rolledSelected &&
+      !window.confirm('Выбранный день в прошлом. Задача встанет на ' +
+        taskDateInfoLabel(formDate) + '. Сохранить?')) {
+      return;
+    }
+
     if (pendingOnTarget >= TASK_DAY_LIMIT) {
       alert('На этот день уже ' + TASK_DAY_LIMIT + ' невыполненных задач');
       return;
@@ -4584,7 +4616,10 @@ function saveTaskFromSheet() {
       return;
     }
 
-    const patch = { text: value, time: time };
+    // Дата пишется всегда: у старой задачи, лежавшей в прошлом, она здесь
+    // и выправляется. Сравнение идёт с сырым днём из хранилища, поэтому сдвиг
+    // на год читается как перенос — с подтверждением, лимитом и снятием отметки.
+    const patch = { text: value, time: time, date: formDate };
 
     // Перенос на другой день. Выполненную задачу он возвращает в работу —
     // но только с согласия человека: иначе случайный тап снимет отметку.
@@ -4597,7 +4632,6 @@ function saveTaskFromSheet() {
         alert('На этот день уже ' + TASK_DAY_LIMIT + ' невыполненных задач');
         return;
       }
-      patch.date = formDate;
       if (current.done) patch.done = false;
     }
 
@@ -4780,6 +4814,7 @@ function renderDatePicker() {
 
     const classes = ['cal-day'];
     if (date.getMonth() !== pickerMonth) classes.push('is-outside');
+    if (iso < today) classes.push('is-past');
     if (iso === today) classes.push('is-today');
     if (iso === formDate) classes.push('is-selected');
 
@@ -4807,14 +4842,29 @@ function renderDatePicker() {
 function onDateChipClick(event) {
   const chip = event.target.closest('.date-chip');
   if (!chip) return;
-  formDate = dateChipValue(chip.getAttribute('data-offset'));
+  formDate = rollToFuture(dateChipValue(chip.getAttribute('data-offset')));
   closeTaskDateSheet();
 }
 
 function onDateGridClick(event) {
   const cell = event.target.closest('.cal-day');
   if (!cell) return;
-  formDate = cell.getAttribute('data-date');
+
+  const picked = cell.getAttribute('data-date');
+  const fixed = rollToFuture(picked);
+  formDate = fixed;
+
+  // Прошедший день уехал на год: пикер не закрывается, а перелистывается
+  // на новый месяц — видно, куда именно попала задача, и почему год другой.
+  if (fixed !== picked) {
+    const anchor = parseISODate(fixed);
+    pickerYear = anchor.getFullYear();
+    pickerMonth = anchor.getMonth();
+    renderDatePicker();
+    updateTaskDateLabel();
+    return;
+  }
+
   closeTaskDateSheet();
 }
 
@@ -4834,13 +4884,14 @@ function onDateTimeChange() {
 }
 
 // «Очистить» возвращает дефолт, а не пусто: дата у задачи обязательна.
-// При создании дефолт — сегодня, при правке — исходный день задачи.
+// При создании дефолт — сегодня, при правке — исходный день задачи,
+// тоже прогнанный через сдвиг: прошлое остаётся недоступным и здесь.
 function onTaskDateClear() {
   if (editingTaskId === null) {
     formDate = toISODate(new Date());
   } else {
     const task = loadTasks().find(function (t) { return t.id === editingTaskId; });
-    if (task) formDate = task.date;
+    if (task) formDate = rollToFuture(task.date);
   }
   formTime = null;
   renderDatePicker();
