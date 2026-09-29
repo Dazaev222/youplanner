@@ -837,9 +837,10 @@ body {
 }
 
 /* Анимация — украшение, а не смысл: при системном запрете движения её убираем.
-   Правило общее для главной страницы и вкладки каза. */
+   Правило общее для главной страницы, вкладки каза и тоста. */
 @media (prefers-reduced-motion: reduce) {
-  #qaza-view {
+  #qaza-view,
+  #toast {
     animation: none;
   }
 
@@ -996,7 +997,8 @@ body {
   opacity: .45;
 }
 
-/* Прошедший день: задача на него не встанет, дата уедет на год вперёд.
+/* Прошедший день: задача на него не встанет, сохранение остановит тост.
+   Класс есть только у пикера, календарь вкладки прошлое не приглушает.
    Правило стоит до .is-selected — выбранный день важнее приглушения. */
 .cal-day.is-past {
   color: var(--text-muted);
@@ -1415,6 +1417,42 @@ body {
   width: 100%;
   min-height: 44px;
   margin-top: 8px;
+}
+
+/* --- Тост ---------------------------------------------------------------- */
+/* Плашка-подсказка поверх всех шторок, поэтому слой выше пикера (140).
+   Фон — из --text, текст — из --surface: плашка контрастна палитре и новых
+   цветов в неё не заводит (§9). Кликов тост не ловит: это подсказка, а не
+   кнопка, — и потому не мешает нажимать то, что под ним. Отступ считается
+   от верха клавиатуры, как у шторок: тост показывается при открытой форме, а
+   fixed на iOS остался бы за клавиатурой. */
+#toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--keyboard-offset, 0px) + 96px);
+  z-index: 150;
+  max-width: calc(100vw - 32px);
+  padding: 12px 18px;
+  border-radius: 14px;
+  background: var(--text);
+  color: var(--surface);
+  font-size: 14px;
+  line-height: 1.35;
+  text-align: center;
+  box-shadow: var(--shadow);
+  transform: translateX(-50%);
+  pointer-events: none;
+  animation: toast-in .18s ease-out;
+}
+
+#toast[hidden] {
+  display: none;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+  }
 }
 
 #settings-tasks-note {
@@ -2449,6 +2487,9 @@ body.view-settings #header-actions {
   </div>
 </div>
 
+<!-- Тост: короткая подсказка поверх шторок. Текст кладёт showToast() -->
+<div id="toast" role="status" hidden></div>
+
   <script>
 /* YouPlanner — слой данных.
    Файл склеивается с ui.js в общий тег script, поэтому функции объявлены
@@ -2534,10 +2575,10 @@ function loadTasks() {
   }
 }
 
-// Задачи не входят ни в резервную копию, ни в синхронизацию,
-// поэтому scheduleSync здесь не зовётся.
+// Задачи уходят наверх тем же отложенным PUT, что привычки и каза.
 function saveTasks(tasks) {
   localStorage.setItem(STORAGE_KEYS.tasks, JSON.stringify(tasks));
+  scheduleSync();
 }
 
 // Дописывает задачу в конец списка. id — время плюс случайный хвост:
@@ -2964,7 +3005,12 @@ function applyCloudData(data, ts) {
   try {
     // Снимок локального берём под флагом: loadHabits/loadQaza при первом
     // прогоне пишут дефолты и иначе поставили бы отправку
-    const local = { habits: loadHabits(), records: loadRecords(), qaza: loadQaza() };
+    const local = {
+      habits: loadHabits(),
+      records: loadRecords(),
+      qaza: loadQaza(),
+      tasks: loadTasks(),
+    };
 
     if (Array.isArray(data.habits) && (hasData(data.habits) || !hasData(local.habits))) {
       localStorage.setItem(STORAGE_KEYS.habits, JSON.stringify(data.habits));
@@ -2977,6 +3023,11 @@ function applyCloudData(data, ts) {
         (hasData(data.qaza) || !hasData(local.qaza))) {
       localStorage.setItem(QAZA_STORAGE_KEY, JSON.stringify(data.qaza));
     }
+    // Задачи — один раздел целиком, без слияния по id: пустой список
+    // с сервера не затирает непустой локальный (уровень защиты 1).
+    if (Array.isArray(data.tasks) && (hasData(data.tasks) || !hasData(local.tasks))) {
+      localStorage.setItem(STORAGE_KEYS.tasks, JSON.stringify(data.tasks));
+    }
     localStorage.setItem(SYNC_TS_KEY, String(ts));
 
     appState.habits = loadHabits();
@@ -2988,6 +3039,7 @@ function applyCloudData(data, ts) {
 
   renderMainView();
   renderQazaView();
+  renderTasksView();
 }
 
 // Забирает данные с сервера. Промис разрешается true, если на сервере пусто —
@@ -3024,6 +3076,7 @@ function syncToCloud() {
       habits: loadHabits(),
       records: loadRecords(),
       qaza: loadQaza(),
+      tasks: loadTasks(),
       updatedAt: ts,
     });
   } finally {
@@ -4273,6 +4326,25 @@ function goToday() {
   renderTable();
 }
 
+/* --- Тост ---------------------------------------------------------------- */
+
+// Плашка-подсказка поверх шторок. 3,5 с: два коротких предложения прочитать
+// можно, а заслонить следующий шаг она не успевает. Повторный вызов перезапускает
+// отсчёт, а не копит таймеры: последнее слово важнее прежнего.
+let toastTimer = null;
+
+function showToast(message) {
+  const toast = document.getElementById('toast');
+  if (!toast) return;
+  toast.textContent = message;
+  toast.hidden = false;
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(function () {
+    toast.hidden = true;
+    toastTimer = null;
+  }, 3500);
+}
+
 /* --- Вкладка «Задачи» ---------------------------------------------------- */
 
 // День, выбранный в календаре. При открытии вкладки — сегодняшний.
@@ -4388,13 +4460,14 @@ function renderTasks() {
 }
 
 // Кнопка «＋» гаснет, когда на день уже набралось десять несделанных задач
+// или сам день прошёл: в прошлое задача не встанет, и открывать форму незачем
 function updateAddButton() {
   const button = document.getElementById('task-add-btn');
   if (!button) return;
   const pending = loadTasks().filter(function (t) {
     return t.date === selectedTaskDate && !t.done;
   }).length;
-  button.disabled = pending >= TASK_DAY_LIMIT;
+  button.disabled = pending >= TASK_DAY_LIMIT || selectedTaskDate < toISODate(new Date());
 }
 
 function renderTasksView() {
@@ -4445,19 +4518,6 @@ function dateChipValue(offset) {
   return toISODate(nextMonday(today));
 }
 
-// Прошедший день задаче не годится: дата уезжает на год вперёд, пока не
-// станет сегодняшней или будущей (14.09.2026 при сегодня 29.09.2026 →
-// 14.09.2027). Год прибавляется, а не день: так сохраняется число и месяц.
-function rollToFuture(iso) {
-  const today = toISODate(new Date());
-  if (iso >= today) return iso;
-  const date = parseISODate(iso);
-  while (toISODate(date) < today) {
-    date.setFullYear(date.getFullYear() + 1);
-  }
-  return toISODate(date);
-}
-
 // Подпись даты в панели формы: «Сегодня» / «Завтра» / «дд.мм»
 function taskDateLabel(iso) {
   const today = toISODate(new Date());
@@ -4493,10 +4553,13 @@ function openTaskSheet(id) {
   const task = editingTaskId === null ? null
     : loadTasks().find(function (t) { return t.id === editingTaskId; });
 
-  // Прошедший день задаче не годится — ни выбранный в календаре вкладки,
-  // ни свой собственный у старой задачи: форма открывается уже со сдвинутой
-  // датой, поэтому и снимок, и сохранение работают с ней же.
-  formDate = rollToFuture(task ? task.date : selectedTaskDate);
+  // Дата старой задачи, лежавшей в прошлом, подменяется на сегодняшнюю: в
+  // прошлое задача не встанет, а молча оставлять её там нельзя — о подмене
+  // сообщает тост. День вкладки не подменяется: прошедший день просто не
+  // пускает в форму, кнопка «＋» на нём погашена.
+  const today = toISODate(new Date());
+  const wasPast = !!task && task.date < today;
+  formDate = wasPast ? today : (task ? task.date : selectedTaskDate);
   formTime = task && task.time ? task.time : null;
 
   const text = document.getElementById('task-sheet-text');
@@ -4522,6 +4585,12 @@ function openTaskSheet(id) {
   sheet.hidden = false;
   syncSheetToKeyboard();
   updateTaskSaveInline();
+
+  // Тост после раскрытия панели: подсказка про подменённую дату должна читаться
+  // поверх открытой формы, а не остаться за подложкой
+  if (wasPast) {
+    showToast('Упс... ваша задача была в прошлом. Дата изменена на сегодня');
+  }
 
   // Safari iOS отдаёт фокус только из стека обработчика клика, поэтому
   // фокусируем синхронно; в setTimeout остаётся лишь доводка скролла
@@ -4574,6 +4643,14 @@ function saveTaskFromSheet() {
   const value = text.value.trim();
   if (!value) return;
 
+  // Прошедшую дату не сохраняем ни при создании, ни при правке: человек мог
+  // выбрать её в пикере руками. Тост говорит почему, задача и форма остаются
+  // как были — выбранное в форме не теряется.
+  if (formDate < toISODate(new Date())) {
+    showToast('Упс... дата уже прошла, выберите будущую дату');
+    return;
+  }
+
   const time = formTime;
   const tasks = loadTasks();
 
@@ -4584,16 +4661,6 @@ function saveTaskFromSheet() {
   }).length;
 
   if (editingTaskId === null) {
-    // День вкладки в прошлом: форма открылась уже со сдвинутой на год датой,
-    // и перенос не должен остаться молчаливым. Дата формы сверяется со сдвигом
-    // выбранного дня — если человек выбрал другой день в пикере, он его видел.
-    const rolledSelected = rollToFuture(selectedTaskDate);
-    if (rolledSelected !== selectedTaskDate && formDate === rolledSelected &&
-      !window.confirm('Выбранный день в прошлом. Задача встанет на ' +
-        taskDateInfoLabel(formDate) + '. Сохранить?')) {
-      return;
-    }
-
     if (pendingOnTarget >= TASK_DAY_LIMIT) {
       alert('На этот день уже ' + TASK_DAY_LIMIT + ' невыполненных задач');
       return;
@@ -4616,23 +4683,28 @@ function saveTaskFromSheet() {
       return;
     }
 
-    // Дата пишется всегда: у старой задачи, лежавшей в прошлом, она здесь
-    // и выправляется. Сравнение идёт с сырым днём из хранилища, поэтому сдвиг
-    // на год читается как перенос — с подтверждением, лимитом и снятием отметки.
+    // Дата пишется всегда, но поводов её сменить два, и правила у них разные.
+    // Человек выбрал другой день сам — это перенос. А дату, лежавшую в прошлом,
+    // форма подменила на сегодняшнюю ещё при открытии, о чём сказал тост: это
+    // выправление, и спрашивать про него второй раз не о чем.
     const patch = { text: value, time: time, date: formDate };
+    const wasDate = originalFormState.date;
 
     // Перенос на другой день. Выполненную задачу он возвращает в работу —
     // но только с согласия человека: иначе случайный тап снимет отметку.
-    if (formDate !== current.date) {
+    if (formDate !== wasDate) {
       if (current.done &&
         !window.confirm('Задача выполнена. Снять отметку и перенести её на другой день?')) {
         return;
       }
-      if (pendingOnTarget >= TASK_DAY_LIMIT) {
-        alert('На этот день уже ' + TASK_DAY_LIMIT + ' невыполненных задач');
-        return;
-      }
       if (current.done) patch.done = false;
+    }
+
+    // Лимит десяти стережёт целевой день в любом случае — и при переносе, и при
+    // выправлении прошлого: забить сегодня задачами нельзя ни так, ни так.
+    if (formDate !== current.date && pendingOnTarget >= TASK_DAY_LIMIT) {
+      alert('На этот день уже ' + TASK_DAY_LIMIT + ' невыполненных задач');
+      return;
     }
 
     const manual = formPriorityManual || !!current.manualPriority;
@@ -4792,7 +4864,7 @@ function closeTaskDateSheet() {
 }
 
 // Ячейки — тот же формат, что у renderCalendar(): .cal-dow, .cal-day
-// с классами is-outside / is-today / is-selected и точкой статуса внутри.
+// с классами is-outside / is-past / is-today / is-selected и точкой статуса.
 function renderDatePicker() {
   const grid = document.getElementById('date-cal-grid');
   if (!grid) return;
@@ -4839,32 +4911,20 @@ function renderDatePicker() {
   }
 }
 
+// Чипы всегда дают сегодня или позже, поэтому проверять их на прошлое нечего
 function onDateChipClick(event) {
   const chip = event.target.closest('.date-chip');
   if (!chip) return;
-  formDate = rollToFuture(dateChipValue(chip.getAttribute('data-offset')));
+  formDate = dateChipValue(chip.getAttribute('data-offset'));
   closeTaskDateSheet();
 }
 
+// Прошедший день выбирается как любой другой: подсказкой служит приглушение
+// .is-past, а сохранить такую дату не даст проверка в saveTaskFromSheet.
 function onDateGridClick(event) {
   const cell = event.target.closest('.cal-day');
   if (!cell) return;
-
-  const picked = cell.getAttribute('data-date');
-  const fixed = rollToFuture(picked);
-  formDate = fixed;
-
-  // Прошедший день уехал на год: пикер не закрывается, а перелистывается
-  // на новый месяц — видно, куда именно попала задача, и почему год другой.
-  if (fixed !== picked) {
-    const anchor = parseISODate(fixed);
-    pickerYear = anchor.getFullYear();
-    pickerMonth = anchor.getMonth();
-    renderDatePicker();
-    updateTaskDateLabel();
-    return;
-  }
-
+  formDate = cell.getAttribute('data-date');
   closeTaskDateSheet();
 }
 
@@ -4884,14 +4944,15 @@ function onDateTimeChange() {
 }
 
 // «Очистить» возвращает дефолт, а не пусто: дата у задачи обязательна.
-// При создании дефолт — сегодня, при правке — исходный день задачи,
-// тоже прогнанный через сдвиг: прошлое остаётся недоступным и здесь.
+// При создании дефолт — сегодня, при правке — исходный день задачи, а если
+// он уже прошёл, то снова сегодня: прошлое остаётся недоступным и здесь.
 function onTaskDateClear() {
+  const today = toISODate(new Date());
   if (editingTaskId === null) {
-    formDate = toISODate(new Date());
+    formDate = today;
   } else {
     const task = loadTasks().find(function (t) { return t.id === editingTaskId; });
-    if (task) formDate = rollToFuture(task.date);
+    if (task) formDate = task.date < today ? today : task.date;
   }
   formTime = null;
   renderDatePicker();
