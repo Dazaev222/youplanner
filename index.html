@@ -1189,15 +1189,113 @@ body {
   font-size: 13px;
 }
 
-.sheet-actions {
+/* Шапка формы: заголовок слева, меню действий справа */
+.sheet-head {
   display: flex;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  margin-top: 12px;
 }
 
-.sheet-actions .btn {
-  flex: 1 1 auto;
+/* Типографика как у .qaza-head h2: у браузерного h2 она крупнее нужного */
+.sheet-head h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -.01em;
+}
+
+/* Кнопка «⋯» — тап-цель 48px; иконка прижата к правому краю панели */
+.sheet-menu-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  width: 48px;
+  height: 48px;
+  margin-right: -12px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  cursor: pointer;
+}
+
+/* Второе меню — ручной выбор приоритета поверх формы задачи. Слой выше
+   .sheet: иначе подложка меню осталась бы под панелью формы. */
+#priority-sheet {
+  z-index: 120;
+}
+
+/* Третье меню — действия формы. Лежит выше меню приоритета: открыть его
+   можно только из шапки формы, а приоритет — тоже из формы. */
+#task-actions-sheet {
+  z-index: 130;
+}
+
+.action-row {
+  display: block;
+  width: 100%;
+  min-height: 48px;
+  padding: 12px 16px;
+  border: 0;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 17px;
+  text-align: center;
+  cursor: pointer;
+  border-radius: 10px;
+}
+
+.action-row:active {
+  background: var(--surface-alt);
+}
+
+.action-row.is-danger {
+  color: var(--danger);
+}
+
+.action-row + .action-row {
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+}
+
+.priority-option {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 48px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Выбранный вариант — фоном, а не только оттенком флага */
+.priority-option.is-active {
+  background: var(--accent-soft);
+}
+
+.priority-flag.is-high {
+  color: #dc2626;
+  font-size: 20px;
+}
+
+.priority-flag.is-low {
+  color: #16a34a;
+  font-size: 20px;
+}
+
+#priority-sheet .btn {
+  width: 100%;
   min-height: 44px;
+  margin-top: 8px;
 }
 
 #settings-tasks-note {
@@ -2124,6 +2222,14 @@ body.view-settings #header-actions {
   <div class="sheet-backdrop" data-task-sheet-close></div>
   <div class="sheet-panel" role="dialog" aria-modal="true">
     <div class="sheet-grip"></div>
+    <div class="sheet-head">
+      <h2 id="task-sheet-title">Новая задача</h2>
+      <button type="button" id="task-sheet-menu-btn" class="sheet-menu-btn" aria-label="Ещё">
+        <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
+          <circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/>
+        </svg>
+      </button>
+    </div>
     <input type="text" id="task-sheet-text" class="sheet-input" placeholder="Что бы вы хотели сделать?" maxlength="120">
     <div class="sheet-toolbar">
       <button type="button" id="task-sheet-date" class="sheet-tool">
@@ -2132,17 +2238,39 @@ body.view-settings #header-actions {
         </svg>
         <span id="task-sheet-date-label">Сегодня</span>
       </button>
-      <button type="button" id="task-sheet-priority" class="sheet-tool" aria-label="Приоритет">
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <button type="button" id="task-sheet-priority" class="sheet-tool" aria-label="Приоритет" aria-haspopup="dialog">
+        <svg class="priority-flag" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M4 21V4"></path><path d="M4 4h13l-2 4 2 4H4"></path>
         </svg>
       </button>
       <input type="time" id="task-sheet-time" class="sheet-time" aria-label="Время">
     </div>
-    <div class="sheet-actions">
-      <button type="button" class="btn btn-secondary" data-task-sheet-close>Отмена</button>
-      <button type="button" id="task-sheet-save" class="btn btn-primary">Добавить</button>
-    </div>
+  </div>
+</div>
+
+<!-- Второе меню: ручной выбор приоритета. Открывается кнопкой формы -->
+<div id="priority-sheet" class="sheet" hidden>
+  <div class="sheet-backdrop" data-priority-sheet-close></div>
+  <div class="sheet-panel" role="dialog" aria-modal="true">
+    <button type="button" class="priority-option" data-priority="high">
+      <span class="priority-flag is-high">⚑</span>
+      <span>Высокий приоритет</span>
+    </button>
+    <button type="button" class="priority-option" data-priority="low">
+      <span class="priority-flag is-low">⚑</span>
+      <span>Низкий приоритет</span>
+    </button>
+    <button type="button" class="btn btn-secondary" data-priority-sheet-close>Отмена</button>
+  </div>
+</div>
+
+<!-- Третье меню: действия формы задачи. Открывается кнопкой «⋯» -->
+<div id="task-actions-sheet" class="sheet" hidden>
+  <div class="sheet-backdrop" data-task-actions-close></div>
+  <div class="sheet-panel" role="dialog" aria-modal="true">
+    <button type="button" id="task-sheet-save" class="action-row">Сохранить</button>
+    <button type="button" id="task-sheet-delete" class="action-row is-danger" hidden>Удалить</button>
+    <button type="button" class="action-row" data-task-actions-close>Отмена</button>
   </div>
 </div>
 
@@ -2239,6 +2367,7 @@ function saveTasks(tasks) {
 
 // Дописывает задачу в конец списка. id — время плюс случайный хвост:
 // одного Date.now() мало, у двух задач подряд он совпадёт.
+// manualPriority — «приоритет выбран человеком»: false у новой задачи.
 function addTask(fields) {
   const tasks = loadTasks();
   const task = {
@@ -2247,10 +2376,31 @@ function addTask(fields) {
     date: fields.date,
     time: fields.time,
     priority: fields.priority,
+    manualPriority: fields.manualPriority === true,
     done: fields.done,
     createdAt: fields.createdAt,
   };
   tasks.push(task);
+  saveTasks(tasks);
+}
+
+// Частичное обновление задачи: поля patch накладываются поверх найденной.
+// Возвращает обновлённую задачу или null, если такой id нет.
+function updateTask(id, patch) {
+  const tasks = loadTasks();
+  const index = tasks.findIndex(function (t) { return t.id === id; });
+  if (index === -1) return null;
+  Object.assign(tasks[index], patch);
+  saveTasks(tasks);
+  return tasks[index];
+}
+
+// Удаление задачи по id. Задачи нет — ничего не делаем.
+function deleteTask(id) {
+  const tasks = loadTasks();
+  const index = tasks.findIndex(function (t) { return t.id === id; });
+  if (index === -1) return;
+  tasks.splice(index, 1);
   saveTasks(tasks);
 }
 
@@ -3342,11 +3492,55 @@ function bindEvents() {
   const calendarGrid = document.getElementById('calendar-grid');
   if (calendarGrid) calendarGrid.addEventListener('click', onCalendarClick);
 
+  // Обёртка, а не сама функция: иначе объект события попал бы в id
   const taskAddButton = document.getElementById('task-add-btn');
-  if (taskAddButton) taskAddButton.addEventListener('click', openTaskSheet);
+  if (taskAddButton) taskAddButton.addEventListener('click', function () { openTaskSheet(); });
+
+  // Действия живут в меню «⋯»: пункт меню сначала закрывает шторку, потом делает
+  const taskMenuButton = document.getElementById('task-sheet-menu-btn');
+  if (taskMenuButton) taskMenuButton.addEventListener('click', openTaskActionsSheet);
 
   const taskSaveButton = document.getElementById('task-sheet-save');
-  if (taskSaveButton) taskSaveButton.addEventListener('click', saveTaskFromSheet);
+  if (taskSaveButton) {
+    taskSaveButton.addEventListener('click', function () {
+      closeTaskActionsSheet();
+      saveTaskFromSheet();
+    });
+  }
+
+  const taskDeleteButton = document.getElementById('task-sheet-delete');
+  if (taskDeleteButton) {
+    taskDeleteButton.addEventListener('click', function () {
+      closeTaskActionsSheet();
+      onTaskDelete();
+    });
+  }
+
+  const taskActionsClosers = document.querySelectorAll('[data-task-actions-close]');
+  for (let i = 0; i < taskActionsClosers.length; i++) {
+    taskActionsClosers[i].addEventListener('click', closeTaskActionsSheet);
+  }
+
+  const taskPriorityButton = document.getElementById('task-sheet-priority');
+  if (taskPriorityButton) taskPriorityButton.addEventListener('click', openPrioritySheet);
+
+  // Строки списка перерисовываются целиком — слушаем контейнер
+  const tasksList = document.getElementById('tasks-list');
+  if (tasksList) {
+    tasksList.addEventListener('change', onTaskCheckChange);
+    tasksList.addEventListener('click', onTasksListClick);
+  }
+
+  const priorityOptions = document.querySelectorAll('#priority-sheet .priority-option');
+  for (let i = 0; i < priorityOptions.length; i++) {
+    priorityOptions[i].addEventListener('click', onPriorityPick);
+  }
+
+  // Подложка и «Отмена» второго меню
+  const priorityClosers = document.querySelectorAll('[data-priority-sheet-close]');
+  for (let i = 0; i < priorityClosers.length; i++) {
+    priorityClosers[i].addEventListener('click', closePrioritySheet);
+  }
 
   const taskSheetText = document.getElementById('task-sheet-text');
   if (taskSheetText) {
@@ -3385,11 +3579,26 @@ function bindEvents() {
     syncFromCloud();
   });
 
-  // Escape закрывает модалку привычек и форму задачи
+  // Escape разбирает окна по слоям: сначала верхнее меню, потом то, что под
+  // ним, и только затем саму форму. Иначе форма закрылась бы, оставив меню
+  // висеть на экране.
   document.addEventListener('keydown', function (event) {
     if (event.key !== 'Escape') return;
     const modal = document.getElementById('habit-modal');
     if (modal && !modal.hidden) closeModal();
+
+    const actionsSheet = document.getElementById('task-actions-sheet');
+    if (actionsSheet && !actionsSheet.hidden) {
+      closeTaskActionsSheet();
+      return;
+    }
+
+    const prioritySheet = document.getElementById('priority-sheet');
+    if (prioritySheet && !prioritySheet.hidden) {
+      closePrioritySheet();
+      return;
+    }
+
     closeTaskSheet();
   });
 
@@ -3948,17 +4157,40 @@ function renderTasksView() {
   updateAddButton();
 }
 
-/* --- Форма новой задачи -------------------------------------------------- */
+/* --- Форма задачи: создание и правка -------------------------------------- */
 
-function openTaskSheet() {
+// id правимой задачи. null — форма открыта на новую задачу.
+let editingTaskId = null;
+
+// Приоритет, выбранный в форме, и признак «человек выбрал его в это
+// открытие формы». Второй флаг нужен, чтобы правка текста не сбрасывала
+// ручной выбор, сделанный раньше: см. manualPriority в saveTaskFromSheet.
+let formPriority = 'low';
+let formPriorityManual = false;
+
+// id = null — новая задача, строка — правка существующей
+function openTaskSheet(id) {
   const sheet = document.getElementById('task-sheet');
   if (!sheet) return;
 
+  editingTaskId = id == null ? null : id;
+  formPriorityManual = false;
+
+  const task = editingTaskId === null ? null
+    : loadTasks().find(function (t) { return t.id === editingTaskId; });
+
   const text = document.getElementById('task-sheet-text');
   const time = document.getElementById('task-sheet-time');
+  const title = document.getElementById('task-sheet-title');
   const label = document.getElementById('task-sheet-date-label');
-  if (text) text.value = '';
-  if (time) time.value = '';
+
+  if (text) text.value = task ? task.text : '';
+  if (time) time.value = task && task.time ? task.time : '';
+
+  formPriority = task ? task.priority : 'low';
+  updatePriorityIcon();
+
+  if (title) title.textContent = task ? 'Редактировать' : 'Новая задача';
 
   if (label) {
     if (selectedTaskDate === toISODate(new Date())) {
@@ -3982,10 +4214,11 @@ function openTaskSheet() {
 function closeTaskSheet() {
   const sheet = document.getElementById('task-sheet');
   if (sheet) sheet.hidden = true;
+  editingTaskId = null;
 }
 
-// Приоритет выводится из времени: задача со временем — важная.
-// Без времени значение не выбирается вручную, кнопка приоритета не работает.
+// Приоритет выводится из времени, если человек его не выбирал. Выбор в меню
+// сильнее всего; правка без захода в меню сохраняет прежнее решение.
 function saveTaskFromSheet() {
   const button = document.getElementById('task-sheet-save');
   const text = document.getElementById('task-sheet-text');
@@ -4000,18 +4233,134 @@ function saveTaskFromSheet() {
   const timeInput = document.getElementById('task-sheet-time');
   const time = (timeInput && timeInput.value) || null;
 
-  addTask({
-    text: value,
-    date: selectedTaskDate,
-    time: time,
-    priority: time ? 'high' : 'low',
-    done: false,
-    createdAt: Date.now(),
-  });
+  if (editingTaskId === null) {
+    addTask({
+      text: value,
+      date: selectedTaskDate,
+      time: time,
+      priority: time ? 'high' : 'low',
+      manualPriority: false,
+      done: false,
+      createdAt: Date.now(),
+    });
+  } else {
+    const current = loadTasks().find(function (t) { return t.id === editingTaskId; });
+    const manual = formPriorityManual || !!(current && current.manualPriority);
+    const priority = formPriorityManual ? formPriority : (manual ? current.priority : (time ? 'high' : 'low'));
+
+    updateTask(editingTaskId, {
+      text: value,
+      time: time,
+      priority: priority,
+      manualPriority: manual,
+    });
+  }
 
   closeTaskSheet();
   button.disabled = false;
   renderTasksView();
+}
+
+// Клик по тексту строки открывает форму правки. Чекбокс живёт на change
+// и сюда не попадает: он не внутри .task-text.
+function onTasksListClick(event) {
+  const text = event.target.closest('.task-text');
+  if (!text) return;
+  const row = text.closest('.task-row');
+  if (!row) return;
+  openTaskSheet(row.getAttribute('data-task-id'));
+}
+
+// Отметка «выполнено». Снятие возвращает задачу в работу, поэтому упирается
+// в тот же лимит, что и кнопка «＋».
+function onTaskCheckChange(event) {
+  const checkbox = event.target.closest('.task-check');
+  if (!checkbox) return;
+  const row = checkbox.closest('.task-row');
+  if (!row) return;
+
+  if (!checkbox.checked) {
+    const active = loadTasks().filter(function (t) {
+      return t.date === selectedTaskDate && !t.done;
+    }).length;
+    if (active >= TASK_DAY_LIMIT) {
+      alert('Достигнут лимит на день: ' + TASK_DAY_LIMIT + ' невыполненных задач');
+      renderTasksView();
+      return;
+    }
+  }
+
+  updateTask(row.getAttribute('data-task-id'), { done: checkbox.checked });
+  renderTasksView();
+}
+
+function onTaskDelete() {
+  if (editingTaskId === null) return;
+  if (!window.confirm('Удалить задачу?')) return;
+
+  deleteTask(editingTaskId);
+  closeTaskSheet();
+  renderTasksView();
+}
+
+/* --- Меню действий формы -------------------------------------------------- */
+
+// «Удалить» показываем только у существующей задачи: у новой удалять нечего
+function openTaskActionsSheet() {
+  const sheet = document.getElementById('task-actions-sheet');
+  if (!sheet) return;
+
+  const remove = document.getElementById('task-sheet-delete');
+  if (remove) remove.hidden = editingTaskId === null;
+
+  sheet.hidden = false;
+}
+
+function closeTaskActionsSheet() {
+  const sheet = document.getElementById('task-actions-sheet');
+  if (sheet) sheet.hidden = true;
+}
+
+/* --- Меню приоритета ------------------------------------------------------ */
+
+function openPrioritySheet() {
+  const sheet = document.getElementById('priority-sheet');
+  if (!sheet) return;
+  markPriorityOptions();
+  sheet.hidden = false;
+}
+
+function closePrioritySheet() {
+  const sheet = document.getElementById('priority-sheet');
+  if (sheet) sheet.hidden = true;
+}
+
+// Подсветка варианта, совпадающего с текущим выбором формы
+function markPriorityOptions() {
+  const sheet = document.getElementById('priority-sheet');
+  if (!sheet) return;
+  const options = sheet.querySelectorAll('.priority-option');
+  for (let i = 0; i < options.length; i++) {
+    options[i].classList.toggle('is-active',
+      options[i].getAttribute('data-priority') === formPriority);
+  }
+}
+
+// Флаг в кнопке формы красится в цвет выбранного приоритета
+function updatePriorityIcon() {
+  const flag = document.querySelector('#task-sheet-priority .priority-flag');
+  if (!flag) return;
+  flag.classList.toggle('is-high', formPriority === 'high');
+  flag.classList.toggle('is-low', formPriority === 'low');
+}
+
+function onPriorityPick(event) {
+  const option = event.target.closest('.priority-option');
+  if (!option) return;
+  formPriority = option.getAttribute('data-priority');
+  formPriorityManual = true;
+  updatePriorityIcon();
+  closePrioritySheet();
 }
 
 // Перелистывание месяца. Выбранным днём становится первое число нового
