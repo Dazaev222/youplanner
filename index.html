@@ -1363,10 +1363,21 @@ body {
   color: var(--text-muted);
 }
 
-/* Колесо времени (§11р). Панель не прокручивается: жест должен доставаться
-   самому колесу, а не уезжать вместе с панелью (у .sheet-panel overflow-y). */
-#task-time-sheet .sheet-panel {
-  overflow: hidden;
+/* Панель колеса времени (§11n). Не .sheet-panel: та прижата к низу экрана
+   и растёт вверх, а выбор времени должен всплывать по центру, как в Apple
+   Reminders. Ширина — по содержимому, поэтому окошко обнимает два колеса,
+   а max-width держит его узким на любой ширине экрана. */
+.time-sheet-panel {
+  position: fixed;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  width: max-content;
+  max-width: 280px;
+  padding: 16px;
+  background: var(--surface);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
 }
 
 .time-wheels {
@@ -2563,7 +2574,7 @@ body.view-settings #header-actions {
      «Срок исполнения»; пикер под ней остаётся открытым до «Готово». -->
 <div id="task-time-sheet" class="sheet" hidden>
   <div class="sheet-backdrop" data-task-time-close></div>
-  <div class="sheet-panel" role="dialog" aria-modal="true">
+  <div class="time-sheet-panel" role="dialog" aria-modal="true">
     <div class="sheet-head">
       <button type="button" id="task-time-cancel" class="sheet-menu-btn" aria-label="Отмена">✕</button>
       <h2>Время</h2>
