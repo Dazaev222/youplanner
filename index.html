@@ -1137,6 +1137,11 @@ body {
   background: var(--surface);
   border-radius: 16px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, .18);
+  /* Панель не выше экрана: у пикера даты (§11n) контента больше, чем
+     влезает на низком экране, поэтому длинная панель прокручивается,
+     а не уезжает верхом за край. */
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
 }
 
 .sheet-grip {
@@ -1178,14 +1183,6 @@ body {
   font: inherit;
   font-size: 13px;
   cursor: pointer;
-}
-
-.sheet-time {
-  border: 0;
-  background: transparent;
-  color: var(--text-muted);
-  font: inherit;
-  font-size: 13px;
 }
 
 /* Галочка сохранения в панели формы. Отжимает себя вправо и красится
@@ -1274,6 +1271,106 @@ body {
 .action-row + .action-row {
   border-top: 1px solid var(--border);
   border-radius: 0;
+}
+
+/* Четвёртая шторка — пикер даты. Лежит выше меню действий (130): открыть
+   её можно только из панели формы, которая под ними всеми. */
+#task-date-sheet {
+  z-index: 140;
+}
+
+.date-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 12px 0 16px;
+}
+
+.date-chip {
+  padding: 8px 14px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-alt);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.date-chip.is-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+#date-cal-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 0 12px;
+}
+
+#date-cal-label {
+  font-weight: 600;
+  font-size: 15px;
+  text-transform: capitalize;
+}
+
+/* Ячейки дня — те же .cal-dow/.cal-day, что в календаре вкладки (§9) */
+#date-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 2px 0;
+}
+
+.date-info-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 16px;
+  padding: 14px 4px;
+  border-top: 1px solid var(--border);
+  color: var(--text);
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.date-info-row svg {
+  color: var(--text-muted);
+  flex: 0 0 auto;
+}
+
+.date-info-label {
+  flex: 1 1 auto;
+}
+
+#date-info-value {
+  color: var(--text-muted);
+}
+
+/* Поле времени спрятано от глаза, но остаётся в потоке: у display:none
+   Safari на iPhone не открывает нативный пикер по программному клику */
+#task-date-time {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
+}
+
+#task-date-clear {
+  display: block;
+  width: 100%;
+  min-height: 44px;
+  margin-top: 16px;
+  color: var(--danger);
+  border-color: var(--border);
+  background: transparent;
+}
+
+#task-date-clear:active {
+  background: var(--surface-alt);
 }
 
 .priority-option {
@@ -2011,6 +2108,9 @@ body.view-settings #header-actions {
     border-radius: 20px 20px 0 0;
     padding: 10px 16px calc(16px + env(safe-area-inset-bottom, 0px));
     transition: bottom .2s ease;
+    /* Панель прижата к низу и растёт вверх: потолок высоты считается
+       от поднятой клавиатуры, иначе верх панели уходит за экран */
+    max-height: calc(100vh - var(--keyboard-offset, 0px) - 12px);
   }
 
   /* У меню действий нет поля ввода: под клавиатуру оно не подстраивается,
@@ -2267,7 +2367,6 @@ body.view-settings #header-actions {
           <path d="M4 21V4"></path><path d="M4 4h13l-2 4 2 4H4"></path>
         </svg>
       </button>
-      <input type="time" id="task-sheet-time" class="sheet-time" aria-label="Время">
       <button type="button" id="task-sheet-save-inline" class="sheet-tool sheet-save-inline" aria-label="Сохранить">
         <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
           <path d="M5 12.5l4.5 4.5L19 7.5"></path>
@@ -2300,6 +2399,47 @@ body.view-settings #header-actions {
     <button type="button" id="task-sheet-save" class="action-row">Сохранить</button>
     <button type="button" id="task-sheet-delete" class="action-row is-danger" hidden>Удалить</button>
     <button type="button" class="action-row" data-task-actions-close>Отмена</button>
+  </div>
+</div>
+
+<!-- Четвёртая шторка: пикер даты и времени. Открывается кнопкой даты в форме -->
+<div id="task-date-sheet" class="sheet" hidden>
+  <div class="sheet-backdrop" data-task-date-close></div>
+  <div class="sheet-panel" role="dialog" aria-modal="true">
+    <div class="sheet-head">
+      <button type="button" id="task-date-cancel" class="sheet-menu-btn" aria-label="Отмена">✕</button>
+      <h2>Дата</h2>
+      <button type="button" id="task-date-done" class="sheet-menu-btn sheet-save-inline" aria-label="Готово">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 12.5l4.5 4.5L19 7.5"></path>
+        </svg>
+      </button>
+    </div>
+
+    <div class="date-chips">
+      <button type="button" class="date-chip" data-offset="0">Сегодня</button>
+      <button type="button" class="date-chip" data-offset="1">Завтра</button>
+      <button type="button" class="date-chip" data-offset="next-mon">След. понедельник</button>
+    </div>
+
+    <div id="date-cal-head">
+      <button type="button" id="date-cal-prev" class="btn btn-secondary">‹</button>
+      <span id="date-cal-label"></span>
+      <button type="button" id="date-cal-next" class="btn btn-secondary">›</button>
+    </div>
+    <div id="date-cal-grid"></div>
+
+    <div class="date-info-row" id="date-time-row">
+      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <circle cx="12" cy="12" r="9"></circle>
+        <path d="M12 7v5l3 2"></path>
+      </svg>
+      <span class="date-info-label">Срок исполнения</span>
+      <span id="date-info-value">Сегодня</span>
+      <input type="time" id="task-date-time">
+    </div>
+
+    <button type="button" id="task-date-clear" class="btn btn-secondary">Очистить</button>
   </div>
 </div>
 
@@ -3572,8 +3712,44 @@ function bindEvents() {
     taskSaveInline.addEventListener('click', saveTaskFromSheet);
   }
 
-  const taskSheetTime = document.getElementById('task-sheet-time');
-  if (taskSheetTime) taskSheetTime.addEventListener('change', updateTaskSaveInline);
+  // Пикер даты: кнопка в панели формы, чипы, календарь, время, «Очистить».
+  // Ячейки и чипы перерисовываются, поэтому слушаем контейнеры.
+  const taskDateButton = document.getElementById('task-sheet-date');
+  if (taskDateButton) taskDateButton.addEventListener('click', openTaskDateSheet);
+
+  const dateChips = document.querySelectorAll('#task-date-sheet .date-chip');
+  for (let i = 0; i < dateChips.length; i++) {
+    dateChips[i].addEventListener('click', onDateChipClick);
+  }
+
+  const dateGrid = document.getElementById('date-cal-grid');
+  if (dateGrid) dateGrid.addEventListener('click', onDateGridClick);
+
+  const datePrev = document.getElementById('date-cal-prev');
+  if (datePrev) datePrev.addEventListener('click', function () { changePickerMonth(-1); });
+
+  const dateNext = document.getElementById('date-cal-next');
+  if (dateNext) dateNext.addEventListener('click', function () { changePickerMonth(1); });
+
+  const dateTimeRow = document.getElementById('date-time-row');
+  if (dateTimeRow) dateTimeRow.addEventListener('click', onDateTimeRowClick);
+
+  const dateTimeInput = document.getElementById('task-date-time');
+  if (dateTimeInput) dateTimeInput.addEventListener('change', onDateTimeChange);
+
+  const dateClear = document.getElementById('task-date-clear');
+  if (dateClear) dateClear.addEventListener('click', onTaskDateClear);
+
+  const dateDone = document.getElementById('task-date-done');
+  if (dateDone) dateDone.addEventListener('click', closeTaskDateSheet);
+
+  const dateCancel = document.getElementById('task-date-cancel');
+  if (dateCancel) dateCancel.addEventListener('click', closeTaskDateSheet);
+
+  const dateClosers = document.querySelectorAll('[data-task-date-close]');
+  for (let i = 0; i < dateClosers.length; i++) {
+    dateClosers[i].addEventListener('click', closeTaskDateSheet);
+  }
 
   // Клавиатура меняет visualViewport, а не resize окна
   if (window.visualViewport) {
@@ -3644,6 +3820,12 @@ function bindEvents() {
     if (event.key !== 'Escape') return;
     const modal = document.getElementById('habit-modal');
     if (modal && !modal.hidden) closeModal();
+
+    const dateSheet = document.getElementById('task-date-sheet');
+    if (dateSheet && !dateSheet.hidden) {
+      closeTaskDateSheet();
+      return;
+    }
 
     const actionsSheet = document.getElementById('task-actions-sheet');
     if (actionsSheet && !actionsSheet.hidden) {
@@ -4220,9 +4402,9 @@ function renderTasksView() {
 // id правимой задачи. null — форма открыта на новую задачу.
 let editingTaskId = null;
 
-// Текст и время на момент открытия формы правки. Галочка сохранения в панели
-// активна только при отличии от снимка: иначе «ввёл и стёр» выглядел бы как
-// изменение. У новой задачи снимка нет — там решает непустое поле.
+// Текст, время и дата на момент открытия формы правки. Галочка сохранения в
+// панели активна только при отличии от снимка: иначе «ввёл и стёр» выглядел
+// бы как изменение. У новой задачи снимка нет — там решает непустое поле.
 let originalFormState = null;
 
 // Приоритет, выбранный в форме, и признак «человек выбрал его в это
@@ -4230,6 +4412,56 @@ let originalFormState = null;
 // ручной выбор, сделанный раньше: см. manualPriority в saveTaskFromSheet.
 let formPriority = 'low';
 let formPriorityManual = false;
+
+// Дата и время формы. Дата обязательна: null здесь не бывает — при открытии
+// форма получает либо день задачи, либо день, выбранный в календаре вкладки.
+let formDate = null;
+let formTime = null;
+
+// Месяц, показанный в пикере. Отдельно от календаря вкладки: листание
+// пикера не должно уводить список дня.
+let pickerYear = 0;
+let pickerMonth = 0;
+
+// Ближайший понедельник строго после этой даты. Сегодня понедельник —
+// значит следующий, через семь дней.
+function nextMonday(from) {
+  const day = from.getDay();               // 0 — воскресенье, 1 — понедельник
+  const delta = ((8 - day) % 7) || 7;
+  return addDays(from, delta);
+}
+
+// Дата, за которой закреплён чип быстрого выбора
+function dateChipValue(offset) {
+  const today = new Date();
+  if (offset === '0') return toISODate(today);
+  if (offset === '1') return toISODate(addDays(today, 1));
+  return toISODate(nextMonday(today));
+}
+
+// Подпись даты в панели формы: «Сегодня» / «Завтра» / «дд.мм»
+function taskDateLabel(iso) {
+  const today = toISODate(new Date());
+  if (iso === today) return 'Сегодня';
+  if (iso === toISODate(addDays(new Date(), 1))) return 'Завтра';
+  const date = parseISODate(iso);
+  return pad2(date.getDate()) + '.' + pad2(date.getMonth() + 1);
+}
+
+// Подпись срока в пикере: у сегодня и завтра слова, у остальных полная дата
+function taskDateInfoLabel(iso) {
+  const today = toISODate(new Date());
+  if (iso === today) return 'Сегодня';
+  if (iso === toISODate(addDays(new Date(), 1))) return 'Завтра';
+  const date = parseISODate(iso);
+  return pad2(date.getDate()) + '.' + pad2(date.getMonth() + 1) + '.' + date.getFullYear();
+}
+
+// Кнопка даты в панели формы показывает текущий formDate
+function updateTaskDateLabel() {
+  const label = document.getElementById('task-sheet-date-label');
+  if (label && formDate) label.textContent = taskDateLabel(formDate);
+}
 
 // id = null — новая задача, строка — правка существующей
 function openTaskSheet(id) {
@@ -4242,32 +4474,28 @@ function openTaskSheet(id) {
   const task = editingTaskId === null ? null
     : loadTasks().find(function (t) { return t.id === editingTaskId; });
 
+  formDate = task ? task.date : selectedTaskDate;
+  formTime = task && task.time ? task.time : null;
+
   const text = document.getElementById('task-sheet-text');
-  const time = document.getElementById('task-sheet-time');
   const title = document.getElementById('task-sheet-title');
-  const label = document.getElementById('task-sheet-date-label');
+  const dateButton = document.getElementById('task-sheet-date');
 
   if (text) text.value = task ? task.text : '';
-  if (time) time.value = task && task.time ? task.time : '';
 
-  // Снимок берём с полей, а не с задачи: сравнение идёт с тем, что видно
+  // Снимок берём с формы, а не с задачи: сравнение идёт с тем, что видно
   originalFormState = task
-    ? { text: (text ? text.value : '').trim(), time: time ? time.value : '' }
+    ? { text: (text ? text.value : '').trim(), time: formTime || '', date: formDate }
     : null;
+
+  // Кнопка даты не гаснет никогда: дата у задачи есть всегда
+  if (dateButton) dateButton.disabled = false;
+  updateTaskDateLabel();
 
   formPriority = task ? task.priority : 'low';
   updatePriorityIcon();
 
   if (title) title.textContent = task ? 'Редактировать' : 'Новая задача';
-
-  if (label) {
-    if (selectedTaskDate === toISODate(new Date())) {
-      label.textContent = 'Сегодня';
-    } else {
-      const date = parseISODate(selectedTaskDate);
-      label.textContent = pad2(date.getDate()) + '.' + pad2(date.getMonth() + 1);
-    }
-  }
 
   sheet.hidden = false;
   syncSheetToKeyboard();
@@ -4285,6 +4513,8 @@ function closeTaskSheet() {
   const sheet = document.getElementById('task-sheet');
   if (sheet) sheet.hidden = true;
   editingTaskId = null;
+  formDate = null;
+  formTime = null;
   document.documentElement.style.setProperty('--keyboard-offset', '0px');
 }
 
@@ -4294,7 +4524,6 @@ function closeTaskSheet() {
 function updateTaskSaveInline() {
   const button = document.getElementById('task-sheet-save-inline');
   const text = document.getElementById('task-sheet-text');
-  const time = document.getElementById('task-sheet-time');
   if (!button || !text) return;
 
   const value = text.value.trim();
@@ -4304,14 +4533,16 @@ function updateTaskSaveInline() {
   } else {
     enabled = !!originalFormState &&
       (value !== originalFormState.text ||
-        (time ? time.value : '') !== originalFormState.time);
+        (formTime || '') !== originalFormState.time ||
+        formDate !== originalFormState.date);
   }
 
   button.disabled = !enabled;
 }
 
 // Приоритет выводится из времени, если человек его не выбирал. Выбор в меню
-// сильнее всего; правка без захода в меню сохраняет прежнее решение.
+// сильнее всего; правка без захода в меню и без смены времени сохраняет
+// прежнее решение, а смена времени пересчитывает приоритет заново.
 function saveTaskFromSheet() {
   const button = document.getElementById('task-sheet-save');
   const text = document.getElementById('task-sheet-text');
@@ -4321,15 +4552,25 @@ function saveTaskFromSheet() {
   const value = text.value.trim();
   if (!value) return;
 
-  button.disabled = true;
+  const time = formTime;
+  const tasks = loadTasks();
 
-  const timeInput = document.getElementById('task-sheet-time');
-  const time = (timeInput && timeInput.value) || null;
+  // Лимит десяти невыполненных проверяется на целевой день и без учёта самой
+  // задачи: перенос не должен упираться в собственный счётчик.
+  const pendingOnTarget = tasks.filter(function (t) {
+    return t.date === formDate && !t.done && t.id !== editingTaskId;
+  }).length;
 
   if (editingTaskId === null) {
+    if (pendingOnTarget >= TASK_DAY_LIMIT) {
+      alert('На этот день уже ' + TASK_DAY_LIMIT + ' невыполненных задач');
+      return;
+    }
+
+    button.disabled = true;
     addTask({
       text: value,
-      date: selectedTaskDate,
+      date: formDate,
       time: time,
       priority: time ? 'high' : 'low',
       manualPriority: false,
@@ -4337,16 +4578,41 @@ function saveTaskFromSheet() {
       createdAt: Date.now(),
     });
   } else {
-    const current = loadTasks().find(function (t) { return t.id === editingTaskId; });
-    const manual = formPriorityManual || !!(current && current.manualPriority);
-    const priority = formPriorityManual ? formPriority : (manual ? current.priority : (time ? 'high' : 'low'));
+    const current = tasks.find(function (t) { return t.id === editingTaskId; });
+    if (!current) {
+      closeTaskSheet();
+      return;
+    }
 
-    updateTask(editingTaskId, {
-      text: value,
-      time: time,
-      priority: priority,
-      manualPriority: manual,
-    });
+    const patch = { text: value, time: time };
+
+    // Перенос на другой день. Выполненную задачу он возвращает в работу —
+    // но только с согласия человека: иначе случайный тап снимет отметку.
+    if (formDate !== current.date) {
+      if (current.done &&
+        !window.confirm('Задача выполнена. Снять отметку и перенести её на другой день?')) {
+        return;
+      }
+      if (pendingOnTarget >= TASK_DAY_LIMIT) {
+        alert('На этот день уже ' + TASK_DAY_LIMIT + ' невыполненных задач');
+        return;
+      }
+      patch.date = formDate;
+      if (current.done) patch.done = false;
+    }
+
+    const manual = formPriorityManual || !!current.manualPriority;
+    if (formPriorityManual) {
+      patch.priority = formPriority;
+    } else if (manual && time === (current.time || null)) {
+      patch.priority = current.priority;
+    } else {
+      patch.priority = time ? 'high' : 'low';
+    }
+    patch.manualPriority = manual;
+
+    button.disabled = true;
+    updateTask(editingTaskId, patch);
   }
 
   closeTaskSheet();
@@ -4459,6 +4725,133 @@ function onPriorityPick(event) {
   formPriorityManual = true;
   updatePriorityIcon();
   closePrioritySheet();
+}
+
+/* --- Пикер даты и времени -------------------------------------------------- */
+
+// Пикер показывает месяц выбранной даты, а не месяц календаря вкладки:
+// при правке задача может лежать в другом месяце.
+function openTaskDateSheet() {
+  const sheet = document.getElementById('task-date-sheet');
+  if (!sheet) return;
+
+  const button = document.getElementById('task-sheet-date');
+  if (button && button.disabled) return;
+
+  const anchor = parseISODate(formDate);
+  pickerYear = anchor.getFullYear();
+  pickerMonth = anchor.getMonth();
+
+  renderDatePicker();
+  sheet.hidden = false;
+  syncSheetToKeyboard();
+}
+
+// formDate и formTime применены ещё до закрытия: чип, день и время меняют их
+// сразу, поэтому «Отмена» здесь просто закрывает пикер, а не откатывает выбор.
+function closeTaskDateSheet() {
+  const sheet = document.getElementById('task-date-sheet');
+  if (sheet) sheet.hidden = true;
+  document.documentElement.style.setProperty('--keyboard-offset', '0px');
+  updateTaskDateLabel();
+  updateTaskSaveInline();
+}
+
+// Ячейки — тот же формат, что у renderCalendar(): .cal-dow, .cal-day
+// с классами is-outside / is-today / is-selected и точкой статуса внутри.
+function renderDatePicker() {
+  const grid = document.getElementById('date-cal-grid');
+  if (!grid) return;
+
+  const label = document.getElementById('date-cal-label');
+  if (label) label.textContent = MONTHS_NOMINATIVE[pickerMonth] + ' ' + pickerYear;
+
+  const today = toISODate(new Date());
+  const start = getWeekStart(new Date(pickerYear, pickerMonth, 1));
+
+  let html = '';
+  for (let i = 0; i < CAL_DOW.length; i++) {
+    html += '<div class="cal-dow">' + CAL_DOW[i] + '</div>';
+  }
+
+  for (let i = 0; i < 42; i++) {
+    const date = addDays(start, i);
+    const iso = toISODate(date);
+
+    const classes = ['cal-day'];
+    if (date.getMonth() !== pickerMonth) classes.push('is-outside');
+    if (iso === today) classes.push('is-today');
+    if (iso === formDate) classes.push('is-selected');
+
+    const marker = getDayMarker(iso);
+    html += '<button type="button" class="' + classes.join(' ') + '" data-date="' + iso + '">' +
+      '<span>' + date.getDate() + '</span>' +
+      (marker ? '<span class="cal-marker is-' + marker + '"></span>' : '') +
+      '</button>';
+  }
+
+  grid.innerHTML = html;
+
+  const chips = document.querySelectorAll('#task-date-sheet .date-chip');
+  for (let i = 0; i < chips.length; i++) {
+    chips[i].classList.toggle('is-active',
+      dateChipValue(chips[i].getAttribute('data-offset')) === formDate);
+  }
+
+  const value = document.getElementById('date-info-value');
+  if (value) {
+    value.textContent = taskDateInfoLabel(formDate) + (formTime ? ', ' + formTime : '');
+  }
+}
+
+function onDateChipClick(event) {
+  const chip = event.target.closest('.date-chip');
+  if (!chip) return;
+  formDate = dateChipValue(chip.getAttribute('data-offset'));
+  closeTaskDateSheet();
+}
+
+function onDateGridClick(event) {
+  const cell = event.target.closest('.cal-day');
+  if (!cell) return;
+  formDate = cell.getAttribute('data-date');
+  closeTaskDateSheet();
+}
+
+// Поле времени спрятано от глаза, поэтому его открывает тап по всей строке
+function onDateTimeRowClick() {
+  const input = document.getElementById('task-date-time');
+  if (!input) return;
+  input.value = formTime || '';
+  input.click();
+}
+
+function onDateTimeChange() {
+  const input = document.getElementById('task-date-time');
+  if (!input) return;
+  formTime = input.value || null;
+  renderDatePicker();
+}
+
+// «Очистить» возвращает дефолт, а не пусто: дата у задачи обязательна.
+// При создании дефолт — сегодня, при правке — исходный день задачи.
+function onTaskDateClear() {
+  if (editingTaskId === null) {
+    formDate = toISODate(new Date());
+  } else {
+    const task = loadTasks().find(function (t) { return t.id === editingTaskId; });
+    if (task) formDate = task.date;
+  }
+  formTime = null;
+  renderDatePicker();
+}
+
+// formDate при листании не сбрасывается: выбранным остаётся тот же день
+function changePickerMonth(delta) {
+  const month = new Date(pickerYear, pickerMonth + delta, 1);
+  pickerYear = month.getFullYear();
+  pickerMonth = month.getMonth();
+  renderDatePicker();
 }
 
 // Перелистывание месяца. Выбранным днём становится первое число нового
