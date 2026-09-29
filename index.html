@@ -1287,6 +1287,12 @@ body {
   z-index: 140;
 }
 
+/* Пятая шторка — колесо времени. Выше пикера даты (140), но ниже тоста (150):
+   открывается поверх пикера, а тот остаётся под ней открытым. */
+#task-time-sheet {
+  z-index: 145;
+}
+
 .date-chips {
   display: flex;
   flex-wrap: wrap;
@@ -1357,14 +1363,86 @@ body {
   color: var(--text-muted);
 }
 
-/* Поле времени спрятано от глаза, но остаётся в потоке: у display:none
-   Safari на iPhone не открывает нативный пикер по программному клику */
-#task-date-time {
+/* Колесо времени (§11р). Панель не прокручивается: жест должен доставаться
+   самому колесу, а не уезжать вместе с панелью (у .sheet-panel overflow-y). */
+#task-time-sheet .sheet-panel {
+  overflow: hidden;
+}
+
+.time-wheels {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+/* Колесо — обычный вертикальный скролл со снапом: строка останавливается
+   точно в середине. Паддинги равны половине окна колеса, поэтому первая и
+   последняя строки тоже встают в центр. */
+.time-wheel {
+  width: 88px;
+  height: 180px;
+  padding: 72px 0;
+  overflow-y: scroll;
+  scroll-snap-type: y mandatory;
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  scrollbar-width: none;
+  text-align: center;
+}
+
+.time-wheel::-webkit-scrollbar {
+  display: none;
+}
+
+/* Высота строки кратна шагу снапа: выбранная считается делением прокрутки */
+.time-wheel-item {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  scroll-snap-align: center;
+  font-size: 17px;
+  color: var(--text-muted);
+  opacity: .5;
+}
+
+.time-wheel-item.is-near {
+  font-size: 22px;
+  opacity: .72;
+}
+
+.time-wheel-item.is-active {
+  font-size: 30px;
+  font-weight: 600;
+  color: var(--text);
+  opacity: 1;
+}
+
+.time-wheel-sep {
+  font-size: 30px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+/* Затухания у краёв окна колеса: строки растворяются в фоне панели, а не
+   обрезаются её краем. Кликов не ловят: это подсказка глазу, не элемент. */
+.time-wheel-fade {
   position: absolute;
-  width: 0;
-  height: 0;
-  opacity: 0;
+  left: 0;
+  right: 0;
+  top: 0;
+  height: 72px;
+  background: linear-gradient(to bottom, var(--surface), transparent);
   pointer-events: none;
+}
+
+.time-wheel-fade.is-bottom {
+  top: auto;
+  bottom: 0;
+  background: linear-gradient(to top, var(--surface), transparent);
 }
 
 #task-date-clear {
@@ -1453,10 +1531,6 @@ body {
   from {
     opacity: 0;
   }
-}
-
-#settings-tasks-note {
-  margin: 12px 0 0;
 }
 
 /* --- Раздел «Настройки» и нижний таб-бар --------------------------------- */
@@ -2278,7 +2352,6 @@ body.view-settings #header-actions {
     </div>
     <ul id="settings-list">
       <li><p class="settings-row settings-version" id="settings-version"></p></li>
-      <li><p id="settings-tasks-note" class="qaza-summary">Задачи не входят в резервную копию. Синхронизация задач — в разработке.</p></li>
       <li>
         <button type="button" id="settings-edit-habits" class="settings-row">
           <span>Редактировать привычки</span><span class="settings-chevron">›</span>
@@ -2480,10 +2553,34 @@ body.view-settings #header-actions {
       </svg>
       <span class="date-info-label">Срок исполнения</span>
       <span id="date-info-value">Сегодня</span>
-      <input type="time" id="task-date-time">
     </div>
 
     <button type="button" id="task-date-clear" class="btn btn-secondary">Очистить</button>
+  </div>
+</div>
+
+<!-- Пятая шторка: колесо времени поверх пикера даты. Открывается строкой
+     «Срок исполнения»; пикер под ней остаётся открытым до «Готово». -->
+<div id="task-time-sheet" class="sheet" hidden>
+  <div class="sheet-backdrop" data-task-time-close></div>
+  <div class="sheet-panel" role="dialog" aria-modal="true">
+    <div class="sheet-head">
+      <button type="button" id="task-time-cancel" class="sheet-menu-btn" aria-label="Отмена">✕</button>
+      <h2>Время</h2>
+      <button type="button" id="task-time-done" class="sheet-menu-btn sheet-save-inline" aria-label="Готово">
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M5 12.5l4.5 4.5L19 7.5"></path>
+        </svg>
+      </button>
+    </div>
+
+    <div class="time-wheels">
+      <div class="time-wheel" id="time-wheel-hours" role="listbox" aria-label="Часы"></div>
+      <span class="time-wheel-sep">:</span>
+      <div class="time-wheel" id="time-wheel-minutes" role="listbox" aria-label="Минуты"></div>
+      <div class="time-wheel-fade"></div>
+      <div class="time-wheel-fade is-bottom"></div>
+    </div>
   </div>
 </div>
 
@@ -3151,8 +3248,9 @@ function showSyncStatus(message) {
 
 /* ---------- Экспорт и импорт данных -------------------------------------- */
 
-// Версия формата резервной копии. Растёт, если меняется состав полей файла.
-const BACKUP_VERSION = 1;
+// Версия формата резервной копии. Растёт, если меняется состав полей файла:
+// версия 2 добавила раздел tasks.
+const BACKUP_VERSION = 2;
 
 // Что попадает в файл. Метка синхронизации и режим главного экрана — состояние
 // устройства, а не данные, поэтому в копию не входят.
@@ -3163,6 +3261,7 @@ function buildBackup() {
     habits: loadHabits(),
     records: loadRecords(),
     qaza: loadQaza(),
+    tasks: loadTasks(),
   };
 }
 
@@ -3197,17 +3296,22 @@ function parseBackup(text) {
   if (!data.records || typeof data.records !== 'object' || Array.isArray(data.records)) return null;
   if (data.qaza !== undefined &&
       (!data.qaza || typeof data.qaza !== 'object' || Array.isArray(data.qaza))) return null;
+  if (data.tasks !== undefined && !Array.isArray(data.tasks)) return null;
 
   return data;
 }
 
 // Замена локальных данных копией. Пишем в localStorage напрямую: saveHabits и
 // saveQaza поставили бы по отправке на каждый ключ, а нужен один PUT на замену.
-// Раздела qaza в файле может не быть — тогда очередь остаётся текущей.
+// Разделов qaza и tasks в файле может не быть — тогда очередь и список задач
+// остаются текущими. Список задач — один раздел целиком, без слияния по id.
 function applyBackup(data) {
   localStorage.setItem(STORAGE_KEYS.habits, JSON.stringify(data.habits));
   localStorage.setItem(STORAGE_KEYS.records, JSON.stringify(data.records));
   if (data.qaza) localStorage.setItem(QAZA_STORAGE_KEY, JSON.stringify(data.qaza));
+  if (Array.isArray(data.tasks)) {
+    localStorage.setItem(STORAGE_KEYS.tasks, JSON.stringify(data.tasks));
+  }
 
   appState.habits = loadHabits();
   appState.records = loadRecords();
@@ -3216,6 +3320,7 @@ function applyBackup(data) {
   scheduleSync();
   renderMainView();
   renderQazaView();
+  renderTasksView();
 }
 
 // Импорт выбранного файла. Пока разбор не удался или пользователь не подтвердил
@@ -3790,11 +3895,25 @@ function bindEvents() {
   const dateNext = document.getElementById('date-cal-next');
   if (dateNext) dateNext.addEventListener('click', function () { changePickerMonth(1); });
 
+  // Строка «Срок исполнения» открывает колесо времени поверх пикера
   const dateTimeRow = document.getElementById('date-time-row');
-  if (dateTimeRow) dateTimeRow.addEventListener('click', onDateTimeRowClick);
+  if (dateTimeRow) dateTimeRow.addEventListener('click', openTaskTimeSheet);
 
-  const dateTimeInput = document.getElementById('task-date-time');
-  if (dateTimeInput) dateTimeInput.addEventListener('change', onDateTimeChange);
+  const timeWheels = document.querySelectorAll('#task-time-sheet .time-wheel');
+  for (let i = 0; i < timeWheels.length; i++) {
+    timeWheels[i].addEventListener('scroll', onTimeWheelScroll, { passive: true });
+  }
+
+  const timeDone = document.getElementById('task-time-done');
+  if (timeDone) timeDone.addEventListener('click', commitTaskTimeSheet);
+
+  const timeCancel = document.getElementById('task-time-cancel');
+  if (timeCancel) timeCancel.addEventListener('click', closeTaskTimeSheet);
+
+  const timeClosers = document.querySelectorAll('[data-task-time-close]');
+  for (let i = 0; i < timeClosers.length; i++) {
+    timeClosers[i].addEventListener('click', closeTaskTimeSheet);
+  }
 
   const dateClear = document.getElementById('task-date-clear');
   if (dateClear) dateClear.addEventListener('click', onTaskDateClear);
@@ -3879,6 +3998,12 @@ function bindEvents() {
     if (event.key !== 'Escape') return;
     const modal = document.getElementById('habit-modal');
     if (modal && !modal.hidden) closeModal();
+
+    const timeSheet = document.getElementById('task-time-sheet');
+    if (timeSheet && !timeSheet.hidden) {
+      closeTaskTimeSheet();
+      return;
+    }
 
     const dateSheet = document.getElementById('task-date-sheet');
     if (dateSheet && !dateSheet.hidden) {
@@ -4858,6 +4983,10 @@ function openTaskDateSheet() {
 function closeTaskDateSheet() {
   const sheet = document.getElementById('task-date-sheet');
   if (sheet) sheet.hidden = true;
+  // Колесо времени живёт поверх пикера: закрыв пикер, гасим и его, иначе
+  // шторка осталась бы висеть над закрытой формой
+  const timeSheet = document.getElementById('task-time-sheet');
+  if (timeSheet) timeSheet.hidden = true;
   document.documentElement.style.setProperty('--keyboard-offset', '0px');
   updateTaskDateLabel();
   updateTaskSaveInline();
@@ -4928,19 +5057,109 @@ function onDateGridClick(event) {
   closeTaskDateSheet();
 }
 
-// Поле времени спрятано от глаза, поэтому его открывает тап по всей строке
-function onDateTimeRowClick() {
-  const input = document.getElementById('task-date-time');
-  if (!input) return;
-  input.value = formTime || '';
-  input.click();
+/* --- Колесо времени (§11р) ----------------------------------------------- */
+
+// Часы идут по одному, минуты — кругами по пять, как в системном пикере:
+// двенадцать значений вместо шестидесяти.
+const TIME_MINUTE_STEP = 5;
+
+// Высота строки колеса. Кратна шагу снапа, поэтому выбранная строка считается
+// делением прокрутки; то же число стоит в CSS у .time-wheel-item.
+const TIME_WHEEL_ROW = 36;
+
+// Значения колеса в порядке следования сверху вниз
+function timeWheelValues(kind) {
+  const values = [];
+  if (kind === 'hours') {
+    for (let i = 0; i < 24; i++) values.push(pad2(i));
+  } else {
+    for (let i = 0; i < 60; i += TIME_MINUTE_STEP) values.push(pad2(i));
+  }
+  return values;
 }
 
-function onDateTimeChange() {
-  const input = document.getElementById('task-date-time');
-  if (!input) return;
-  formTime = input.value || null;
+// Строки колеса собираются на каждое открытие, а выбранная ставится в середину
+// прокруткой: снап доводит её до точного положения сам.
+function renderTimeWheel(kind, value) {
+  const wheel = document.getElementById(kind === 'hours' ? 'time-wheel-hours' : 'time-wheel-minutes');
+  if (!wheel) return;
+
+  const values = timeWheelValues(kind);
+  let html = '';
+  for (let i = 0; i < values.length; i++) {
+    html += '<div class="time-wheel-item" role="option" data-value="' + values[i] + '">' +
+      values[i] + '</div>';
+  }
+  wheel.innerHTML = html;
+
+  let index = values.indexOf(value);
+  if (index < 0) {
+    // У старой задачи минуты могли идти не по кругу колеса — берём ближайший
+    const step = kind === 'hours' ? 1 : TIME_MINUTE_STEP;
+    index = Math.round((parseInt(value, 10) || 0) / step);
+    index = Math.min(Math.max(index, 0), values.length - 1);
+  }
+
+  wheel.scrollTop = index * TIME_WHEEL_ROW;
+  updateTimeWheelActive(wheel);
+}
+
+// Значение колеса — строка, стоящая в середине окна
+function timeWheelValue(wheel) {
+  const item = wheel.querySelectorAll('.time-wheel-item')[Math.round(wheel.scrollTop / TIME_WHEEL_ROW)];
+  return item ? item.getAttribute('data-value') : '00';
+}
+
+// Подсветка середины: центральная строка крупная и тёмная, соседние — ближе
+function updateTimeWheelActive(wheel) {
+  if (!wheel) return;
+  const items = wheel.querySelectorAll('.time-wheel-item');
+  const active = Math.round(wheel.scrollTop / TIME_WHEEL_ROW);
+  for (let i = 0; i < items.length; i++) {
+    items[i].classList.toggle('is-active', i === active);
+    items[i].classList.toggle('is-near', i === active - 1 || i === active + 1);
+    items[i].setAttribute('aria-selected', i === active ? 'true' : 'false');
+  }
+}
+
+// Прокрутка сыплется десятками событий — пересчёт один на кадр
+let timeWheelFrame = 0;
+
+function onTimeWheelScroll() {
+  if (timeWheelFrame) return;
+  timeWheelFrame = requestAnimationFrame(function () {
+    timeWheelFrame = 0;
+    updateTimeWheelActive(document.getElementById('time-wheel-hours'));
+    updateTimeWheelActive(document.getElementById('time-wheel-minutes'));
+  });
+}
+
+// Пустое время показывает оба колеса на «00»: колесо не бывает без значения
+function openTaskTimeSheet() {
+  const sheet = document.getElementById('task-time-sheet');
+  if (!sheet) return;
+  const parts = (formTime || '').split(':');
+  renderTimeWheel('hours', parts[0] || '00');
+  renderTimeWheel('minutes', parts[1] || '00');
+  sheet.hidden = false;
+  syncSheetToKeyboard();
+}
+
+// «Готово» пишет время, «Отмена» и подложка — нет; и то и другое гасит только
+// колесо: пикер даты под ним остаётся открытым, туда и возвращается человек
+function commitTaskTimeSheet() {
+  const hours = document.getElementById('time-wheel-hours');
+  const minutes = document.getElementById('time-wheel-minutes');
+  if (!hours || !minutes) return;
+  formTime = timeWheelValue(hours) + ':' + timeWheelValue(minutes);
+  closeTaskTimeSheet();
+}
+
+function closeTaskTimeSheet() {
+  const sheet = document.getElementById('task-time-sheet');
+  if (sheet) sheet.hidden = true;
   renderDatePicker();
+  updateTaskSaveInline();
 }
 
 // «Очистить» возвращает дефолт, а не пусто: дата у задачи обязательна.
