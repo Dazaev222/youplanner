@@ -1653,12 +1653,14 @@ body.view-settings #header-actions {
     border-radius: 0;
   }
 
-  /* Шапка держится сверху при прокрутке формы */
+  /* Шапка держится сверху при прокрутке формы.
+     safe-area: окно занимает весь экран, поэтому без запаса кнопка «✕»
+     уходит под Dynamic Island. */
   .modal-header {
     position: sticky;
     top: 0;
     z-index: 1;
-    padding-top: 16px;
+    padding-top: calc(16px + env(safe-area-inset-top, 0px));
     background-color: var(--surface);
   }
 
