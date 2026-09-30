@@ -1703,15 +1703,18 @@ body {
   display: none;
 }
 
-/* Настройки молитв: мазхаб и координаты */
-#prayer-madhhab {
+/* Настройки молитв: метод расчёта, мазхаб и координаты. Правила у двух групп
+   пилюль общие — как у пар .qaza-start-* и .qaza-add-* */
+#prayer-madhhab,
+#prayer-method {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 8px;
 }
 
-.prayer-madhhab-option {
+.prayer-madhhab-option,
+.prayer-method-option {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -1723,7 +1726,8 @@ body {
   cursor: pointer;
 }
 
-.prayer-madhhab-option.is-active {
+.prayer-madhhab-option.is-active,
+.prayer-method-option.is-active {
   border-color: var(--accent);
   background: var(--accent-soft);
   color: var(--accent);
@@ -1731,7 +1735,8 @@ body {
 
 /* Радио скрыто визуально, но остаётся фокусируемым: кольцо фокуса рисуется
    на подписи */
-.prayer-madhhab-radio {
+.prayer-madhhab-radio,
+.prayer-method-radio {
   position: absolute;
   width: 1px;
   height: 1px;
@@ -1739,7 +1744,8 @@ body {
   clip-path: inset(50%);
 }
 
-.prayer-madhhab-radio:focus-visible + span {
+.prayer-madhhab-radio:focus-visible + span,
+.prayer-method-radio:focus-visible + span {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
   border-radius: 6px;
@@ -2691,6 +2697,13 @@ body.view-settings #header-actions {
     </div>
 
     <section class="prayer-settings-block">
+      <h3 class="qaza-subtitle">Метод расчёта</h3>
+      <p class="qaza-summary">ДУМ ЧР закрепляет Зухр на 12:30 круглый год,
+        астрономический берёт истинный солнечный полдень.</p>
+      <div id="prayer-method" role="radiogroup" aria-label="Метод расчёта"></div>
+    </section>
+
+    <section class="prayer-settings-block">
       <h3 class="qaza-subtitle">Мазхаб</h3>
       <p class="qaza-summary">От мазхаба зависит только время Асра:
         у ханафитского тень в два раза длиннее, поэтому Аср позже.</p>
@@ -3455,16 +3468,22 @@ function saveQaza(qaza) {
 // запуск, по нему показывается приветственный экран.
 const PRAYER_KEY = 'youplanner.prayer';
 
-// Часовой пояс расчёта. Метод ДУМ РФ считает по московскому времени, перевода
-// часов в России нет, поэтому пояс задан числом и от настроек устройства
-// не зависит: иначе у телефона в другом поясе времена уехали бы.
+// Часовой пояс расчёта. Расписание ДУМ ЧР публикуется по московскому времени,
+// перевода часов в России нет, поэтому пояс задан числом и от настроек
+// устройства не зависит: иначе у телефона в другом поясе времена уехали бы.
 const PRAYER_TZ = 3;
 
 // Мазхаб влияет только на Аср: во сколько раз тень предмета должна превысить
-// его высоту. Шафиитский — тень ×1, ханафитский — ×2.
+// его высоту. Ханафитский — ×2, шафиитский — ×1, как в методе ДУМ ЧР (§11q).
 const PRAYER_SHADOW = { shafi: 1, hanafi: 2 };
 const PRAYER_MADHHABS = ['shafi', 'hanafi'];
 const PRAYER_MADHHAB_LABELS = { shafi: 'Шафиитский', hanafi: 'Ханафитский' };
+
+// Метод расчёта. Отличаются только Зухром: ДУМ ЧР закрепляет его на 12:30
+// круглый год, астрономический берёт истинный солнечный полдень.
+const PRAYER_METHODS = ['dum-chr', 'astro'];
+const PRAYER_METHOD_LABELS = { 'dum-chr': 'ДУМ ЧР', astro: 'Астрономический' };
+const PRAYER_METHOD_DEFAULT = 'dum-chr';
 
 // Порядок времён в списке. Восход — не намаз, но он строка списка и участвует
 // в «следующем»: пользователь видит его время и ждёт его появления.
@@ -3482,11 +3501,17 @@ const PRAYER_WINDOWS = [
   ['maghrib', 'isha'], ['isha', null],
 ];
 
-// Углы метода ДУМ РФ: Фаджр — 16° под горизонтом, Иша — 15°
+// Углы метода ДУМ ЧР: Фаджр — 16° под горизонтом, Иша — 15°.
 const PRAYER_FAJR_ANGLE = 16;
 const PRAYER_ISHA_ANGLE = 15;
 // Восход и закат: 0,833° — высота с учётом рефракции и радиуса диска
 const PRAYER_HORIZON_ANGLE = 0.833;
+
+// Зухр метода ДУМ ЧР: закреплён на 12:30 круглый год, а не солнечный полдень.
+// Постоянных правок в минутах нет и не нужно: чистый расчёт с этими углами
+// и тенью ×1 совпадает с эталоном ДУМ ЧР на весь сентябрь 2026 в пределах
+// минуты (§11q, §13).
+const PRAYER_DHUHR_FIXED = 12 * 60 + 30;
 
 function prayerRad(deg) { return deg * Math.PI / 180; }
 function prayerDeg(rad) { return rad * 180 / Math.PI; }
@@ -3526,16 +3551,20 @@ function prayerSun(jd) {
   };
 }
 
-// Времена намазов на дату — минуты от полуночи UTC+3. null означает, что
-// время в этот день не наступает: за полярным кругом Солнце не опускается
-// на 16° под горизонт, и выдумывать вместо этого нечего.
-function prayerTimes(iso, lat, lng, madhhab) {
+// Времена намазов на дату — минуты от полуночи UTC+3 (§11q). null означает, что
+// время в этот день не наступает: за полярным кругом Солнце не опускается на 16°
+// под горизонт, и выдумывать вместо этого нечего.
+// method — метод расчёта; неизвестный читается как метод по умолчанию, чтобы
+// старый ключ без поля не ронял экран.
+function prayerTimes(iso, lat, lng, madhhab, method) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso))) return null;
   if (!isFinite(lat) || !isFinite(lng)) return null;
   if (lat < -89.8 || lat > 89.8 || lng < -180 || lng > 180) return null;
 
   const factor = PRAYER_SHADOW[madhhab];
   if (!factor) return null;
+
+  const mode = PRAYER_METHODS.indexOf(method) >= 0 ? method : PRAYER_METHOD_DEFAULT;
 
   // Солнце приходит в зенит не по часам пояса, а по своему положению, поэтому
   // долгота сдвигает и точку отсчёта, и поправку к часам
@@ -3574,7 +3603,7 @@ function prayerTimes(iso, lat, lng, madhhab) {
 
   // Два прогона: первый берёт приблизительные времена, второй уточняет по ним
   // положение Солнца
-  let hours = { fajr: 5, sunrise: 6, dhuhr: 12, asr: 13, maghrib: 18, isha: 18 };
+  let hours = { fajr: 5, sunrise: 6, dhuhr: 12, asr: 13, maghrib: 18, isha: 19 };
   let computed = null;
 
   for (let pass = 0; pass < 2; pass++) {
@@ -3585,7 +3614,9 @@ function prayerTimes(iso, lat, lng, madhhab) {
       dhuhr: noon(before.dhuhr),
       asr: at(angleTime(asrAngle(before.asr), before.asr), before.asr, 1),
       maghrib: at(angleTime(PRAYER_HORIZON_ANGLE, before.maghrib), before.maghrib, 1),
-      isha: at(angleTime(PRAYER_ISHA_ANGLE, before.isha), before.isha, 1),
+      // Иша считается по своему положению Солнца, а не промежутком от Магриба:
+      // 15° под горизонтом — угол метода ДУМ ЧР
+      isha: at(angleTime(PRAYER_ISHA_ANGLE, before.maghrib), before.maghrib, 1),
     };
     hours = computed;
   }
@@ -3595,6 +3626,11 @@ function prayerTimes(iso, lat, lng, madhhab) {
     const value = computed[key];
     result[key] = value === null || value === undefined ? null : (value + zone) * 60;
   });
+
+  // Зухр берётся из метода: у ДУМ ЧР это закреплённые 12:30, у астрономического
+  // остаётся посчитанный выше истинный полдень
+  if (mode === PRAYER_METHOD_DEFAULT) result.dhuhr = PRAYER_DHUHR_FIXED;
+
   return result;
 }
 
@@ -3634,6 +3670,8 @@ function loadPrayer() {
       lat: lat,
       lng: lng,
       madhhab: PRAYER_SHADOW[parsed.madhhab] ? parsed.madhhab : 'shafi',
+      // Ключ без поля — состояние до §11r: читается как метод ДУМ ЧР
+      method: PRAYER_METHODS.indexOf(parsed.method) >= 0 ? parsed.method : PRAYER_METHOD_DEFAULT,
     };
   } catch (e) {
     return null;
@@ -3651,6 +3689,7 @@ function savePrayer(prayer) {
     lat: lat,
     lng: lng,
     madhhab: PRAYER_SHADOW[prayer.madhhab] ? prayer.madhhab : 'shafi',
+    method: PRAYER_METHODS.indexOf(prayer.method) >= 0 ? prayer.method : PRAYER_METHOD_DEFAULT,
   }));
   scheduleSync();
 }
@@ -4435,6 +4474,9 @@ function bindEvents() {
 
   const prayerMadhhab = document.getElementById('prayer-madhhab');
   if (prayerMadhhab) prayerMadhhab.addEventListener('change', onPrayerMadhhabChange);
+
+  const prayerMethod = document.getElementById('prayer-method');
+  if (prayerMethod) prayerMethod.addEventListener('change', onPrayerMethodChange);
 
   const prayerRefresh = document.getElementById('prayer-refresh');
   if (prayerRefresh) prayerRefresh.addEventListener('click', onPrayerRefresh);
@@ -6080,12 +6122,13 @@ function prayerViewState() {
   if (!saved) return null;
 
   const now = new Date();
-  const times = prayerTimes(prayerDateISO(now), saved.lat, saved.lng, saved.madhhab);
+  const times = prayerTimes(prayerDateISO(now), saved.lat, saved.lng,
+    saved.madhhab, saved.method);
   if (!times) return null;
 
   const tomorrow = prayerTimes(
     prayerDateISO(new Date(now.getTime() + 86400000)),
-    saved.lat, saved.lng, saved.madhhab) || {};
+    saved.lat, saved.lng, saved.madhhab, saved.method) || {};
 
   const nowMin = prayerMinutes(now);
   const current = prayerCurrent(times, nowMin);
@@ -6232,6 +6275,28 @@ function renderPrayerSettings() {
   }
 
   renderPrayerMadhhab(saved ? saved.madhhab : 'shafi');
+  renderPrayerMethod(saved ? saved.method : PRAYER_METHOD_DEFAULT);
+}
+
+function renderPrayerMethod(method) {
+  const box = document.getElementById('prayer-method');
+  if (!box) return;
+
+  box.innerHTML = PRAYER_METHODS.map(function (key) {
+    const active = key === method;
+    return '<label class="prayer-method-option' + (active ? ' is-active' : '') + '">' +
+      '<input type="radio" class="prayer-method-radio" name="prayer-method" value="' +
+      escapeHtml(key) + '"' + (active ? ' checked' : '') + '>' +
+      '<span>' + escapeHtml(PRAYER_METHOD_LABELS[key]) + '</span></label>';
+  }).join('');
+}
+
+function markPrayerMethod(method) {
+  document.querySelectorAll('#prayer-method .prayer-method-option')
+    .forEach(function (option) {
+      const input = option.querySelector('input');
+      option.classList.toggle('is-active', !!input && input.value === method);
+    });
 }
 
 function renderPrayerMadhhab(madhhab) {
@@ -6311,10 +6376,15 @@ function requestPrayerLocation(noteId, onDone) {
   }, { timeout: 10000, maximumAge: 600000 });
 }
 
-// Сохраняет координаты, не трогая выбранный мазхаб
+// Сохраняет координаты, не трогая выбранные мазхаб и метод расчёта
 function applyPrayerCoords(lat, lng) {
   const saved = loadPrayer();
-  savePrayer({ lat: lat, lng: lng, madhhab: saved ? saved.madhhab : 'shafi' });
+  savePrayer({
+    lat: lat,
+    lng: lng,
+    madhhab: saved ? saved.madhhab : 'shafi',
+    method: saved ? saved.method : PRAYER_METHOD_DEFAULT,
+  });
   afterPrayerChange();
 }
 
@@ -6352,11 +6422,23 @@ function onPrayerMadhhabChange(event) {
 
   const saved = loadPrayer();
   if (!saved) return;
-  savePrayer({ lat: saved.lat, lng: saved.lng, madhhab: value });
+  savePrayer({ lat: saved.lat, lng: saved.lng, madhhab: value, method: saved.method });
 
   // Настройки не пересобираются целиком — только подсветка: экран молитв
   // мог быть открыт, и он перерисовывается под новый мазхаб
   markPrayerMadhhab(value);
+  renderPrayerView();
+}
+
+function onPrayerMethodChange(event) {
+  const value = event.target && event.target.value;
+  if (PRAYER_METHODS.indexOf(value) < 0) return;
+
+  const saved = loadPrayer();
+  if (!saved) return;
+  savePrayer({ lat: saved.lat, lng: saved.lng, madhhab: saved.madhhab, method: value });
+
+  markPrayerMethod(value);
   renderPrayerView();
 }
 
