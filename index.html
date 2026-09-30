@@ -2640,7 +2640,7 @@ function loadHabits() {
     const defaults = DEFAULT_HABITS.map(function (h) {
       return { id: h.id, name: h.name, type: h.type, unit: h.unit, goal: h.goal };
     });
-    saveHabits(defaults);
+    saveNormalized(function () { saveHabits(defaults); });
     return defaults;
   }
 }
@@ -3059,11 +3059,11 @@ function loadQaza() {
       qaza.cursor = nextQazaIndex(qaza, qaza.cursor);
     }
 
-    saveQaza(qaza);
+    saveNormalized(function () { saveQaza(qaza); });
     return qaza;
   } catch (e) {
     const fresh = copyQaza(DEFAULT_QAZA);
-    saveQaza(fresh);
+    saveNormalized(function () { saveQaza(fresh); });
     return fresh;
   }
 }
@@ -3092,6 +3092,33 @@ let syncStatusTimer = null;
 // встречную отправку: loadQaza() зовёт saveQaza(), а syncToCloud() зовёт
 // loadQaza() — без флага каждая отправка планировала бы следующую.
 let syncing = false;
+// Первая сверка с сервером пройдена. До неё отправлять нельзя: локальное
+// состояние ещё не сверено с серверным, и PUT затёр бы на сервере чужие
+// данные. Гонка настоящая: loadQaza() при чтении зовёт saveQaza(), то есть
+// на каждом старте ставит отправку, а ответа сервера при медленной сети
+// ещё нет — отправка уходила вперёд ответа и затирала чужой снимок.
+let cloudReady = false;
+// Правка, случившаяся до первой сверки: отправку не теряем, а откладываем
+// до ответа сервера — иначе PUT ушёл бы раньше, чем мы узнали серверное.
+// Флаг же говорит и обратное: пока он взведён, серверный снимок локальному
+// не указ (см. cloudSnapshotWins).
+let syncPending = false;
+// Чтение приводит данные в порядок и пишет их обратно: дефолты привычек,
+// миграция версии каза, обрезка истории, курсор. Это не правка пользователя,
+// поэтому приоритета локальному состоянию такая запись не даёт и syncPending
+// не взводит — иначе флаг стоял бы на каждом старте и снимок с сервера
+// не применялся бы никогда.
+let normalizing = false;
+
+// Единственный вход для записей при чтении: saveNormalized(() => saveX(...))
+function saveNormalized(write) {
+  normalizing = true;
+  try {
+    write();
+  } finally {
+    normalizing = false;
+  }
+}
 
 // Время последней известной версии данных. Больше — свежее.
 function syncTs() {
@@ -3150,6 +3177,16 @@ function applyCloudData(data, ts) {
   renderTasksView();
 }
 
+// Уступает ли локальное состояние серверному снимку. Правило одно на все
+// сверки: снимок должен быть новее и не спорить с правкой, которой сервер
+// ещё не видел. Второе условие закрывает гонку первых секунд: правка, сделанная
+// во время незавершённой сверки, уходит наверх (init после сверки зовёт
+// syncToCloud), а пришедший снимок её уже не трогает — иначе задача пропала бы,
+// не дойдя до сервера. Другое устройство получит её при следующей сверке.
+function cloudSnapshotWins(serverTs) {
+  return serverTs > syncTs() && !syncPending;
+}
+
 // Забирает данные с сервера. Промис разрешается true, если на сервере пусто —
 // тогда init отправляет наверх локальную копию.
 // Ошибки сети глотаем: приложение работает на локальных данных.
@@ -3163,7 +3200,7 @@ function syncFromCloud() {
       if (!data || typeof data !== 'object') return true;
 
       const serverTs = Number(data.updatedAt) || 0;
-      if (serverTs <= syncTs()) return false;
+      if (!cloudSnapshotWins(serverTs)) return false;
 
       applyCloudData(data, serverTs);
       return false;
@@ -3238,6 +3275,12 @@ function backupCloudSnapshot() {
 // Отложенная отправка: несколько правок подряд дают один PUT
 function scheduleSync() {
   if (syncing) return;
+  // До первой сверки отправлять нельзя: локальное состояние ещё не сверено,
+  // а PUT затирает узел целиком. Правку запоминаем и отправим после ответа.
+  if (!cloudReady) {
+    if (!normalizing) syncPending = true;
+    return;
+  }
   if (syncTimer) clearTimeout(syncTimer);
   syncTimer = setTimeout(function () {
     syncTimer = null;
@@ -3702,10 +3745,31 @@ function init() {
   // так главная вкладка сразу подсвечена, а таб-бар скрыт на ПК
   switchAppView('main');
 
-  // Пустой сервер заполняем своей копией, иначе забираем то, что там новее
-  syncFromCloud().then(function (serverEmpty) {
-    if (serverEmpty) syncToCloud();
-  });
+  // Пустой сервер заполняем своей копией, иначе забираем то, что там новее.
+  // Только после этого разрешаем отправку: loadQaza() выше уже зовёт
+  // saveQaza() → scheduleSync(), и если ответ сервера придёт позже задержки,
+  // отправка уходила бы вперёд ответа и затирала чужой снимок (в том числе
+  // задачи — пустой локальный список ложился на сервер вместо серверного).
+  //
+  // Сверка разрешает отправку при любом исходе, включая недоступный сервер:
+  // приложение работает офлайн, и ждать сети, чтобы разрешить запись, значило
+  // бы копить правки в syncPending без срока. Итог сверки берём через
+  // Promise.resolve(), потому что fetch вызывается синхронно: его бросок
+  // вылетел бы из syncFromCloud до возврата промиса, и .catch ниже его не
+  // увидел бы. Отправка после неудачной сверки просто упадёт молча — это
+  // штатный путь syncToCloud, а следующая правка отправит всё разом.
+  Promise.resolve()
+    .then(syncFromCloud)
+    .catch(function () { return false; })
+    .then(function (serverEmpty) {
+      cloudReady = true;
+      // Накопленную правку забирает отправка, и приоритет локального на этом
+      // исчерпан: оставленный флаг запирал бы применение серверных снимков
+      // до конца сеанса.
+      const pending = syncPending;
+      syncPending = false;
+      if (serverEmpty || pending) syncToCloud();
+    });
 }
 
 // Все обработчики навешиваются один раз. События внутри таблицы и списка
