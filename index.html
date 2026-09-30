@@ -2095,8 +2095,9 @@ body.view-settings #header-actions {
     display: block;
   }
 
-  /* Из каза на телефоне выходим таб-баром — кнопка «Назад» дублирует его */
-  #qaza-back {
+  /* Из каза и задач на телефоне выходим таб-баром — кнопка «Назад» дублирует его */
+  #qaza-back,
+  #tasks-back {
     display: none;
   }
 
@@ -2341,7 +2342,10 @@ body.view-settings #header-actions {
 
   <!-- Вкладка «Задачи»: календарь месяца и список задач выбранного дня -->
   <section id="tasks-view" hidden>
-    <div class="qaza-head"><h2>Задачи</h2></div>
+    <div class="qaza-head">
+      <h2>Задачи</h2>
+      <button id="tasks-back" class="btn btn-secondary">← Назад</button>
+    </div>
     <div id="calendar-head">
       <button type="button" id="calendar-prev" class="btn btn-secondary">‹</button>
       <span id="calendar-label"></span>
@@ -3870,6 +3874,11 @@ function bindEvents() {
   const qazaBack = document.getElementById('qaza-back');
   if (qazaBack) {
     qazaBack.addEventListener('click', function () { switchAppView('main'); });
+  }
+
+  const tasksBack = document.getElementById('tasks-back');
+  if (tasksBack) {
+    tasksBack.addEventListener('click', function () { switchAppView('main'); });
   }
 
   // Нижний таб-бар: тот же переключатель разделов, что и у кнопок шапки
