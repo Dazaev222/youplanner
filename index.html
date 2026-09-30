@@ -603,6 +603,8 @@ body {
 
 /* display у этих элементов перебивает атрибут hidden, поэтому правило нужно явно */
 #qaza-view[hidden],
+#prayer-view[hidden],
+#prayer-settings-view[hidden],
 #main[hidden],
 #week-nav[hidden],
 #qaza-start-block[hidden],
@@ -840,6 +842,7 @@ body {
    Правило общее для главной страницы, вкладки каза и тоста. */
 @media (prefers-reduced-motion: reduce) {
   #qaza-view,
+  #prayer-view,
   #toast {
     animation: none;
   }
@@ -1508,6 +1511,250 @@ body {
   margin-top: 8px;
 }
 
+/* --- Вкладка «Молитвы» ---------------------------------------------------- */
+/* Единственная карточка приложения с фоном-градиентом: голубое небо сверху,
+   светлое снизу. Кольцо и акценты — те же --accent, что и везде, поэтому
+   новых цветов палитра не заводит, а карточки строк остаются белыми. */
+#prayer-view,
+#prayer-settings-view {
+  margin-top: 20px;
+  padding: 22px 26px 26px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  box-shadow: var(--shadow);
+  animation: qaza-view-in .22s ease-out;
+}
+
+#prayer-view {
+  background: linear-gradient(180deg, #d8e8fb 0%, #eff6fe 46%, var(--surface) 100%);
+}
+
+#prayer-settings-view {
+  background: var(--surface);
+}
+
+/* Шапка каза после появления «Молитв»: кнопка слева, заголовок прижат вправо
+   и стоит вплотную к «← Назад». Автоотступ — единственное, что разводит
+   кнопку и заголовок, поэтому порядок в разметке остаётся естественным. */
+#qaza-view .qaza-head h2 {
+  margin-left: auto;
+}
+
+/* Большой круг: кольцо и время следующего намаза */
+#prayer-ring {
+  position: relative;
+  width: 216px;
+  height: 216px;
+  margin: 6px auto 0;
+}
+
+#prayer-ring svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.prayer-ring-track {
+  fill: none;
+  stroke: rgba(0, 98, 204, .16);
+  stroke-width: 12;
+}
+
+.prayer-ring-progress {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 12;
+  stroke-linecap: round;
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
+  transition: stroke-dashoffset .3s ease-out;
+}
+
+.prayer-ring-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+#prayer-next-name {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+#prayer-next-time {
+  font-size: 36px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.02em;
+  line-height: 1.1;
+}
+
+#prayer-next-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* Список времён: строки-карточки поверх градиента */
+#prayer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 22px;
+}
+
+.prayer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--surface);
+}
+
+/* Текущий намаз: рамка и фон плюс счётчик у следующей строки — состояние
+   видно и без опоры на один цвет */
+.prayer-row.is-current {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+/* Восход — не намаз: приглушён и помечен пунктиром, чтобы не читался
+   как время молитвы */
+.prayer-row.is-sunrise {
+  border-style: dashed;
+  color: var(--text-muted);
+}
+
+.prayer-row-right {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.prayer-row-time {
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+}
+
+.prayer-countdown {
+  color: var(--accent);
+  font-size: 13px;
+}
+
+/* Первый запуск: два способа задать координаты */
+.prayer-welcome-lead {
+  margin: 16px 0 0;
+  color: var(--text-muted);
+}
+
+#prayer-welcome-fields {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.prayer-field {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.prayer-field span {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* 16px — порог, ниже которого iOS зумит страницу при фокусе в поле */
+.prayer-field input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+  font-variant-numeric: tabular-nums;
+}
+
+.prayer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+#prayer-welcome-note {
+  margin: 14px 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+#prayer-welcome-note:empty {
+  display: none;
+}
+
+/* Настройки молитв: мазхаб и координаты */
+#prayer-madhhab {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.prayer-madhhab-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px 16px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-alt);
+  cursor: pointer;
+}
+
+.prayer-madhhab-option.is-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+/* Радио скрыто визуально, но остаётся фокусируемым: кольцо фокуса рисуется
+   на подписи */
+.prayer-madhhab-radio {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+}
+
+.prayer-madhhab-radio:focus-visible + span {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+.prayer-settings-block {
+  margin-top: 22px;
+}
+
+#prayer-coords {
+  margin: 10px 0 0;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
 /* --- Тост ---------------------------------------------------------------- */
 /* Плашка-подсказка поверх всех шторок, поэтому слой выше пикера (140).
    Фон — из --text, текст — из --surface: плашка контрастна палитре и новых
@@ -1760,6 +2007,7 @@ body {
 
 /* В каза и настройках шапка действий не нужна — и на ПК, и на телефоне */
 body.view-qaza #header-actions,
+body.view-prayer #header-actions,
 body.view-settings #header-actions {
   display: none;
 }
@@ -2062,6 +2310,44 @@ body.view-settings #header-actions {
     font-size: 17px;
   }
 
+  /* Шапка каза — исключение: кнопка «Молитвы» и заголовок стоят строкой,
+     колонкой они встали бы друг под друга */
+  #qaza-view .qaza-head {
+    flex-direction: row;
+    align-items: center;
+    gap: 10px;
+  }
+
+  /* У «Молитв» в шапке заголовок и «← Назад»: колонка растянула бы кнопку
+     во всю ширину карточки */
+  #prayer-view .qaza-head,
+  #prayer-settings-view .qaza-head {
+    flex-direction: row;
+    align-items: center;
+  }
+
+  #prayer-btn {
+    min-height: 38px;
+    padding: 8px 12px;
+    font-size: 14px;
+  }
+
+  #prayer-view,
+  #prayer-settings-view {
+    margin-top: 12px;
+    padding: 16px 14px 20px;
+    border-radius: 12px;
+  }
+
+  #prayer-ring {
+    width: 184px;
+    height: 184px;
+  }
+
+  #prayer-next-time {
+    font-size: 30px;
+  }
+
   /* Экран «Привычки»: компактнее карточки каза */
   #habits-edit-view {
     margin-top: 12px;
@@ -2261,6 +2547,7 @@ body.view-settings #header-actions {
   /* В каза и настройках половины недели не нужны.
      Шапка действий гасится общим правилом в основном блоке. */
   body.view-qaza #mobile-day-tabs,
+  body.view-prayer #mobile-day-tabs,
   body.view-settings #mobile-day-tabs {
     display: none;
   }
@@ -2312,6 +2599,7 @@ body.view-settings #header-actions {
   <!-- Вкладка «Каза-намазы»: очередь каза по пяти намазам -->
   <section id="qaza-view" hidden>
     <div class="qaza-head">
+      <button type="button" id="prayer-btn" class="btn btn-secondary">Молитвы</button>
       <h2>Каза-намазы</h2>
       <button id="qaza-back" class="btn btn-secondary">← Назад</button>
     </div>
@@ -2338,6 +2626,84 @@ body.view-settings #header-actions {
     <div class="qaza-actions">
       <button id="qaza-undo" class="btn btn-secondary">Отменить последнее</button>
     </div>
+  </section>
+
+  <!-- Вкладка «Молитвы»: открывается кнопкой из шапки каза. Пока координат
+       нет, вместо времён показывается приветственный экран с двумя способами
+       их задать. Таб-бар на этой вкладке остаётся и подсвечивает «Каза». -->
+  <section id="prayer-view" hidden>
+    <div class="qaza-head">
+      <h2>Молитвы</h2>
+      <button type="button" id="prayer-back" class="btn btn-secondary">← Назад</button>
+    </div>
+
+    <div id="prayer-welcome">
+      <p class="prayer-welcome-lead">Укажите, где вы находитесь, — времена намазов
+        считаются по координатам. Способ любой: определить автоматически или
+        ввести широту и долготу вручную.</p>
+      <div class="prayer-actions">
+        <button type="button" id="prayer-geo" class="btn btn-primary">Определить местоположение</button>
+      </div>
+      <div id="prayer-welcome-fields">
+        <label class="prayer-field">
+          <span>Широта</span>
+          <input type="text" id="prayer-lat" inputmode="decimal" autocomplete="off"
+                 placeholder="43.38085">
+        </label>
+        <label class="prayer-field">
+          <span>Долгота</span>
+          <input type="text" id="prayer-lng" inputmode="decimal" autocomplete="off"
+                 placeholder="45.83479">
+        </label>
+      </div>
+      <div class="prayer-actions">
+        <button type="button" id="prayer-save" class="btn btn-primary">Сохранить</button>
+      </div>
+      <p id="prayer-welcome-note"></p>
+    </div>
+
+    <div id="prayer-times">
+      <div id="prayer-ring">
+        <svg viewBox="0 0 200 200" aria-hidden="true">
+          <circle class="prayer-ring-track" cx="100" cy="100" r="88"></circle>
+          <circle class="prayer-ring-progress" id="prayer-ring-progress"
+                  cx="100" cy="100" r="88"></circle>
+        </svg>
+        <div class="prayer-ring-center">
+          <span id="prayer-next-name"></span>
+          <strong id="prayer-next-time"></strong>
+          <span id="prayer-next-hint" hidden>завтра</span>
+        </div>
+      </div>
+      <div id="prayer-list"></div>
+      <div class="prayer-actions">
+        <button type="button" id="prayer-show-all" class="btn btn-secondary">Показать все</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- Настройки молитв: мазхаб и координаты. Открываются строкой из Настроек,
+       доступны и на телефоне, и на ПК -->
+  <section id="prayer-settings-view" hidden>
+    <div class="qaza-head">
+      <h2>Молитвы</h2>
+      <button type="button" id="prayer-settings-back" class="btn btn-secondary">← Назад</button>
+    </div>
+
+    <section class="prayer-settings-block">
+      <h3 class="qaza-subtitle">Мазхаб</h3>
+      <p class="qaza-summary">От мазхаба зависит только время Асра:
+        у ханафитского тень в два раза длиннее, поэтому Аср позже.</p>
+      <div id="prayer-madhhab" role="radiogroup" aria-label="Мазхаб"></div>
+    </section>
+
+    <section class="prayer-settings-block">
+      <h3 class="qaza-subtitle">Координаты</h3>
+      <p id="prayer-coords"></p>
+      <div class="prayer-actions">
+        <button type="button" id="prayer-refresh" class="btn btn-secondary">Обновить</button>
+      </div>
+    </section>
   </section>
 
   <!-- Вкладка «Задачи»: календарь месяца и список задач выбранного дня -->
@@ -2370,6 +2736,11 @@ body.view-settings #header-actions {
       <li>
         <button type="button" id="settings-edit-habits" class="settings-row">
           <span>Редактировать привычки</span><span class="settings-chevron">›</span>
+        </button>
+      </li>
+      <li>
+        <button type="button" id="settings-prayer" class="settings-row">
+          <span>Молитвы</span><span class="settings-chevron">›</span>
         </button>
       </li>
       <li>
@@ -3077,6 +3448,213 @@ function saveQaza(qaza) {
   scheduleSync();
 }
 
+/* ---------- Молитвы: координаты, мазхаб и расчёт времён ------------------ */
+
+// Координаты и мазхаб живут одним ключом и ходят на сервер одним разделом,
+// как каза и задачи. Ключа нет — координаты не заданы: это и есть первый
+// запуск, по нему показывается приветственный экран.
+const PRAYER_KEY = 'youplanner.prayer';
+
+// Часовой пояс расчёта. Метод ДУМ РФ считает по московскому времени, перевода
+// часов в России нет, поэтому пояс задан числом и от настроек устройства
+// не зависит: иначе у телефона в другом поясе времена уехали бы.
+const PRAYER_TZ = 3;
+
+// Мазхаб влияет только на Аср: во сколько раз тень предмета должна превысить
+// его высоту. Шафиитский — тень ×1, ханафитский — ×2.
+const PRAYER_SHADOW = { shafi: 1, hanafi: 2 };
+const PRAYER_MADHHABS = ['shafi', 'hanafi'];
+const PRAYER_MADHHAB_LABELS = { shafi: 'Шафиитский', hanafi: 'Ханафитский' };
+
+// Порядок времён в списке. Восход — не намаз, но он строка списка и участвует
+// в «следующем»: пользователь видит его время и ждёт его появления.
+const PRAYER_ORDER = ['fajr', 'sunrise', 'dhuhr', 'asr', 'maghrib', 'isha'];
+const PRAYER_LABELS = {
+  fajr: 'Фаджр', sunrise: 'Восход', dhuhr: 'Зухр',
+  asr: 'Аср', maghrib: 'Магриб', isha: 'Иша',
+};
+
+// Окна намазов: [начало, конец). Восход окна не имеет — это не намаз, а
+// граница утреннего. Иша тянется до полуночи: её продолжение после 00:00
+// принадлежит уже следующему дню, и экран за него не отвечает.
+const PRAYER_WINDOWS = [
+  ['fajr', 'sunrise'], ['dhuhr', 'asr'], ['asr', 'maghrib'],
+  ['maghrib', 'isha'], ['isha', null],
+];
+
+// Углы метода ДУМ РФ: Фаджр — 16° под горизонтом, Иша — 15°
+const PRAYER_FAJR_ANGLE = 16;
+const PRAYER_ISHA_ANGLE = 15;
+// Восход и закат: 0,833° — высота с учётом рефракции и радиуса диска
+const PRAYER_HORIZON_ANGLE = 0.833;
+
+function prayerRad(deg) { return deg * Math.PI / 180; }
+function prayerDeg(rad) { return rad * 180 / Math.PI; }
+
+// Угол в [0, 360)
+function prayerFixAngle(a) { return a - 360 * Math.floor(a / 360); }
+// Час в [0, 24)
+function prayerFixHour(a) { return a - 24 * Math.floor(a / 24); }
+
+// Юлианский день на 00:00 UTC указанной даты
+function prayerJulian(iso) {
+  const parts = String(iso).split('-');
+  let year = Number(parts[0]);
+  let month = Number(parts[1]);
+  const day = Number(parts[2]);
+  if (month <= 2) { year -= 1; month += 12; }
+  const a = Math.floor(year / 100);
+  const b = 2 - a + Math.floor(a / 4);
+  return Math.floor(365.25 * (year + 4716)) + Math.floor(30.6001 * (month + 1)) +
+    day + b - 1524.5;
+}
+
+// Склонение Солнца (градусы) и уравнение времени (часы) — стандартные ряды
+function prayerSun(jd) {
+  const d = jd - 2451545.0;
+  const g = prayerFixAngle(357.529 + 0.98560028 * d);
+  const q = prayerFixAngle(280.459 + 0.98564736 * d);
+  const l = prayerFixAngle(q + 1.915 * Math.sin(prayerRad(g)) +
+    0.020 * Math.sin(prayerRad(2 * g)));
+  const e = 23.439 - 0.00000036 * d;
+  const ra = prayerFixHour(prayerDeg(Math.atan2(
+    Math.cos(prayerRad(e)) * Math.sin(prayerRad(l)),
+    Math.cos(prayerRad(l)))) / 15);
+  return {
+    declination: prayerDeg(Math.asin(Math.sin(prayerRad(e)) * Math.sin(prayerRad(l)))),
+    equation: q / 15 - ra,
+  };
+}
+
+// Времена намазов на дату — минуты от полуночи UTC+3. null означает, что
+// время в этот день не наступает: за полярным кругом Солнце не опускается
+// на 16° под горизонт, и выдумывать вместо этого нечего.
+function prayerTimes(iso, lat, lng, madhhab) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso))) return null;
+  if (!isFinite(lat) || !isFinite(lng)) return null;
+  if (lat < -89.8 || lat > 89.8 || lng < -180 || lng > 180) return null;
+
+  const factor = PRAYER_SHADOW[madhhab];
+  if (!factor) return null;
+
+  // Солнце приходит в зенит не по часам пояса, а по своему положению, поэтому
+  // долгота сдвигает и точку отсчёта, и поправку к часам
+  const jDate = prayerJulian(iso) - lng / (15 * 24);
+  const zone = PRAYER_TZ - lng / 15;
+
+  const declination = function (hours) {
+    return prayerSun(jDate + hours / 24).declination;
+  };
+  const noon = function (hours) {
+    return prayerFixHour(12 - prayerSun(jDate + hours / 24).equation);
+  };
+  // Часовой угол для высоты angle (градусы) — в часах от полудня
+  const angleTime = function (angle, hours) {
+    const decl = declination(hours);
+    const cosH = (-Math.sin(prayerRad(angle)) -
+      Math.sin(prayerRad(decl)) * Math.sin(prayerRad(lat))) /
+      (Math.cos(prayerRad(decl)) * Math.cos(prayerRad(lat)));
+    if (cosH < -1 || cosH > 1) return null;
+    return prayerDeg(Math.acos(cosH)) / 15;
+  };
+  // Аср: тень предмета сравнивается с его высотой. Угол выходит отрицательным
+  // — это высота, отсчитанная вниз, как и у остальных времён
+  const asrAngle = function (hours) {
+    const decl = declination(hours);
+    return -prayerDeg(Math.atan(1 / (factor +
+      Math.tan(Math.abs(prayerRad(lat - decl))))));
+  };
+
+  // Часовое смещение от полудня → время суток. Фаджр и Восход отсчитываются
+  // назад, остальные вперёд; null остаётся null — время не наступает.
+  const at = function (offset, hours, direction) {
+    if (offset === null) return null;
+    return noon(hours) + direction * offset;
+  };
+
+  // Два прогона: первый берёт приблизительные времена, второй уточняет по ним
+  // положение Солнца
+  let hours = { fajr: 5, sunrise: 6, dhuhr: 12, asr: 13, maghrib: 18, isha: 18 };
+  let computed = null;
+
+  for (let pass = 0; pass < 2; pass++) {
+    const before = hours;
+    computed = {
+      fajr: at(angleTime(PRAYER_FAJR_ANGLE, before.fajr), before.fajr, -1),
+      sunrise: at(angleTime(PRAYER_HORIZON_ANGLE, before.sunrise), before.sunrise, -1),
+      dhuhr: noon(before.dhuhr),
+      asr: at(angleTime(asrAngle(before.asr), before.asr), before.asr, 1),
+      maghrib: at(angleTime(PRAYER_HORIZON_ANGLE, before.maghrib), before.maghrib, 1),
+      isha: at(angleTime(PRAYER_ISHA_ANGLE, before.isha), before.isha, 1),
+    };
+    hours = computed;
+  }
+
+  const result = {};
+  PRAYER_ORDER.forEach(function (key) {
+    const value = computed[key];
+    result[key] = value === null || value === undefined ? null : (value + zone) * 60;
+  });
+  return result;
+}
+
+// Дата по UTC+3 в формате 'YYYY-MM-DD'. Именно пояс расчёта, а не пояс
+// устройства: времена намазов не должны зависеть от того, где сейчас телефон.
+function prayerDateISO(date) {
+  return new Date(date.getTime() + PRAYER_TZ * 3600000).toISOString().slice(0, 10);
+}
+
+// Минуты от полуночи UTC+3
+function prayerMinutes(date) {
+  const shifted = new Date(date.getTime() + PRAYER_TZ * 3600000);
+  return shifted.getUTCHours() * 60 + shifted.getUTCMinutes() +
+    shifted.getUTCSeconds() / 60 + shifted.getUTCMilliseconds() / 60000;
+}
+
+// Пять знаков после запятой — столько же даёт геолокация
+function prayerRound(value) {
+  return Math.round(value * 100000) / 100000;
+}
+
+// Чтение с проверкой: битый ключ читается как «координат нет», а не роняет
+// расчёт. Мазхаб вне списка — шафиитский.
+function loadPrayer() {
+  try {
+    const raw = localStorage.getItem(PRAYER_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+
+    const lat = Number(parsed.lat);
+    const lng = Number(parsed.lng);
+    if (!isFinite(lat) || !isFinite(lng)) return null;
+    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+
+    return {
+      lat: lat,
+      lng: lng,
+      madhhab: PRAYER_SHADOW[parsed.madhhab] ? parsed.madhhab : 'shafi',
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+// Раздел уходит наверх тем же отложенным PUT, что привычки, каза и задачи
+function savePrayer(prayer) {
+  const lat = Number(prayer && prayer.lat);
+  const lng = Number(prayer && prayer.lng);
+  if (!isFinite(lat) || !isFinite(lng)) return;
+  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return;
+
+  localStorage.setItem(PRAYER_KEY, JSON.stringify({
+    lat: lat,
+    lng: lng,
+    madhhab: PRAYER_SHADOW[prayer.madhhab] ? prayer.madhhab : 'shafi',
+  }));
+  scheduleSync();
+}
+
 /* ---------- Синхронизация с Firebase (REST, без SDK) --------------------- */
 
 const FIREBASE_URL = 'https://youplanner-5c2f5-default-rtdb.firebaseio.com/youplanner-a7x9k2';
@@ -3149,6 +3727,7 @@ function applyCloudData(data, ts) {
       records: loadRecords(),
       qaza: loadQaza(),
       tasks: loadTasks(),
+      prayer: loadPrayer() || {},
     };
 
     if (Array.isArray(data.habits) && (hasData(data.habits) || !hasData(local.habits))) {
@@ -3167,6 +3746,12 @@ function applyCloudData(data, ts) {
     if (Array.isArray(data.tasks) && (hasData(data.tasks) || !hasData(local.tasks))) {
       localStorage.setItem(STORAGE_KEYS.tasks, JSON.stringify(data.tasks));
     }
+    // Координаты — один раздел целиком, как задачи. Пустой объект с сервера
+    // не затирает заданные координаты: это след неполного снимка.
+    if (data.prayer && typeof data.prayer === 'object' && !Array.isArray(data.prayer) &&
+        (hasData(data.prayer) || !hasData(local.prayer))) {
+      localStorage.setItem(PRAYER_KEY, JSON.stringify(data.prayer));
+    }
     localStorage.setItem(SYNC_TS_KEY, String(ts));
 
     appState.habits = loadHabits();
@@ -3179,6 +3764,7 @@ function applyCloudData(data, ts) {
   renderMainView();
   renderQazaView();
   renderTasksView();
+  renderPrayerView();
 }
 
 // Уступает ли локальное состояние серверному снимку. Правило одно на все
@@ -3226,6 +3812,7 @@ function syncToCloud() {
       records: loadRecords(),
       qaza: loadQaza(),
       tasks: loadTasks(),
+      prayer: loadPrayer() || {},
       updatedAt: ts,
     });
   } finally {
@@ -3307,11 +3894,13 @@ function showSyncStatus(message) {
 /* ---------- Экспорт и импорт данных -------------------------------------- */
 
 // Версия формата резервной копии. Растёт, если меняется состав полей файла:
-// версия 2 добавила раздел tasks.
-const BACKUP_VERSION = 2;
+// версия 2 добавила раздел tasks, версия 3 — раздел prayer.
+const BACKUP_VERSION = 3;
 
 // Что попадает в файл. Метка синхронизации и режим главного экрана — состояние
-// устройства, а не данные, поэтому в копию не входят.
+// устройства, а не данные, поэтому в копию не входят. Координат может не быть;
+// тогда раздел уходит пустым объектом — так же, как пустой список задач, и
+// читается он по общим правилам.
 function buildBackup() {
   return {
     version: BACKUP_VERSION,
@@ -3320,6 +3909,7 @@ function buildBackup() {
     records: loadRecords(),
     qaza: loadQaza(),
     tasks: loadTasks(),
+    prayer: loadPrayer() || {},
   };
 }
 
@@ -3355,6 +3945,8 @@ function parseBackup(text) {
   if (data.qaza !== undefined &&
       (!data.qaza || typeof data.qaza !== 'object' || Array.isArray(data.qaza))) return null;
   if (data.tasks !== undefined && !Array.isArray(data.tasks)) return null;
+  if (data.prayer !== undefined &&
+      (!data.prayer || typeof data.prayer !== 'object' || Array.isArray(data.prayer))) return null;
 
   return data;
 }
@@ -3370,6 +3962,9 @@ function applyBackup(data) {
   if (Array.isArray(data.tasks)) {
     localStorage.setItem(STORAGE_KEYS.tasks, JSON.stringify(data.tasks));
   }
+  if (data.prayer && typeof data.prayer === 'object' && !Array.isArray(data.prayer)) {
+    localStorage.setItem(PRAYER_KEY, JSON.stringify(data.prayer));
+  }
 
   appState.habits = loadHabits();
   appState.records = loadRecords();
@@ -3379,6 +3974,7 @@ function applyBackup(data) {
   renderMainView();
   renderQazaView();
   renderTasksView();
+  renderPrayerView();
 }
 
 // Импорт выбранного файла. Пока разбор не удался или пользователь не подтвердил
@@ -3749,6 +4345,11 @@ function init() {
   // так главная вкладка сразу подсвечена, а таб-бар скрыт на ПК
   switchAppView('main');
 
+  // Раз в минуту обновляются счётчик и окно намаза. Таймер один на приложение
+  // и идёт всегда: вкладка может быть закрыта, а при её открытии экран всё
+  // равно собирается заново.
+  if (!prayerTimer) prayerTimer = setInterval(prayerTick, 60000);
+
   // Пустой сервер заполняем своей копией, иначе забираем то, что там новее.
   // Только после этого разрешаем отправку: loadQaza() выше уже зовёт
   // saveQaza() → scheduleSync(), и если ответ сервера придёт позже задержки,
@@ -3800,6 +4401,43 @@ function bindEvents() {
   if (settingsBack) {
     settingsBack.addEventListener('click', function () { switchAppView('main'); });
   }
+
+  // Вкладка «Молитвы»: кнопка в шапке каза, возврат в неё же
+  const prayerButton = document.getElementById('prayer-btn');
+  if (prayerButton) {
+    prayerButton.addEventListener('click', function () { switchAppView('prayer'); });
+  }
+
+  const prayerBack = document.getElementById('prayer-back');
+  if (prayerBack) {
+    prayerBack.addEventListener('click', function () { switchAppView('qaza'); });
+  }
+
+  const prayerGeo = document.getElementById('prayer-geo');
+  if (prayerGeo) prayerGeo.addEventListener('click', onPrayerGeo);
+
+  const prayerSave = document.getElementById('prayer-save');
+  if (prayerSave) prayerSave.addEventListener('click', onPrayerManualSave);
+
+  const prayerShowAllButton = document.getElementById('prayer-show-all');
+  if (prayerShowAllButton) prayerShowAllButton.addEventListener('click', onPrayerShowAll);
+
+  // Экран настроек молитв: строка из Настроек, мазхаб и обновление координат
+  const settingsPrayer = document.getElementById('settings-prayer');
+  if (settingsPrayer) {
+    settingsPrayer.addEventListener('click', function () { switchAppView('prayer-settings'); });
+  }
+
+  const prayerSettingsBack = document.getElementById('prayer-settings-back');
+  if (prayerSettingsBack) {
+    prayerSettingsBack.addEventListener('click', function () { switchAppView('settings'); });
+  }
+
+  const prayerMadhhab = document.getElementById('prayer-madhhab');
+  if (prayerMadhhab) prayerMadhhab.addEventListener('change', onPrayerMadhhabChange);
+
+  const prayerRefresh = document.getElementById('prayer-refresh');
+  if (prayerRefresh) prayerRefresh.addEventListener('click', onPrayerRefresh);
 
   // Экран «Привычки» в настройках
   const settingsEdit = document.getElementById('settings-edit-habits');
@@ -5310,6 +5948,8 @@ function switchAppView(name) {
   document.getElementById('settings-view').hidden = name !== 'settings';
   document.getElementById('habits-edit-view').hidden = name !== 'edit-habits';
   document.getElementById('qaza-view').hidden = name !== 'qaza';
+  document.getElementById('prayer-view').hidden = name !== 'prayer';
+  document.getElementById('prayer-settings-view').hidden = name !== 'prayer-settings';
   document.getElementById('tasks-view').hidden = name !== 'tasks';
   document.getElementById('mobile-day-tabs').hidden = name !== 'main' || !isMobileView();
   document.getElementById('tab-bar').hidden = !isMobileView();
@@ -5320,15 +5960,20 @@ function switchAppView(name) {
   // Кнопка «＋» принадлежит вкладке задач: вне неё она бы висела поверх
   document.getElementById('task-add-btn').hidden = name !== 'tasks';
 
-  // Экран «Привычки» — вложенный в настройки, там же подсвечивается и вкладка
-  const tabView = name === 'edit-habits' ? 'settings' : name;
+  // Вложенные экраны подсвечивают вкладку, из которой открыты: «Привычки» и
+  // настройки молитв — «Настройки», «Молитвы» — «Каза»
+  const tabView = name === 'edit-habits' || name === 'prayer-settings' ? 'settings'
+    : name === 'prayer' ? 'qaza'
+      : name;
   document.querySelectorAll('#tab-bar .tab-item').forEach(function (item) {
     item.classList.toggle('is-active', item.getAttribute('data-view') === tabView);
   });
 
-  // Классы на body гасят шапку действий в каза и настройках
-  const isSettings = name === 'settings' || name === 'edit-habits';
+  // Классы на body гасят шапку действий в каза, молитвах и настройках
+  const isSettings = name === 'settings' || name === 'edit-habits' ||
+    name === 'prayer-settings';
   document.body.classList.toggle('view-qaza', name === 'qaza');
+  document.body.classList.toggle('view-prayer', name === 'prayer');
   document.body.classList.toggle('view-settings', isSettings);
 
   if (name === 'qaza') {
@@ -5354,6 +5999,16 @@ function switchAppView(name) {
     renderTasksView();
   }
 
+  if (name === 'prayer') {
+    // Список открывается свёрнутым: «Показать все» — разовый взгляд
+    prayerShowAll = false;
+    renderPrayerView();
+  }
+
+  if (name === 'prayer-settings') {
+    renderPrayerSettings();
+  }
+
   window.scrollTo(0, 0);
 }
 
@@ -5361,6 +6016,353 @@ function switchAppView(name) {
 function renderSettingsView() {
   const version = document.getElementById('settings-version');
   if (version) version.textContent = 'Версия: ' + APP_VERSION + ' · сборка ' + APP_BUILD;
+}
+
+/* ---------- Экран «Молитвы» ---------------------------------------------- */
+
+// Раскрыт ли полный список. Живёт только в интерфейсе и сбрасывается при
+// входе на вкладку: «Показать все» — разовый взгляд, а не настройка.
+let prayerShowAll = false;
+// Сутки, на которые нарисован экран. Смена значения — сигнал пересобрать
+// день целиком, а не только счётчик.
+let prayerRenderedDay = null;
+let prayerTimer = null;
+
+// Намаз, окно которого идёт сейчас. Восход окна не имеет — он не намаз,
+// а граница утреннего.
+function prayerCurrent(times, nowMin) {
+  for (let i = 0; i < PRAYER_WINDOWS.length; i++) {
+    const from = times[PRAYER_WINDOWS[i][0]];
+    const endKey = PRAYER_WINDOWS[i][1];
+    const to = endKey ? times[endKey] : 1440;
+    if (from === null || from === undefined) continue;
+    if (to === null || to === undefined) continue;
+    if (nowMin >= from && nowMin < to) return PRAYER_WINDOWS[i][0];
+  }
+  return null;
+}
+
+// Ближайшее событие: сперва сегодняшние, потом завтрашний Фаджр. Минуты
+// завтрашних идут со сдвигом на сутки — так разница до них берётся вычитанием,
+// а не отдельной веткой.
+function prayerNext(times, tomorrow, nowMin) {
+  for (let i = 0; i < PRAYER_ORDER.length; i++) {
+    const min = times[PRAYER_ORDER[i]];
+    if (min === null || min === undefined) continue;
+    if (min > nowMin) return { key: PRAYER_ORDER[i], min: min, tomorrow: false };
+  }
+
+  const fajr = tomorrow ? tomorrow.fajr : null;
+  if (fajr === null || fajr === undefined) return null;
+  return { key: 'fajr', min: fajr + 1440, tomorrow: true };
+}
+
+// Событие после следующего — вторая строка свёрнутого списка
+function prayerAfter(times, tomorrow, next) {
+  if (!next) return null;
+
+  if (next.tomorrow) {
+    const sunrise = tomorrow ? tomorrow.sunrise : null;
+    if (sunrise === null || sunrise === undefined) return null;
+    return { key: 'sunrise', min: sunrise + 1440, tomorrow: true };
+  }
+
+  const key = PRAYER_ORDER[PRAYER_ORDER.indexOf(next.key) + 1];
+  if (!key || times[key] === null || times[key] === undefined) return null;
+  return { key: key, min: times[key], tomorrow: false };
+}
+
+// Всё, что нужно экрану: времена сегодня и завтра, текущий намаз, следующий
+// и строки свёрнутого списка. Завтрашние времена нужны не для красоты:
+// после Иши следующее событие наступает уже завтра, и круг обязан его показать.
+function prayerViewState() {
+  const saved = loadPrayer();
+  if (!saved) return null;
+
+  const now = new Date();
+  const times = prayerTimes(prayerDateISO(now), saved.lat, saved.lng, saved.madhhab);
+  if (!times) return null;
+
+  const tomorrow = prayerTimes(
+    prayerDateISO(new Date(now.getTime() + 86400000)),
+    saved.lat, saved.lng, saved.madhhab) || {};
+
+  const nowMin = prayerMinutes(now);
+  const current = prayerCurrent(times, nowMin);
+  const next = prayerNext(times, tomorrow, nowMin);
+  const after = prayerAfter(times, tomorrow, next);
+
+  // Идёт окно намаза — показываем текущий и следующий; окна нет (например,
+  // между Восходом и Зухром) — следующий и после следующего.
+  const shown = [];
+  if (current) {
+    shown.push({ key: current, min: times[current], tomorrow: false });
+    if (next) shown.push(next);
+  } else {
+    if (next) shown.push(next);
+    if (after) shown.push(after);
+  }
+
+  return { times: times, now: nowMin, current: current, next: next, shown: shown };
+}
+
+// Минуты → «ЧЧ:ММ». Завтрашние минуты приходят со сдвигом на сутки.
+function prayerClock(minutes) {
+  if (minutes === null || minutes === undefined || !isFinite(minutes)) return '--:--';
+  const total = Math.round(minutes) % 1440;
+  return pad2(Math.floor(total / 60)) + ':' + pad2(total % 60);
+}
+
+// Счётчик до начала намаза
+function prayerCountdown(minutes) {
+  const total = Math.max(0, Math.round(minutes));
+  const hours = Math.floor(total / 60);
+  const mins = total % 60;
+  if (hours && mins) return 'через ' + hours + ' ч ' + mins + ' мин';
+  if (hours) return 'через ' + hours + ' ч';
+  return 'через ' + mins + ' мин';
+}
+
+// Строки списка: свёрнуто — две, развёрнуто — все шесть по порядку
+function prayerRows(view) {
+  if (!prayerShowAll) return view.shown;
+
+  const rows = [];
+  PRAYER_ORDER.forEach(function (key) {
+    const min = view.times[key];
+    if (min === null || min === undefined) return;
+    rows.push({ key: key, min: min, tomorrow: false });
+  });
+  return rows;
+}
+
+function renderPrayerList(view) {
+  const list = document.getElementById('prayer-list');
+  if (!list) return;
+
+  list.innerHTML = prayerRows(view).map(function (entry) {
+    const classes = ['prayer-row'];
+    if (entry.key === 'sunrise') classes.push('is-sunrise');
+
+    const isCurrent = view.current === entry.key && !entry.tomorrow;
+    if (isCurrent) classes.push('is-current');
+
+    // Счётчик стоит у следующего намаза и только у него: у текущего он
+    // читался бы как «до конца намаза», а это неправда
+    const isNext = !!view.next && view.next.key === entry.key &&
+      view.next.tomorrow === entry.tomorrow && !isCurrent;
+    const countdown = isNext
+      ? '<span class="prayer-countdown">' +
+        escapeHtml(prayerCountdown(view.next.min - view.now)) + '</span>'
+      : '';
+
+    return '<div class="' + classes.join(' ') + '" data-prayer="' +
+      escapeHtml(entry.key) + '">' +
+      '<span class="prayer-row-name">' + escapeHtml(PRAYER_LABELS[entry.key]) + '</span>' +
+      '<span class="prayer-row-right">' + countdown +
+      '<span class="prayer-row-time">' + escapeHtml(prayerClock(entry.min)) +
+      '</span></span></div>';
+  }).join('');
+}
+
+// Кольцо показывает долю пути от прошлого события до следующего: по ней
+// видно, много ли осталось, не заводя второй шкалы.
+function renderPrayerRing(view) {
+  const ring = document.getElementById('prayer-ring-progress');
+  if (!ring) return;
+
+  const length = 2 * Math.PI * 88;
+  ring.setAttribute('stroke-dasharray', String(length));
+
+  if (!view.next) {
+    ring.setAttribute('stroke-dashoffset', String(length));
+    return;
+  }
+
+  let from = 0;
+  PRAYER_ORDER.forEach(function (key) {
+    const min = view.times[key];
+    if (min !== null && min !== undefined && min <= view.now) {
+      from = Math.max(from, min);
+    }
+  });
+
+  const span = view.next.min - from;
+  const done = span > 0 ? Math.min(1, Math.max(0, (view.now - from) / span)) : 0;
+  ring.setAttribute('stroke-dashoffset', String(length * (1 - done)));
+}
+
+function renderPrayerTimes() {
+  const view = prayerViewState();
+  if (!view) return;
+
+  const name = document.getElementById('prayer-next-name');
+  const time = document.getElementById('prayer-next-time');
+  if (name) name.textContent = view.next ? PRAYER_LABELS[view.next.key] : '';
+  if (time) time.textContent = view.next ? prayerClock(view.next.min) : '--:--';
+  setHidden('prayer-next-hint', !(view.next && view.next.tomorrow));
+
+  renderPrayerRing(view);
+  renderPrayerList(view);
+
+  const showAll = document.getElementById('prayer-show-all');
+  if (showAll) showAll.textContent = prayerShowAll ? 'Свернуть' : 'Показать все';
+}
+
+// Пока координат нет, вместо времён показывается приветственный экран
+function renderPrayerView() {
+  const saved = loadPrayer();
+  setHidden('prayer-welcome', !!saved);
+  setHidden('prayer-times', !saved);
+
+  prayerRenderedDay = prayerDateISO(new Date());
+  if (!saved) return;
+
+  renderPrayerTimes();
+}
+
+function renderPrayerSettings() {
+  const saved = loadPrayer();
+
+  const coords = document.getElementById('prayer-coords');
+  if (coords) {
+    coords.textContent = saved
+      ? 'Широта ' + saved.lat + ' · Долгота ' + saved.lng
+      : 'Координат нет — времена намазов не считаются.';
+  }
+
+  renderPrayerMadhhab(saved ? saved.madhhab : 'shafi');
+}
+
+function renderPrayerMadhhab(madhhab) {
+  const box = document.getElementById('prayer-madhhab');
+  if (!box) return;
+
+  box.innerHTML = PRAYER_MADHHABS.map(function (key) {
+    const active = key === madhhab;
+    return '<label class="prayer-madhhab-option' + (active ? ' is-active' : '') + '">' +
+      '<input type="radio" class="prayer-madhhab-radio" name="prayer-madhhab" value="' +
+      escapeHtml(key) + '"' + (active ? ' checked' : '') + '>' +
+      '<span>' + escapeHtml(PRAYER_MADHHAB_LABELS[key]) + '</span></label>';
+  }).join('');
+}
+
+// Подсветка выбранной пилюли без пересборки разметки: пересборка внутри
+// события change уносит элемент, по которому только что нажали
+function markPrayerMadhhab(madhhab) {
+  document.querySelectorAll('#prayer-madhhab .prayer-madhhab-option')
+    .forEach(function (option) {
+      const input = option.querySelector('input');
+      option.classList.toggle('is-active', !!input && input.value === madhhab);
+    });
+}
+
+// Раз в минуту: счётчик до следующего намаза и смена суток. В полночь
+// пересобирается весь день — времена-то у него свои.
+function prayerTick() {
+  if (prayerDateISO(new Date()) !== prayerRenderedDay) {
+    renderPrayerView();
+    return;
+  }
+  renderPrayerTimes();
+}
+
+// После смены координат или мазхаба перерисовываются оба экрана: они читают
+// один и тот же ключ
+function afterPrayerChange() {
+  renderPrayerView();
+  renderPrayerSettings();
+}
+
+// Разбор координаты. Запятая вместо точки — обычная опечатка мобильной
+// клавиатуры, поэтому принимается наравне с точкой.
+function prayerParseCoord(value, limit) {
+  const raw = value === null || value === undefined ? '' : String(value);
+  const text = raw.trim().replace(',', '.');
+  if (!text) return null;
+
+  const num = Number(text);
+  if (!isFinite(num) || num < -limit || num > limit) return null;
+  return prayerRound(num);
+}
+
+// Геолокация — единственный способ, который может отказать не по вине
+// пользователя, поэтому отказ объясняется словами, а не молчанием.
+// Экран без своей строки для пояснений (настройки) говорит тостом.
+function requestPrayerLocation(noteId, onDone) {
+  const note = noteId ? document.getElementById(noteId) : null;
+  const say = function (message) {
+    if (note) { note.textContent = message; return; }
+    if (message) showToast(message);
+  };
+
+  if (!navigator.geolocation) {
+    say('Геолокация недоступна. Введите координаты вручную.');
+    return;
+  }
+
+  say('Определяем местоположение…');
+  navigator.geolocation.getCurrentPosition(function (position) {
+    say('');
+    onDone(prayerRound(position.coords.latitude),
+      prayerRound(position.coords.longitude));
+  }, function () {
+    say('Не удалось определить местоположение. Введите координаты вручную.');
+  }, { timeout: 10000, maximumAge: 600000 });
+}
+
+// Сохраняет координаты, не трогая выбранный мазхаб
+function applyPrayerCoords(lat, lng) {
+  const saved = loadPrayer();
+  savePrayer({ lat: lat, lng: lng, madhhab: saved ? saved.madhhab : 'shafi' });
+  afterPrayerChange();
+}
+
+function onPrayerGeo() {
+  requestPrayerLocation('prayer-welcome-note', applyPrayerCoords);
+}
+
+function onPrayerRefresh() {
+  requestPrayerLocation(null, function (lat, lng) {
+    applyPrayerCoords(lat, lng);
+    showToast('Координаты обновлены');
+  });
+}
+
+function onPrayerManualSave() {
+  const latEl = document.getElementById('prayer-lat');
+  const lngEl = document.getElementById('prayer-lng');
+  const note = document.getElementById('prayer-welcome-note');
+
+  const lat = prayerParseCoord(latEl ? latEl.value : '', 90);
+  const lng = prayerParseCoord(lngEl ? lngEl.value : '', 180);
+
+  if (lat === null || lng === null) {
+    if (note) note.textContent = 'Широта — число от −90 до 90, долгота — от −180 до 180.';
+    return;
+  }
+
+  if (note) note.textContent = '';
+  applyPrayerCoords(lat, lng);
+}
+
+function onPrayerMadhhabChange(event) {
+  const value = event.target && event.target.value;
+  if (!PRAYER_SHADOW[value]) return;
+
+  const saved = loadPrayer();
+  if (!saved) return;
+  savePrayer({ lat: saved.lat, lng: saved.lng, madhhab: value });
+
+  // Настройки не пересобираются целиком — только подсветка: экран молитв
+  // мог быть открыт, и он перерисовывается под новый мазхаб
+  markPrayerMadhhab(value);
+  renderPrayerView();
+}
+
+function onPrayerShowAll() {
+  prayerShowAll = !prayerShowAll;
+  renderPrayerTimes();
 }
 
 function renderQazaView() {
