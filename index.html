@@ -2345,6 +2345,33 @@ body.view-settings #header-actions {
     font-size: 11px;
   }
 
+  /* Поле и кнопка попапа в одной колонке. Поле отдаёт кнопке ровно её
+     габарит, поэтому обе встают в одну строку и остаются центрированными
+     по вертикали. Без этого поле во всю ширину выдавливает кнопку на вторую
+     строку, и строка Корана становится вдвое выше соседних.
+     Ширина кнопки подобрана по тесному случаю (колонка 40px на экране 320px):
+     при 18px полю остаётся 16px, и двузначное число ещё видно целиком.
+     Боковые отступы поля срезаны до 1px по той же причине. */
+  #habits-table .cell-number.has-level-btn {
+    width: calc(100% - 20px);
+    height: 24px;
+    padding: 3px 1px;
+    vertical-align: middle;
+  }
+
+  #habits-table .cell-level-btn {
+    width: 18px;
+    height: 24px;
+    min-height: 0;
+    margin-left: 2px;
+    vertical-align: middle;
+  }
+
+  #habits-table .cell-level-btn svg {
+    width: 10px;
+    height: 10px;
+  }
+
   .cell-check {
     width: 16px;
     height: 16px;
@@ -4683,10 +4710,14 @@ function cellMarkup(habit, date) {
     inner = qazaCellMarkup(date);
   } else if (habit.type === 'number') {
     const text = typeof value === 'number' ? String(value) : '';
+    // Класс нужен только мобильному медиа-запросу: там поле делит ширину
+    // колонки с кнопкой попапа, иначе кнопка уезжает на вторую строку
+    const withButton = hasLevelPopup(habit.id);
     inner = '<input type="number" class="cell-number' +
-      levelClass(entry ? entry.level : null) + '" min="0" step="1"' + dataAttrs +
+      levelClass(entry ? entry.level : null) + (withButton ? ' has-level-btn' : '') +
+      '" min="0" step="1"' + dataAttrs +
       ' value="' + escapeHtml(text) + '" aria-label="Значение">';
-    if (hasLevelPopup(habit.id)) inner += levelButtonMarkup(habit, date);
+    if (withButton) inner += levelButtonMarkup(habit, date);
   } else {
     const current = typeof value === 'string' ? value : '';
     inner = '<select class="cell-select' +
