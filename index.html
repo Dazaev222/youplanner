@@ -26,6 +26,7 @@
   --accent-soft: #e6f0fb;
   --success: #1f9d63;
   --danger: #c93a3a;        /* контраст к белому тексту ≈ 5.1:1 */
+  --two-min: #38bdf8;       /* уровень «2 минуты»: голубая граница поля */
   --on-accent: #ffffff;     /* цвет текста на фоне --accent */
   --on-danger: #ffffff;     /* цвет текста на фоне --danger */
   --shadow: 0 8px 24px rgba(20, 20, 40, .12);
@@ -347,8 +348,14 @@ body {
 @media (hover: hover) {
   .cell:hover .cell-number,
   .cell:hover .cell-select {
-    border-color: var(--accent);
     transform: translateY(-1px);
+  }
+
+  /* Акцентную рамку при наведении получает только поле без уровня: цвет
+     уровня важнее подсказки, и перебивать его нельзя (§1.4) */
+  .cell:hover .cell-number:not(.is-on-time):not(.is-late):not(.is-two-min),
+  .cell:hover .cell-select:not(.is-on-time):not(.is-late):not(.is-two-min) {
+    border-color: var(--accent);
   }
 
   .cell:hover .cell-check {
@@ -364,6 +371,70 @@ body {
 .cell-select:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+/* --- Уровень выполнения -------------------------------------------------
+   Цвет уровня несёт только граница поля отметки: фон и содержимое не
+   трогаются (§1.4). Время не задано и уровень не «2 минуты» — остаётся
+   обычная рамка --border. */
+.cell-number.is-on-time,
+.cell-select.is-on-time {
+  border-color: var(--success);
+}
+
+.cell-number.is-late,
+.cell-select.is-late {
+  border-color: var(--danger);
+}
+
+.cell-number.is-two-min,
+.cell-select.is-two-min {
+  border-color: var(--two-min);
+}
+
+/* Кнопка вызова попапа — маленькая, рядом с полем отметки (§1.2).
+   Точка в углу показывает, что уровень у записи уже выставлен. */
+.cell-level-btn {
+  position: relative;
+  width: 26px;
+  min-height: 26px;
+  margin-left: 3px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background-color: var(--surface-alt);
+  color: var(--text-muted);
+  line-height: 1;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.cell-level-btn svg {
+  display: block;
+  margin: 0 auto;
+}
+
+.cell-level-btn:active {
+  background-color: var(--accent-soft);
+}
+
+/* Уровень выставлен — кнопка помечена, чтобы это было видно и без цвета поля */
+.cell-level-btn.is-set::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background-color: var(--accent);
+}
+
+@media (hover: hover) {
+  .cell-level-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
 }
 
 /* --- Круг прогресса --- */
@@ -530,6 +601,11 @@ body {
 
 #habit-list input[type="number"] {
   width: 90px;
+}
+
+/* Поле времени — шире прочих: колесо Safari не влезает в 90px */
+#habit-list input[type="time"] {
+  width: 116px;
 }
 
 /* Имя привычки в строке списка занимает свободное место */
@@ -870,6 +946,7 @@ body {
   .cell:hover .cell-select,
   .cell:hover .cell-check,
   .cell:hover .cell-x,
+  .cell-level-btn:hover,
   .qaza-row:hover,
   .qaza-plan-item:hover,
   .qaza-start-option:hover,
@@ -1511,6 +1588,59 @@ body {
   margin-top: 8px;
 }
 
+/* --- Попап уровня выполнения (§1.3) --------------------------------------
+   Одна шторка на обе привычки: пункты те же, что у меню действий формы
+   (§11l), — строки во всю ширину панели. */
+#level-sheet {
+  z-index: 120;
+}
+
+.level-option {
+  display: block;
+  width: 100%;
+  min-height: 48px;
+  padding: 12px 16px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 17px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.level-option:active {
+  background: var(--surface-alt);
+}
+
+/* Выбранный уровень — фоном: попап показывает, что уже стоит */
+.level-option.is-active {
+  background: var(--accent-soft);
+}
+
+/* «Полная версия» без числа — не готова: выполнять нечего (§2.3).
+   «2 минуты» доступны всегда, в том числе когда время не задано (§1.7). */
+.level-option:disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.level-option:disabled:active {
+  background: transparent;
+}
+
+.level-option + .level-option {
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+}
+
+#level-sheet .btn {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 8px;
+}
+
 /* --- Вкладка «Молитвы» ---------------------------------------------------- */
 /* Единственная карточка приложения с фоном-градиентом: голубое небо сверху,
    светлое снизу. Кольцо и акценты — те же --accent, что и везде, поэтому
@@ -2118,6 +2248,9 @@ body.view-settings #header-actions {
   .day-card .cell-x { width: 30px; height: 30px; font-size: 14px; }
   .day-card .cell-number { width: 72px; min-height: 40px; padding: 8px 10px; font-size: 15px; }
   .day-card .cell-select { width: 120px; min-height: 40px; padding: 8px 10px; font-size: 15px; }
+  /* Кнопка уровня в карточке — по росту соседнего поля; отступ даёт
+     gap самого .day-card-controls, внешний ему не нужен */
+  .day-card .cell-level-btn { width: 40px; min-height: 40px; margin-left: 0; }
   .day-card .cell-qaza { font-size: 17px; font-weight: 600; }
 
   /* Шапка в столбик: логотип, подпись недели, действия */
@@ -2908,6 +3041,21 @@ body.view-settings #header-actions {
   </div>
 </div>
 
+<!-- Попап уровня выполнения привычки. Открывается маленькой кнопкой рядом
+     с полем отметки у Корана и Спорта (§1.3); на телефоне — панель снизу,
+     на ПК — окошко по центру, как у остальных шторок -->
+<div id="level-sheet" class="sheet" hidden>
+  <div class="sheet-backdrop" data-level-sheet-close></div>
+  <div class="sheet-panel" role="dialog" aria-modal="true">
+    <div class="sheet-head">
+      <h2 id="level-sheet-title">Как выполнено?</h2>
+    </div>
+    <button type="button" id="level-option-full" class="level-option" data-level="full">Полная версия</button>
+    <button type="button" id="level-option-two-min" class="level-option" data-level="two-min">2 минуты</button>
+    <button type="button" class="btn btn-secondary" data-level-sheet-close>Отмена</button>
+  </div>
+</div>
+
 <!-- Третье меню: действия формы задачи. Открывается кнопкой «⋯» -->
 <div id="task-actions-sheet" class="sheet" hidden>
   <div class="sheet-backdrop" data-task-actions-close></div>
@@ -3006,8 +3154,10 @@ const DEFAULT_HABITS = [
   { id: 'h4', name: 'Магриб', type: 'boolean', unit: '', goal: null },
   { id: 'h5', name: 'Иша', type: 'boolean', unit: '', goal: null },
   { id: 'h6', name: 'Каза', type: 'number', unit: 'раз', goal: 3 },
-  { id: 'h7', name: 'Спорт', type: 'choice', unit: '', goal: null },
-  { id: 'h8', name: 'Коран', type: 'number', unit: 'стр.', goal: 5 },
+  // time — необязательное время привычки: у Корана и Спорта оно задаёт
+  // окно «вовремя» и цвет границы поля отметки (§1.1, §1.6)
+  { id: 'h7', name: 'Спорт', type: 'choice', unit: '', goal: null, time: null },
+  { id: 'h8', name: 'Коран', type: 'number', unit: 'стр.', goal: 5, time: null },
   { id: 'h9', name: 'Работа с текстами', type: 'number', unit: 'мин', goal: 10 },
   { id: 'h10', name: 'Чтение книги', type: 'number', unit: 'стр.', goal: 2 },
   { id: 'h11', name: 'Таблицы', type: 'boolean', unit: '', goal: null },
@@ -3026,7 +3176,9 @@ function loadHabits() {
     return parsed;
   } catch (e) {
     const defaults = DEFAULT_HABITS.map(function (h) {
-      return { id: h.id, name: h.name, type: h.type, unit: h.unit, goal: h.goal };
+      const copy = { id: h.id, name: h.name, type: h.type, unit: h.unit, goal: h.goal };
+      if (h.time !== undefined) copy.time = h.time;
+      return copy;
     });
     saveNormalized(function () { saveHabits(defaults); });
     return defaults;
@@ -3147,6 +3299,155 @@ function setRecord(date, habitId, value) {
   scheduleSync();
 }
 
+/* ---------- Уровни выполнения: Коран и Спорт ---------------------------- */
+
+// Привычки с уровнями: у них запись — объект { value, level }, а у привычки
+// есть необязательное время time (§1.1). Id из спеки трекера, как у каза.
+const SPORT_HABIT_ID = 'h7';
+const QURAN_HABIT_ID = 'h8';
+
+// Уровни выполнения записи
+const LEVEL_ON_TIME = 'on-time';
+const LEVEL_LATE = 'late';
+const LEVEL_TWO_MIN = 'two-min';
+
+// Окно «вовремя» — ±60 минут от назначенного времени (§1.6)
+const LEVEL_WINDOW_MIN = 60;
+
+// Варианты привычки «Спорт»: «да», «нет», «2 минуты», «отдых» (§3.1).
+// «Отдых» — запланированный пропуск: уровня у него нет, серию он не рвёт
+// и в прогресс не входит.
+const SPORT_VALUES = ['yes', 'no', 'two-min', 'rest'];
+const SPORT_VALUE_LABELS = {
+  'yes': 'да',
+  'no': 'нет',
+  'two-min': '2 минуты',
+  'rest': 'отдых',
+};
+
+// Коды прежней схемы. «Частично» убрано из списка, но в записях его
+// достаточно, и оно читается как «2 минуты» (§3.2).
+const SPORT_LEGACY_VALUES = {
+  'да': 'yes',
+  'нет': 'no',
+  'частично': 'two-min',
+  'отдых': 'rest',
+};
+
+// Есть ли у привычки уровни
+function isLevelHabit(habitId) {
+  return habitId === SPORT_HABIT_ID || habitId === QURAN_HABIT_ID;
+}
+
+// У кого есть попап уровня. Только у Корана: у Спорта «2 минуты» уже стоят
+// пунктом в самом списке, и второй способ задать тот же уровень не нужен (§11r).
+function hasLevelPopup(habitId) {
+  return habitId === QURAN_HABIT_ID;
+}
+
+// Приводит запись к виду { value, level }. Старые записи — скаляр (число
+// страниц или строка варианта) — читаются как { value: оно, level: null };
+// перезапись в localStorage при чтении не делается. null — записи нет.
+function normalizeEntry(habitId, raw) {
+  if (raw === undefined || raw === null || raw === '') return null;
+
+  if (typeof raw === 'object' && !Array.isArray(raw)) {
+    return {
+      value: raw.value === undefined ? null : raw.value,
+      level: raw.level || null,
+    };
+  }
+
+  if (habitId === SPORT_HABIT_ID) {
+    // Старое «частично» — это и есть «2 минуты», и уровень у него голубой
+    const value = SPORT_LEGACY_VALUES[raw] || raw;
+    return { value: value, level: value === LEVEL_TWO_MIN ? LEVEL_TWO_MIN : null };
+  }
+
+  return { value: raw, level: null };
+}
+
+// Запись в виде { value, level } или null. У привычек без уровней запись
+// остаётся скаляром и просто оборачивается.
+function getEntry(date, habitId) {
+  const raw = getRecord(date, habitId);
+  if (raw === undefined) return null;
+  if (!isLevelHabit(habitId)) return { value: raw, level: null };
+  return normalizeEntry(habitId, raw);
+}
+
+// Значение записи без уровня — то, что показывает поле отметки
+function recordValue(date, habitId) {
+  const entry = getEntry(date, habitId);
+  return entry ? entry.value : undefined;
+}
+
+// 'HH:MM' → минуты от полуночи; null, если строка не время
+function habitTimeMinutes(time) {
+  if (typeof time !== 'string') return null;
+  const match = /^(\d{1,2}):(\d{2})$/.exec(time);
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (hours > 23 || minutes > 59) return null;
+  return hours * 60 + minutes;
+}
+
+// Уровень по времени отметки: 'on-time' — в окне ±60 минут от назначенного,
+// 'late' — вне окна, null — время у привычки не задано (§1.6). При null
+// граница поля не красится вовсе.
+function habitLevelByTime(habit, now) {
+  if (!habit || habit.time === null || habit.time === undefined) return null;
+  const plan = habitTimeMinutes(habit.time);
+  if (plan === null) return null;
+
+  const minutes = now.getHours() * 60 + now.getMinutes();
+  return Math.abs(minutes - plan) <= LEVEL_WINDOW_MIN ? LEVEL_ON_TIME : LEVEL_LATE;
+}
+
+// День, к которому относится отметка (§4). time = '23:30', отметка в 00:15 —
+// это ещё вчера: окно вокруг назначенного момента переходит через полночь.
+// Правило смотрит только на сегодняшнюю колонку: день, выбранный руками,
+// человек выбрал осознанно.
+function habitMarkDate(habit, date, now) {
+  if (!habit || !isLevelHabit(habit.id)) return date;
+  if (date !== toISODate(now)) return date;
+
+  const plan = habitTimeMinutes(habit.time);
+  if (plan === null) return date;
+
+  // Сколько минут от назначенного момента до полуночи плюс сколько прошло
+  // после неё — расстояние по часовой стрелке через границу суток
+  const beforeMidnight = 24 * 60 - plan;
+  const afterMidnight = now.getHours() * 60 + now.getMinutes();
+  if (beforeMidnight + afterMidnight > LEVEL_WINDOW_MIN) return date;
+
+  return toISODate(addDays(now, -1));
+}
+
+// Уровень обычного выполнения: «2 минуты» — само себе уровень (§3.4),
+// у Спорта выполнением считается только ответ «да» — «нет» и «отдых»
+// уровнем не отмечаются, а у Корана и «да» он выводится из времени
+// отметки и бывает пустым, когда время у привычки не задано (§1.6).
+function defaultLevel(habit, value) {
+  if (value === LEVEL_TWO_MIN) return LEVEL_TWO_MIN;
+  if (habit.id === SPORT_HABIT_ID && value !== 'yes') return null;
+  return habitLevelByTime(habit, new Date());
+}
+
+// Запись отметки вместе с уровнем. value: undefined — запись удаляется,
+// вместе с ней уходит и уровень. Объектную запись получают только привычки
+// с уровнями: у остальных значение остаётся скаляром, как было, — иначе
+// чужая схема разошлась бы с уже сохранёнными записями.
+function writeHabitEntry(habit, date, value, level) {
+  if (!habit) return;
+  if (value === undefined || !isLevelHabit(habit.id)) {
+    setRecord(date, habit.id, value);
+    return;
+  }
+  setRecord(date, habit.id, { value: value, level: level });
+}
+
 // Есть ли хотя бы одна запись у привычки
 function hasRecords(habitId) {
   const records = loadRecords();
@@ -3213,13 +3514,16 @@ function removeHabit(id) {
 function calcProgress(habit, dates) {
   if (!dates || dates.length === 0) return 0;
 
-  // Веса вариантов ответа для типа "choice"
-  const weights = { 'да': 1, 'частично': 0.5, 'нет': 0, 'отдых': 0 };
+  // Веса вариантов ответа для типа "choice". «Отдых» — запланированный
+  // пропуск: он вес не набирает, но и серию не рвёт.
+  const weights = { 'yes': 1, 'two-min': 0.5, 'no': 0, 'rest': 0 };
   const base = dates.length;
   let sum = 0;
 
   for (let i = 0; i < dates.length; i++) {
-    const value = getRecord(dates[i], habit.id);
+    // У Корана в прогресс идут введённые страницы, а не число отметок:
+    // пустое поле даёт 0, две страницы — 2 (§2.6).
+    const value = recordValue(dates[i], habit.id);
     if (value === undefined) continue;
 
     if (habit.type === 'boolean') {
@@ -3422,7 +3726,9 @@ function qazaTotalRemaining(qaza) {
 // История обрезается до сегодняшнего дня: стек нужен только для отмены,
 // поэтому он не растёт бесконечно.
 function loadQaza() {
-  const today = toISODate(new Date());
+  // День каза: до Фаджра это ещё вчера, поэтому и журнал хранит вчерашние
+  // записи — иначе выполнение, сделанное ночью, нечем было бы отменить (§7)
+  const today = kazaDayFor(new Date());
   try {
     const raw = localStorage.getItem(QAZA_STORAGE_KEY);
     if (!raw) throw new Error('нет данных');
@@ -3670,7 +3976,7 @@ function loadPrayer() {
       lat: lat,
       lng: lng,
       madhhab: PRAYER_SHADOW[parsed.madhhab] ? parsed.madhhab : 'shafi',
-      // Ключ без поля — состояние до §11r: читается как метод ДУМ ЧР
+      // Ключ без поля — состояние до §11q: читается как метод ДУМ ЧР
       method: PRAYER_METHODS.indexOf(parsed.method) >= 0 ? parsed.method : PRAYER_METHOD_DEFAULT,
     };
   } catch (e) {
@@ -3933,8 +4239,9 @@ function showSyncStatus(message) {
 /* ---------- Экспорт и импорт данных -------------------------------------- */
 
 // Версия формата резервной копии. Растёт, если меняется состав полей файла:
-// версия 2 добавила раздел tasks, версия 3 — раздел prayer.
-const BACKUP_VERSION = 3;
+// версия 2 добавила раздел tasks, версия 3 — раздел prayer, версия 4 —
+// время у привычки и уровень у записи (§8). Старые файлы читаются как раньше.
+const BACKUP_VERSION = 4;
 
 // Что попадает в файл. Метка синхронизации и режим главного экрана — состояние
 // устройства, а не данные, поэтому в копию не входят. Координат может не быть;
@@ -4055,6 +4362,38 @@ function qazaDoneCount(qaza, date) {
 // Выполнение текущего намаза: остаток уменьшается, курсор сдвигается дальше.
 // Счётчик каза за сегодня пишется в youplanner.records как привычка h6 —
 // это единственное место, откуда его читают прогресс-круги таблицы.
+// Начало дня каза в минутах от полуночи (§5): намаз, сделанный до Фаджра,
+// относится к предыдущему дню. Фаджр берётся из prayerTimes() по текущим
+// координатам; координат нет или расчёт не удался — 05:00 UTC+3.
+function kazaDayBoundary(now) {
+  const FALLBACK = 5 * 60;
+
+  const prayer = loadPrayer();
+  if (!prayer) return FALLBACK;
+
+  try {
+    const times = prayerTimes(prayerDateISO(now), prayer.lat, prayer.lng,
+      prayer.madhhab, prayer.method);
+    // Number.isFinite, а не isFinite: за полярным кругом Фаджр приходит
+    // как null, а isFinite(null) истинно и дал бы границу 00:00
+    if (!times || !Number.isFinite(times.fajr)) return FALLBACK;
+    return times.fajr;
+  } catch (e) {
+    return FALLBACK;
+  }
+}
+
+// День, к которому относится выполнение каза прямо сейчас. До Фаджра это
+// вчерашний день: ночью человек завершает вчерашний намаз, а не сегодняшний.
+// Часы сверяются по UTC+3 — тому же поясу, в котором считает prayerTimes(),
+// а ключ дня берётся общим toISODate, как у остальных записей.
+function kazaDayFor(now) {
+  const minutes = prayerMinutes(now);
+  return minutes >= kazaDayBoundary(now)
+    ? toISODate(now)
+    : toISODate(addDays(now, -1));
+}
+
 function markQazaDone(qaza, today) {
   const key = NAMAZ_ORDER[qaza.cursor];
   if (!key || qaza.remaining[key] <= 0) return qaza;
@@ -4168,7 +4507,9 @@ const MONTHS_GENITIVE = ['января', 'февраля', 'марта', 'апр
 const MONTHS_SHORT = ['янв', 'фев', 'мар', 'апр', 'май', 'июн',
   'июл', 'авг', 'сент', 'окт', 'ноя', 'дек'];
 
-// Варианты значения для привычек типа choice (пустая опция = «нет записи»)
+// Варианты значения для привычек типа choice (пустая опция = «нет записи»).
+// Коды привычек с уровнями лежат в SPORT_VALUES рядом с уровнями: у Спорта
+// список свой, и «частично» в нём больше нет (§3.1).
 const CHOICE_OPTIONS = ['да', 'нет', 'частично', 'отдых'];
 
 // Доступные типы привычек для формы
@@ -4181,7 +4522,7 @@ const HABIT_TYPES = [
 // Версия приложения для строки в Настройках. Номер живёт здесь, а не в разметке:
 // обновлять его придётся в одном месте.
 const APP_VERSION = '1.0';
-const APP_BUILD = '2026-09-28';
+const APP_BUILD = '2026-10-01';
 
 /* --- Вспомогательные функции (не пересекаются с именами data.js) --------- */
 
@@ -4283,20 +4624,47 @@ function habitTypeLabel(type) {
   return '';
 }
 
-// Опции выпадающего списка значений ячейки choice
-function choiceOptionsMarkup(current) {
+// Опции выпадающего списка значений ячейки choice. У Спорта свой список
+// кодов и свои подписи (§3.1), у прочих привычек типа choice — общий.
+function choiceOptionsMarkup(current, habitId) {
+  const isSport = habitId === SPORT_HABIT_ID;
+  const codes = isSport ? SPORT_VALUES : CHOICE_OPTIONS;
+
   let html = '<option value=""' + (current === '' ? ' selected' : '') + '>—</option>';
-  for (let i = 0; i < CHOICE_OPTIONS.length; i++) {
-    const option = CHOICE_OPTIONS[i];
-    html += '<option value="' + option + '"' +
-      (option === current ? ' selected' : '') + '>' + option + '</option>';
+  for (let i = 0; i < codes.length; i++) {
+    const option = codes[i];
+    const label = isSport ? SPORT_VALUE_LABELS[option] : option;
+    html += '<option value="' + escapeHtml(option) + '"' +
+      (option === current ? ' selected' : '') + '>' + escapeHtml(label) + '</option>';
   }
   return html;
 }
 
+// Класс границы поля отметки по уровню записи (§1.5). Уровня нет — класс
+// не ставится, и поле остаётся с обычной рамкой --border.
+function levelClass(level) {
+  if (level === LEVEL_ON_TIME) return ' is-on-time';
+  if (level === LEVEL_LATE) return ' is-late';
+  if (level === LEVEL_TWO_MIN) return ' is-two-min';
+  return '';
+}
+
+// Маленькая кнопка вызова попапа уровня — только у Корана (§1.2)
+function levelButtonMarkup(habit, date) {
+  const entry = getEntry(date, habit.id);
+  const isSet = entry && entry.level ? ' is-set' : '';
+  return '<button type="button" class="cell-level-btn' + isSet + '"' +
+    ' data-habit-id="' + escapeHtml(habit.id) + '"' +
+    ' data-date="' + escapeHtml(date) + '" aria-label="Как выполнено">' +
+    '<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor"' +
+    ' stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">' +
+    '<path d="M6 9l6 6 6-6"></path></svg></button>';
+}
+
 // Разметка одной ячейки дня: <td class="cell" data-habit-id data-date>…</td>
 function cellMarkup(habit, date) {
-  const value = getRecord(date, habit.id);
+  const entry = getEntry(date, habit.id);
+  const value = entry ? entry.value : undefined;
   const dataAttrs = ' data-habit-id="' + escapeHtml(habit.id) + '"' +
     ' data-date="' + escapeHtml(date) + '"';
   let inner = '';
@@ -4315,12 +4683,15 @@ function cellMarkup(habit, date) {
     inner = qazaCellMarkup(date);
   } else if (habit.type === 'number') {
     const text = typeof value === 'number' ? String(value) : '';
-    inner = '<input type="number" class="cell-number" min="0" step="1"' + dataAttrs +
+    inner = '<input type="number" class="cell-number' +
+      levelClass(entry ? entry.level : null) + '" min="0" step="1"' + dataAttrs +
       ' value="' + escapeHtml(text) + '" aria-label="Значение">';
+    if (hasLevelPopup(habit.id)) inner += levelButtonMarkup(habit, date);
   } else {
     const current = typeof value === 'string' ? value : '';
-    inner = '<select class="cell-select"' + dataAttrs + ' aria-label="Значение">' +
-      choiceOptionsMarkup(current) + '</select>';
+    inner = '<select class="cell-select' +
+      levelClass(entry ? entry.level : null) + '"' + dataAttrs + ' aria-label="Значение">' +
+      choiceOptionsMarkup(current, habit.id) + '</select>';
   }
 
   return '<td class="cell"' + dataAttrs + '>' + inner + '</td>';
@@ -4717,6 +5088,17 @@ function bindEvents() {
     priorityClosers[i].addEventListener('click', closePrioritySheet);
   }
 
+  const levelOptions = document.querySelectorAll('#level-sheet .level-option');
+  for (let i = 0; i < levelOptions.length; i++) {
+    levelOptions[i].addEventListener('click', onLevelPick);
+  }
+
+  // Подложка и «Отмена» попапа уровня
+  const levelClosers = document.querySelectorAll('[data-level-sheet-close]');
+  for (let i = 0; i < levelClosers.length; i++) {
+    levelClosers[i].addEventListener('click', closeLevelSheet);
+  }
+
   const taskSheetText = document.getElementById('task-sheet-text');
   if (taskSheetText) {
     taskSheetText.addEventListener('keydown', function (event) {
@@ -4984,19 +5366,23 @@ function renderDayCards() {
       // Каза ведётся во вкладке, карточка только показывает счётчик дня
       inner = '<div class="day-card-controls">' + qazaCellMarkup(today) + '</div>';
     } else if (habit.type === 'number') {
-      const value = getRecord(today, habit.id);
+      const entry = getEntry(today, habit.id);
+      const value = entry ? entry.value : undefined;
       const text = typeof value === 'number' ? String(value) : '';
       inner = '<div class="day-card-controls">' +
-        '<input type="number" class="cell-number" min="0" step="1" data-habit-id="' +
+        '<input type="number" class="cell-number' +
+        levelClass(entry ? entry.level : null) + '" min="0" step="1" data-habit-id="' +
         escapeHtml(habit.id) + '" data-date="' + today + '" value="' + escapeHtml(text) +
-        '" aria-label="Значение"></div>';
+        '" aria-label="Значение">' +
+        (hasLevelPopup(habit.id) ? levelButtonMarkup(habit, today) : '') + '</div>';
     } else {
-      const value = getRecord(today, habit.id);
-      const current = typeof value === 'string' ? value : '';
+      const entry = getEntry(today, habit.id);
+      const current = entry && typeof entry.value === 'string' ? entry.value : '';
       inner = '<div class="day-card-controls">' +
-        '<select class="cell-select" data-habit-id="' + escapeHtml(habit.id) +
+        '<select class="cell-select' + levelClass(entry ? entry.level : null) +
+        '" data-habit-id="' + escapeHtml(habit.id) +
         '" data-date="' + today + '" aria-label="Значение">' +
-        choiceOptionsMarkup(current) + '</select></div>';
+        choiceOptionsMarkup(current, habit.id) + '</select></div>';
     }
 
     html += '<div class="day-card">' +
@@ -5103,7 +5489,14 @@ function onTableChange(event) {
   const habit = findHabit(habitId);
   if (!habit || !date) return;
 
-  const current = getRecord(date, habitId);
+  const entry = getEntry(date, habitId);
+  const current = entry ? entry.value : undefined;
+  // Уровень «2 минуты» выбран человеком и правку значения переживает (§2.4) —
+  // но только у Корана: там значение и уровень независимы. У Спорта уровень
+  // выводится из самого ответа, и «отдых» после «2 минут» не должен остаться
+  // голубым, поэтому там он всегда пересчитывается.
+  const kept = habitId === QURAN_HABIT_ID && entry && entry.level === LEVEL_TWO_MIN
+    ? LEVEL_TWO_MIN : undefined;
 
   // boolean: галочка = true, снятая галочка = удаление записи
   if (target.classList.contains('cell-check')) {
@@ -5121,7 +5514,8 @@ function onTableChange(event) {
   if (target.classList.contains('cell-select')) {
     const value = target.value === '' ? undefined : target.value;
     if (sameValue(current, value)) return;
-    onCellChange(habit, date, value);
+    onCellChange(habit, date, value, kept === undefined ? defaultLevel(habit, value) : kept);
+    syncLevelCell(cell, habitId, date);
     return;
   }
 
@@ -5135,13 +5529,44 @@ function onTableChange(event) {
       value = (isFinite(parsed) && parsed >= 0) ? parsed : undefined;
     }
     if (sameValue(current, value)) return;
-    onCellChange(habit, date, value);
+    onCellChange(habit, date, value, kept === undefined ? defaultLevel(habit, value) : kept);
+    syncLevelCell(cell, habitId, date);
   }
+}
+
+// Вид полей ячейки после отметки: класс границы по уровню и метка на кнопке
+function syncLevelCell(cell, habitId, date) {
+  if (!cell || !isLevelHabit(habitId)) return;
+
+  const entry = getEntry(date, habitId);
+  const level = entry ? entry.level : null;
+
+  const field = cell.querySelector('.cell-number') || cell.querySelector('.cell-select');
+  if (field) {
+    field.classList.remove('is-on-time', 'is-late', 'is-two-min');
+    const cls = levelClass(level).trim();
+    if (cls) field.classList.add(cls);
+  }
+
+  const button = cell.querySelector('.cell-level-btn');
+  if (button) button.classList.toggle('is-set', !!level);
 }
 
 function onTableClick(event) {
   const target = event.target;
   if (!target || typeof target.closest !== 'function') return;
+
+  // Кнопка уровня открывает попап на привычке и дне своей ячейки (§1.2)
+  const levelButton = target.closest('.cell-level-btn');
+  if (levelButton) {
+    const levelCell = cellContainer(levelButton);
+    if (!levelCell) return;
+    openLevelSheet(
+      cellData(levelCell, levelButton, 'data-habit-id'),
+      cellData(levelCell, levelButton, 'data-date')
+    );
+    return;
+  }
 
   const button = target.closest('.cell-x');
   if (!button) return;
@@ -5173,11 +5598,22 @@ function syncBooleanCell(cell, value) {
 
 /* --- Изменение значения ячейки ------------------------------------------- */
 
-// Записывает значение и обновляет ТОЛЬКО круг своей строки — без renderTable()
-function onCellChange(habit, date, value) {
+// Записывает значение и обновляет ТОЛЬКО круг своей строки — без renderTable().
+// День отметки может уехать во вчерашний (§4): тогда без перерисовки не
+// обойтись — отметка встанет в чужую колонку и останется незамеченной.
+function onCellChange(habit, date, value, level) {
   if (!habit) return;
-  setRecord(date, habit.id, value);
+
+  const markDate = habitMarkDate(habit, date, new Date());
+  writeHabitEntry(habit, markDate, value, level);
   appState.records = loadRecords();
+
+  if (markDate !== date) {
+    renderTable();
+    renderDayCards();
+    return;
+  }
+
   updateRowCircle(habit.id);
 }
 
@@ -5676,6 +6112,95 @@ function closeTaskActionsSheet() {
   const sheet = document.getElementById('task-actions-sheet');
   if (sheet) sheet.hidden = true;
   document.documentElement.style.setProperty('--keyboard-offset', '0px');
+}
+
+/* --- Попап уровня выполнения (§1.3) --------------------------------------- */
+
+// Привычка и день, для которых открыт попап. День здесь уже выправленный
+// правилом полуночи (§4): попап пишет туда же, куда писала бы клетка.
+let levelSheetTarget = null;
+
+// Текущее значение отметки — из него считается «Полная версия».
+// Пустое поле значит, что выполнять нечего, и пункт гаснет (§2.3).
+function openLevelSheet(habitId, date) {
+  const habit = findHabit(habitId);
+  if (!habit || !date || !hasLevelPopup(habitId)) return;
+
+  const entry = getEntry(date, habitId);
+  const value = entry ? entry.value : undefined;
+  const hasValue = typeof value === 'number';
+
+  levelSheetTarget = {
+    habitId: habitId,
+    date: habitMarkDate(habit, date, new Date()),
+    value: value,
+  };
+
+  const full = document.getElementById('level-option-full');
+  if (full) {
+    full.disabled = !hasValue;
+    full.classList.toggle('is-active', !!entry && entry.level !== LEVEL_TWO_MIN);
+  }
+
+  const twoMin = document.getElementById('level-option-two-min');
+  if (twoMin) twoMin.classList.toggle('is-active', !!entry && entry.level === LEVEL_TWO_MIN);
+
+  const sheet = document.getElementById('level-sheet');
+  if (!sheet) return;
+  sheet.hidden = false;
+  syncSheetToKeyboard();
+}
+
+function closeLevelSheet() {
+  const sheet = document.getElementById('level-sheet');
+  if (sheet) sheet.hidden = true;
+  levelSheetTarget = null;
+  document.documentElement.style.setProperty('--keyboard-offset', '0px');
+}
+
+// Выбор пункта попапа. «2 минуты» пишутся и уровнем, и значением, если
+// значения ещё нет: у Корана это 0, у Спорта — сам код «2 минуты».
+function onLevelPick(event) {
+  const option = event.target.closest('.level-option');
+  if (!option || option.disabled || !levelSheetTarget) return;
+
+  const habit = findHabit(levelSheetTarget.habitId);
+  const date = levelSheetTarget.date;
+  const value = levelSheetTarget.value;
+  if (!habit) return;
+
+  let level;
+  if (option.getAttribute('data-level') === 'two-min') {
+    level = LEVEL_TWO_MIN;
+  } else {
+    level = defaultLevel(habit, value);
+  }
+
+  // Числа ещё нет — «2 минуты» пишутся нулём страниц (§2.4).
+  // «Полная версия» без числа недоступна, поэтому дальше пути нет.
+  let written = value;
+  if (written === undefined && level === LEVEL_TWO_MIN) written = 0;
+  if (written === undefined) return;
+
+  writeHabitEntry(habit, date, written, level);
+  appState.records = loadRecords();
+
+  closeLevelSheet();
+  syncLevelCells(habit.id, date);
+  updateRowCircle(habit.id);
+}
+
+// Вид полей уровня после выбора в попапе: клетки таблицы и, если открыт режим
+// «День», карточки. Так же поступает updateQazaCells: на телефоне таблица
+// скрыта медиа-запросом, но остаётся в DOM, и обновления одной её мало.
+function syncLevelCells(habitId, date) {
+  const cells = document.querySelectorAll(
+    'td.cell[data-habit-id="' + cssEscape(habitId) + '"]');
+  for (let i = 0; i < cells.length; i++) {
+    if (cells[i].getAttribute('data-date') === date) syncLevelCell(cells[i], habitId, date);
+  }
+
+  if (isMainDayView()) renderDayCards();
 }
 
 /* --- Меню приоритета ------------------------------------------------------ */
@@ -6512,7 +7037,8 @@ function onQazaAddPick(event) {
 function onQazaAddSubmit() {
   if (qazaAddPick === null) return;
 
-  addMissedQaza(qazaState, NAMAZ_ORDER[qazaAddPick], toISODate(new Date()));
+  // Ручное добавление тоже идёт в день каза: ночью до Фаджра это вчера (§5)
+  addMissedQaza(qazaState, NAMAZ_ORDER[qazaAddPick], kazaDayFor(new Date()));
 
   // После добавления выбор сбрасывается: повторное нажатие не должно
   // записать тот же намаз второй раз
@@ -6605,7 +7131,9 @@ function renderQazaPlan() {
   const startLabel = document.getElementById('qaza-plan-start');
   if (!box) return;
 
-  const today = toISODate(new Date());
+  // День каза, а не календарный: запись, зачтённая ночью во вчера, отменяется
+  // оттуда же, куда легла (§7)
+  const today = kazaDayFor(new Date());
   const plan = getQazaPlan(qazaState);
 
   if (undo) {
@@ -6655,17 +7183,25 @@ function renderQazaPlan() {
 
 // Нажатие «Выполнено». Обработчик делегирован на #qaza-plan, потому что
 // содержимое плана перерисовывается целиком.
+// День берётся не календарный, а день каза (§5): ночью до Фаджра выполнение
+// уходит во вчерашний день, и об этом говорит тост — иначе отметка в таблице
+// встала бы не туда, где её ищут (§6).
 function onQazaDone(event) {
   const target = event && event.target;
   if (!target || typeof target.closest !== 'function') return;
   if (!target.closest('#qaza-done')) return;
 
-  markQazaDone(qazaState, toISODate(new Date()));
+  const day = kazaDayFor(new Date());
+  markQazaDone(qazaState, day);
   afterQazaChange();
+
+  if (day !== toISODate(new Date())) showToast('Каза зачтена во вчерашний день');
 }
 
+// Отмена работает с тем днём, к которому отнесена верхняя запись (§7):
+// запись, зачтённая вчера, снимается там же, где и легла.
 function onQazaUndo() {
-  undoQazaDone(qazaState, toISODate(new Date()));
+  undoQazaDone(qazaState, kazaDayFor(new Date()));
   afterQazaChange();
 }
 
@@ -6749,6 +7285,11 @@ function renderHabitList() {
       '" placeholder="Ед." aria-label="Единица измерения">' +
       '<input type="number" class="habit-edit-goal" min="1" step="1" value="' +
       escapeHtml(goalValue) + '" placeholder="Цель" aria-label="Цель">' +
+      // Время — только у привычек с уровнями: оно задаёт окно «вовремя»
+      (isLevelHabit(habit.id)
+        ? '<input type="time" class="habit-edit-time" value="' +
+          escapeHtml(habit.time || '') + '" aria-label="Время">'
+        : '') +
       '<button type="button" class="btn btn-secondary habit-save">Сохранить</button>' +
       // У каза кнопки удаления нет: удалив привычку, синхронизацию не восстановить
       (isQaza ? '' : '<button type="button" class="btn btn-danger habit-delete">Удалить</button>') +
@@ -6789,6 +7330,8 @@ function onHabitListClick(event) {
       return;
     }
     const patch = { name: data.name.trim(), unit: data.unit, goal: data.goal };
+    // Время есть только у привычек с уровнями: поле пустое — время не задано
+    if (isLevelHabit(habitId)) patch.time = data.time;
     // Тип меняем только у привычки без записей
     if (!hasRecords(habitId)) patch.type = data.type;
 
@@ -6846,6 +7389,13 @@ function renderHabitsEditList() {
           '<input type="number" class="edit-goal" min="1" step="1" value="' +
           escapeHtml(goalValue) + '" placeholder="Цель">' +
         '</label>' +
+        // Время — только у привычек с уровнями: оно задаёт окно «вовремя»
+        (isLevelHabit(habit.id)
+          ? '<label class="edit-time-field"><span>Время</span>' +
+            '<input type="time" class="edit-time" value="' +
+            escapeHtml(habit.time || '') + '">' +
+            '</label>'
+          : '') +
         '<p class="form-error" role="alert"></p>' +
         '<div class="habit-row-actions">' +
           '<button type="button" class="btn btn-primary edit-save">Сохранить</button>' +
@@ -6908,6 +7458,8 @@ function onHabitsEditClick(event) {
       return;
     }
     const patch = { name: data.name.trim(), unit: data.unit, goal: data.goal };
+    // Время есть только у привычек с уровнями: поле пустое — время не задано
+    if (isLevelHabit(habitId)) patch.time = data.time;
     // Тип меняем только у привычки без записей
     if (!hasRecords(habitId)) patch.type = data.type;
 
@@ -6940,6 +7492,7 @@ const EDIT_ROW_SELECTORS = {
   type: '.edit-type',
   unit: '.edit-unit',
   goal: '.edit-goal',
+  time: '.edit-time',
 };
 
 // Данные одной строки списка привычек.
@@ -6950,16 +7503,21 @@ function readHabitItem(item, cls) {
   const typeField = item.querySelector(sel.type || '.habit-type');
   const unitField = item.querySelector(sel.unit || '.habit-edit-unit');
   const goalField = item.querySelector(sel.goal || '.habit-edit-goal');
+  const timeField = item.querySelector(sel.time || '.habit-edit-time');
 
   const type = typeField ? typeField.value : 'boolean';
   const unit = unitField ? unitField.value.trim() : '';
   const goalText = goalField ? goalField.value.trim() : '';
+  // Пустое поле времени — это null, а не пустая строка: так «времени нет»
+  // и «время затёрли» читаются одинаково
+  const timeText = timeField ? timeField.value.trim() : '';
 
   return {
     name: nameField ? nameField.value : '',
     type: type,
     unit: type === 'number' ? unit : '',
     goal: type === 'number' ? Number(goalText) : null,
+    time: timeText === '' ? null : timeText,
   };
 }
 
