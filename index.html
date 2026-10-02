@@ -984,6 +984,23 @@ body {
   display: none;
 }
 
+/* Пустая таблица без ответа сервера: пометка стоит над карточками дня
+   и над таблицей, в обоих режимах главной */
+.habits-note {
+  margin: 12px 0;
+  padding: 14px 16px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  color: var(--text-muted);
+  font-size: 14px;
+  text-align: center;
+}
+
+.habits-note[hidden] {
+  display: none;
+}
+
 #day-cards {
   display: flex;
   flex-direction: column;
@@ -2747,6 +2764,10 @@ body.view-settings #header-actions {
       <button type="button" class="view-switch-btn" data-view="week">Неделя</button>
     </div>
 
+    <!-- Пустая таблица без ответа сервера — это «не загрузили», а не
+         «привычек нет». Показывается из renderMainView -->
+    <p id="habits-note" class="habits-note" hidden>Привычки не загружены: нет связи с сервером.</p>
+
     <!-- Режим «День»: по карточке на привычку за сегодня -->
     <div id="day-cards" hidden></div>
 
@@ -3171,6 +3192,7 @@ const STORAGE_KEYS = {
   habits: 'youplanner.habits',
   records: 'youplanner.records',
   tasks: 'youplanner.tasks',
+  migrations: 'youplanner.migrations',
 };
 
 // 11 привычек по умолчанию (порядок и значения — из спеки, п.5)
@@ -3181,34 +3203,93 @@ const DEFAULT_HABITS = [
   { id: 'h4', name: 'Магриб', type: 'boolean', unit: '', goal: null },
   { id: 'h5', name: 'Иша', type: 'boolean', unit: '', goal: null },
   { id: 'h6', name: 'Каза', type: 'number', unit: 'раз', goal: 3 },
-  // time — необязательное время привычки: у Корана и Спорта оно задаёт
+  // time — необязательное время привычки: у привычек с уровнями оно задаёт
   // окно «вовремя» и цвет границы поля отметки (§1.1, §1.6)
   { id: 'h7', name: 'Спорт', type: 'choice', unit: '', goal: null, time: null },
   { id: 'h8', name: 'Коран', type: 'number', unit: 'стр.', goal: 5, time: null },
   { id: 'h9', name: 'Работа с текстами', type: 'number', unit: 'мин', goal: 10 },
   { id: 'h10', name: 'Чтение книги', type: 'number', unit: 'стр.', goal: 2 },
   { id: 'h11', name: 'Таблицы', type: 'boolean', unit: '', goal: null },
+  { id: 'h12', name: 'Пресс', type: 'choice', unit: '', goal: null, time: null },
 ];
+
+// Копия привычки по умолчанию по id. Копия, а не ссылка на элемент
+// DEFAULT_HABITS: записанное в localStorage не должно править сам список.
+// Ключ time переносится только если он у привычки есть вовсе.
+function defaultHabit(id) {
+  for (let i = 0; i < DEFAULT_HABITS.length; i++) {
+    const h = DEFAULT_HABITS[i];
+    if (h.id !== id) continue;
+    const copy = { id: h.id, name: h.name, type: h.type, unit: h.unit, goal: h.goal };
+    if (h.time !== undefined) copy.time = h.time;
+    return copy;
+  }
+  return null;
+}
+
+/* ---------- Миграции ---------- */
+
+// Какие разовые правки устройство уже прошло. Отметка нужна затем, чтобы
+// правка не повторялась на каждой загрузке: иначе удалённую привычку
+// возвращал бы каждый старт, а не только первый.
+function loadMigrations() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.migrations);
+    if (!raw) return {};
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+    return parsed;
+  } catch (e) {
+    return {};
+  }
+}
+
+function migrationDone(name) {
+  return loadMigrations()[name] === true;
+}
+
+function markMigration(name) {
+  const migrations = loadMigrations();
+  if (migrations[name] === true) return;
+  migrations[name] = true;
+  localStorage.setItem(STORAGE_KEYS.migrations, JSON.stringify(migrations));
+}
+
+// «Пресс» заведена в дефолтах позже остальных привычек, поэтому у устройства
+// со сложившимся списком сама она не появится — список доводит эта миграция.
+// Срабатывает один раз: удалённый «Пресс» после неё не возвращается.
+// Зовётся только после сверки и только на непустом списке: пустое хранилище
+// значит «ещё не знаем», и дополнять в нём нечего (§13).
+function migratePressHabit() {
+  if (migrationDone('press')) return;
+
+  const habits = loadHabits();
+  if (!hasData(habits)) return;
+  markMigration('press');
+
+  for (let i = 0; i < habits.length; i++) {
+    if (habits[i].id === PRESS_HABIT_ID) return;
+  }
+
+  habits.push(defaultHabit(PRESS_HABIT_ID));
+  saveNormalized(function () { saveHabits(habits); });
+}
 
 /* ---------- Чтение и запись localStorage ---------- */
 
-// Возвращает список привычек. Если ключа нет или JSON битый —
-// записывает дефолты и возвращает их копию.
+// Возвращает список привычек как он лежит в хранилище. Отсутствие ключа,
+// пустой список и битый JSON читаются одинаково — как «привычек нет».
+// Дефолты здесь не пишутся: пустое хранилище значит «ещё не знаем», а не
+// «привычек нет», и засевает его init после подтверждённой сверки (§13).
 function loadHabits() {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.habits);
-    if (!raw) throw new Error('нет данных');
+    if (!raw) return [];
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) throw new Error('не массив');
+    if (!Array.isArray(parsed)) return [];
     return parsed;
   } catch (e) {
-    const defaults = DEFAULT_HABITS.map(function (h) {
-      const copy = { id: h.id, name: h.name, type: h.type, unit: h.unit, goal: h.goal };
-      if (h.time !== undefined) copy.time = h.time;
-      return copy;
-    });
-    saveNormalized(function () { saveHabits(defaults); });
-    return defaults;
+    return [];
   }
 }
 
@@ -3332,6 +3413,7 @@ function setRecord(date, habitId, value) {
 // есть необязательное время time (§1.1). Id из спеки трекера, как у каза.
 const SPORT_HABIT_ID = 'h7';
 const QURAN_HABIT_ID = 'h8';
+const PRESS_HABIT_ID = 'h12';
 
 // Уровни выполнения записи
 const LEVEL_ON_TIME = 'on-time';
@@ -3341,7 +3423,7 @@ const LEVEL_TWO_MIN = 'two-min';
 // Окно «вовремя» — ±60 минут от назначенного времени (§1.6)
 const LEVEL_WINDOW_MIN = 60;
 
-// Варианты привычки «Спорт»: «да», «нет», «2 минуты», «отдых» (§3.1).
+// Варианты привычек «Спорт» и «Пресс»: «да», «нет», «2 минуты», «отдых» (§3.1).
 // «Отдых» — запланированный пропуск: уровня у него нет, серию он не рвёт
 // и в прогресс не входит.
 const SPORT_VALUES = ['yes', 'no', 'two-min', 'rest'];
@@ -3361,9 +3443,14 @@ const SPORT_LEGACY_VALUES = {
   'отдых': 'rest',
 };
 
+// Спорт и Пресс — привычки типа choice со своим списком кодов вместо общего
+function isChoiceLevelHabit(habitId) {
+  return habitId === SPORT_HABIT_ID || habitId === PRESS_HABIT_ID;
+}
+
 // Есть ли у привычки уровни
 function isLevelHabit(habitId) {
-  return habitId === SPORT_HABIT_ID || habitId === QURAN_HABIT_ID;
+  return isChoiceLevelHabit(habitId) || habitId === QURAN_HABIT_ID;
 }
 
 // У кого есть попап уровня. Только у Корана: у Спорта «2 минуты» уже стоят
@@ -3385,7 +3472,7 @@ function normalizeEntry(habitId, raw) {
     };
   }
 
-  if (habitId === SPORT_HABIT_ID) {
+  if (isChoiceLevelHabit(habitId)) {
     // Старое «частично» — это и есть «2 минуты», и уровень у него голубой
     const value = SPORT_LEGACY_VALUES[raw] || raw;
     return { value: value, level: value === LEVEL_TWO_MIN ? LEVEL_TWO_MIN : null };
@@ -3458,7 +3545,7 @@ function habitMarkDate(habit, date, now) {
 // отметки и бывает пустым, когда время у привычки не задано (§1.6).
 function defaultLevel(habit, value) {
   if (value === LEVEL_TWO_MIN) return LEVEL_TWO_MIN;
-  if (habit.id === SPORT_HABIT_ID && value !== 'yes') return null;
+  if (isChoiceLevelHabit(habit.id) && value !== 'yes') return null;
   return habitLevelByTime(habit, new Date());
 }
 
@@ -3496,6 +3583,9 @@ function addHabit(habit) {
     type: habit.type,
     unit: habit.unit || '',
     goal: habit.goal === undefined ? null : habit.goal,
+    // time ставится сразу и пустым: иначе привычка без ключа и привычка
+    // с time: null — два формата одного состояния
+    time: null,
   };
   habits.push(newHabit);
   saveHabits(habits);
@@ -4052,6 +4142,10 @@ let syncing = false;
 // на каждом старте ставит отправку, а ответа сервера при медленной сети
 // ещё нет — отправка уходила вперёд ответа и затирала чужой снимок.
 let cloudReady = false;
+// Сервер ответил на сверку. Отдельно от cloudReady: тот взводится и при
+// недоступном сервере, а пустая таблица должна отличать «не загрузили»
+// от «человек всё удалил» (§13).
+let cloudReachable = false;
 // Правка, случившаяся до первой сверки: отправку не теряем, а откладываем
 // до ответа сервера — иначе PUT ушёл бы раньше, чем мы узнали серверное.
 // Флаг же говорит и обратное: пока он взведён, серверный снимок локальному
@@ -4159,15 +4253,27 @@ function syncFromCloud() {
       return response.json();
     })
     .then(function (data) {
-      if (!data || typeof data !== 'object') return true;
+      cloudReachable = true;
+      if (!data || typeof data !== 'object') {
+        return { reachable: true, serverEmpty: true };
+      }
 
       const serverTs = Number(data.updatedAt) || 0;
-      if (!cloudSnapshotWins(serverTs)) return false;
+      if (!cloudSnapshotWins(serverTs)) {
+        // Снимок отвергнут, но привычек у нас нет вовсе — значит правка,
+        // которой сервер ещё не видел, привычек не касалась: править было
+        // нечего. Берём серверный список, иначе пустой уехал бы наверх
+        // и стёр серверный.
+        if (Array.isArray(data.habits) && hasData(data.habits) && !hasData(loadHabits())) {
+          localStorage.setItem(STORAGE_KEYS.habits, JSON.stringify(data.habits));
+        }
+        return { reachable: true, serverEmpty: false };
+      }
 
       applyCloudData(data, serverTs);
-      return false;
+      return { reachable: true, serverEmpty: false };
     })
-    .catch(function () { return false; });
+    .catch(function () { return { reachable: false, serverEmpty: false }; });
 }
 
 // Отправляет локальные данные наверх. Ключ времени пишется до запроса: ответ
@@ -4176,11 +4282,34 @@ function syncToCloud() {
   const ts = Date.now();
   localStorage.setItem(SYNC_TS_KEY, String(ts));
 
-  let body;
+  // Сначала копия, потом запись: сбой копирования данные всё равно отправит.
+  // Заодно оттуда берётся предыдущий узел — он нужен телу запроса.
+  return Promise.resolve()
+    .then(backupCloudSnapshot)
+    .catch(function () { return null; })
+    .then(function (previous) {
+      return fetch(FIREBASE_URL + '.json', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: syncBody(ts, previous),
+      });
+    })
+    .catch(function () {});
+}
+
+// Тело PUT. Привычки берём локальные — кроме одного случая: сверка ни разу
+// не дошла до сервера, а список у нас пуст. Пустой список здесь значит
+// «не загрузили», а не «привычек нет», и PUT стёр бы серверные привычки,
+// которых мы просто не видели. Тогда отправляем серверные (§13).
+function syncBody(ts, previous) {
   syncing = true;
   try {
-    body = JSON.stringify({
-      habits: loadHabits(),
+    let habits = loadHabits();
+    if (!cloudReachable && !hasData(habits) && previous && hasData(previous.habits)) {
+      habits = previous.habits;
+    }
+    return JSON.stringify({
+      habits: habits,
       records: loadRecords(),
       qaza: loadQaza(),
       tasks: loadTasks(),
@@ -4190,24 +4319,13 @@ function syncToCloud() {
   } finally {
     syncing = false;
   }
-
-  // Сначала копия, потом запись: сбой копирования данные всё равно отправит
-  return Promise.resolve()
-    .then(backupCloudSnapshot)
-    .catch(function () {})
-    .then(function () {
-      return fetch(FIREBASE_URL + '.json', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: body,
-      });
-    })
-    .catch(function () {});
 }
 
 // Кладёт наверх копию того, что сейчас лежит на сервере: запись затирает
 // чужой снимок, и без копии его не вернуть. Свежая версия сверху, всего не
 // больше BACKUP_LIMIT — самая старая уходит. Пустой узел копировать нечего.
+// Возвращает предыдущий узел: не вышло записать копию — отправку это
+// не отменяет, и узел всё равно нужен вызывающему.
 function backupCloudSnapshot() {
   return fetch(FIREBASE_URL + '.json')
     .then(function (response) {
@@ -4230,9 +4348,10 @@ function backupCloudSnapshot() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(items.slice(0, BACKUP_LIMIT)),
           });
-        });
+        })
+        .then(function () { return previous; }, function () { return previous; });
     })
-    .catch(function () {});
+    .catch(function () { return null; });
 }
 
 // Отложенная отправка: несколько правок подряд дают один PUT
@@ -4536,7 +4655,7 @@ const MONTHS_SHORT = ['янв', 'фев', 'мар', 'апр', 'май', 'июн'
 
 // Варианты значения для привычек типа choice (пустая опция = «нет записи»).
 // Коды привычек с уровнями лежат в SPORT_VALUES рядом с уровнями: у Спорта
-// список свой, и «частично» в нём больше нет (§3.1).
+// и Пресса список свой, и «частично» в нём больше нет (§3.1).
 const CHOICE_OPTIONS = ['да', 'нет', 'частично', 'отдых'];
 
 // Доступные типы привычек для формы
@@ -4651,16 +4770,16 @@ function habitTypeLabel(type) {
   return '';
 }
 
-// Опции выпадающего списка значений ячейки choice. У Спорта свой список
-// кодов и свои подписи (§3.1), у прочих привычек типа choice — общий.
+// Опции выпадающего списка значений ячейки choice. У Спорта и Пресса свой
+// список кодов и свои подписи (§3.1), у прочих привычек типа choice — общий.
 function choiceOptionsMarkup(current, habitId) {
-  const isSport = habitId === SPORT_HABIT_ID;
-  const codes = isSport ? SPORT_VALUES : CHOICE_OPTIONS;
+  const isCoded = isChoiceLevelHabit(habitId);
+  const codes = isCoded ? SPORT_VALUES : CHOICE_OPTIONS;
 
   let html = '<option value=""' + (current === '' ? ' selected' : '') + '>—</option>';
   for (let i = 0; i < codes.length; i++) {
     const option = codes[i];
-    const label = isSport ? SPORT_VALUE_LABELS[option] : option;
+    const label = isCoded ? SPORT_VALUE_LABELS[option] : option;
     html += '<option value="' + escapeHtml(option) + '"' +
       (option === current ? ' selected' : '') + '>' + escapeHtml(label) + '</option>';
   }
@@ -4767,6 +4886,25 @@ function circleMarkup(percent, habitId, monthPct) {
 
 /* --- Инициализация ------------------------------------------------------- */
 
+// Что делать со списком привычек после первой сверки. Пустое хранилище само
+// по себе не значит, что привычек нет: это «ещё не знаем». Дефолты пишутся
+// только тогда, когда сервер ответил и подтвердил, что он пуст, — иначе
+// пустая таблица честнее выдуманного списка (§13). Запись идёт под
+// saveNormalized, поэтому syncPending она не взводит, а отправку забирает
+// init: узел пуст, значит PUT и так уходит.
+function settleHabitsAfterSync(result) {
+  const reachable = !!result && result.reachable === true;
+
+  if (reachable && result.serverEmpty && !hasData(loadHabits())) {
+    const defaults = DEFAULT_HABITS.map(function (h) { return defaultHabit(h.id); });
+    saveNormalized(function () { saveHabits(defaults); });
+    markMigration('press');
+  }
+
+  // Миграция ждёт конца сверки: до неё список ещё может приехать с сервера
+  migratePressHabit();
+}
+
 function init() {
   appState.habits = loadHabits();
   appState.records = loadRecords();
@@ -4806,15 +4944,23 @@ function init() {
   // штатный путь syncToCloud, а следующая правка отправит всё разом.
   Promise.resolve()
     .then(syncFromCloud)
-    .catch(function () { return false; })
-    .then(function (serverEmpty) {
+    .catch(function () { return null; })
+    .then(function (result) {
+      // Дефолты и миграция — до cloudReady: запись под saveNormalized не
+      // взводит syncPending, а отправку заберёт init ниже
+      settleHabitsAfterSync(result);
       cloudReady = true;
       // Накопленную правку забирает отправка, и приоритет локального на этом
       // исчерпан: оставленный флаг запирал бы применение серверных снимков
       // до конца сеанса.
       const pending = syncPending;
       syncPending = false;
-      if (serverEmpty || pending) syncToCloud();
+      if ((result && result.serverEmpty) || pending) syncToCloud();
+
+      // Список привычек мог измениться только что — перерисовываем главную,
+      // чтобы вместе с ним появилась или пропала пометка «не загружены»
+      appState.habits = loadHabits();
+      renderMainView();
     });
 }
 
@@ -4903,11 +5049,18 @@ function bindEvents() {
     habitsEditList.addEventListener('change', onHabitsEditChange);
   }
 
-  // Ручная синхронизация из настроек
+  // Ручная синхронизация из настроек. Итог у неё тот же, что у первой:
+  // пустой сервер засевает дефолты — иначе пустая таблица осталась бы и без
+  // данных, и без пометки. Отправку ставит сама запись (§11t)
   const syncNow = document.getElementById('settings-sync-now');
   if (syncNow) {
     syncNow.addEventListener('click', function () {
-      syncFromCloud().then(function () { showSyncStatus('Обновлено'); });
+      syncFromCloud().then(function (result) {
+        settleHabitsAfterSync(result);
+        appState.habits = loadHabits();
+        renderMainView();
+        showSyncStatus('Обновлено');
+      });
     });
   }
 
@@ -5354,6 +5507,11 @@ function renderMainView() {
   const tabs = document.getElementById('mobile-day-tabs');
   const weekNav = document.getElementById('week-nav');
   const table = document.getElementById('habits-table');
+
+  // Пустая таблица при неотвеченной сверке — это «данные не загружены».
+  // Пустая таблица после ответа сервера — «человек всё удалил», и молчит
+  const note = document.getElementById('habits-note');
+  if (note) note.hidden = !(cloudReady && !cloudReachable && appState.habits.length === 0);
 
   if (isMainDayView()) {
     if (dayBox) dayBox.hidden = false;
