@@ -3184,8 +3184,9 @@ body.view-settings #header-actions {
 
   <script>
 /* YouPlanner — слой данных.
-   Файл склеивается с ui.js в общий тег script, поэтому функции объявлены
-   в глобальной области. Никаких внешних загрузок и обёрток-IIFE. */
+   Модульная сборка утрачена (§3 Spec.md), поэтому весь скрипт — один файл,
+   а функции объявлены в глобальной области. Никаких внешних загрузок
+   и обёрток-IIFE. */
 
 // Ключи localStorage
 const STORAGE_KEYS = {
@@ -3195,7 +3196,7 @@ const STORAGE_KEYS = {
   migrations: 'youplanner.migrations',
 };
 
-// 11 привычек по умолчанию (порядок и значения — из спеки, п.5)
+// 12 привычек по умолчанию (порядок и значения — из спеки, п.5)
 const DEFAULT_HABITS = [
   { id: 'h1', name: 'Фаджр', type: 'boolean', unit: '', goal: null },
   { id: 'h2', name: 'Зухр', type: 'boolean', unit: '', goal: null },
@@ -3631,9 +3632,12 @@ function removeHabit(id) {
 function calcProgress(habit, dates) {
   if (!dates || dates.length === 0) return 0;
 
-  // Веса вариантов ответа для типа "choice". «Отдых» — запланированный
-  // пропуск: он вес не набирает, но и серию не рвёт.
-  const weights = { 'yes': 1, 'two-min': 0.5, 'no': 0, 'rest': 0 };
+  // Веса вариантов ответа для типа "choice". Коды Спорта и Пресса и русские
+  // значения привычек из формы — одно состояние, поэтому в таблице обе пары
+  // ключей: без русских прогресс у привычки из формы всегда был бы нулевым.
+  // «Отдых» — запланированный пропуск: вес не набирает, но и серию не рвёт.
+  const weights = { 'yes': 1, 'да': 1, 'two-min': 0.5, 'частично': 0.5,
+    'no': 0, 'нет': 0, 'rest': 0, 'отдых': 0 };
   const base = dates.length;
   let sum = 0;
 
@@ -3702,17 +3706,6 @@ function getWeekStart(d) {
   return addDays(copy, -day);
 }
 
-// Все даты месяца в формате 'YYYY-MM-DD'. month — 0-based.
-function getMonthDates(year, month) {
-  const dates = [];
-  const cursor = new Date(year, month, 1);
-  while (cursor.getMonth() === month) {
-    dates.push(toISODate(cursor));
-    cursor.setDate(cursor.getDate() + 1);
-  }
-  return dates;
-}
-
 // Даты месяца с 1-го числа по сегодня включительно — знаменатель месячного
 // прогресса. Для месяца, который уже закончился, — все его дни;
 // для месяца, который ещё не начался, — пустой массив.
@@ -3736,7 +3729,7 @@ function getMonthDatesToToday(year, month) {
 const QAZA_STORAGE_KEY = 'youplanner.qaza';
 
 // Привычка, которая показывает счётчик каза за день. Id из спеки трекера:
-// дефолтные привычки имеют стабильные id h1…h11.
+// дефолтные привычки имеют стабильные id h1…h12.
 const QAZA_HABIT_ID = 'h6';
 
 // Дневная цель — ориентир, а не жёсткий лимит
@@ -4607,11 +4600,11 @@ function undoQazaDone(qaza, today) {
 }
 
 /* ==========================================================================
-   YouPlanner — логика интерфейса (ui.js)
+   YouPlanner — логика интерфейса
 
-   Файл склеивается с data.js в один общий тег script (см. assemble.js), поэтому
-   это не модуль и не IIFE: все имена объявляются в глобальной области видимости.
-   Функции слоя данных только ВЫЗЫВАЮТСЯ, но никогда не переобъявляются.
+   Скрипт не модуль и не IIFE: все имена объявляются в глобальной области
+   видимости. Функции слоя данных только ВЫЗЫВАЮТСЯ, но никогда
+   не переобъявляются.
 
    Ключевая архитектурная особенность: ячейки таблицы перерисовываются целиком
    (renderTable), поэтому обработчики событий навешиваются ОДИН РАЗ на
@@ -4627,9 +4620,6 @@ const appState = {
   weekStart: null, // Date — понедельник отображаемой недели
 };
 
-// Текущий раздел приложения: 'main' — таблица, 'qaza' — каза, 'settings' — настройки
-let appView = 'main';
-
 // Мобильная вёрстка: -1 не выбрана, 0 Пн–Чт, 1 Пт–Вс
 let mobileDayPage = -1;
 
@@ -4639,7 +4629,7 @@ let mainView = localStorage.getItem('youplanner.mainView') || 'day';
 
 /* --- Константы ----------------------------------------------------------- */
 
-// Геометрия прогресс-круга: радиус 24, длина окружности 2 * π * 24 ≈ 150.796
+// Геометрия прогресс-круга: радиус 27, длина окружности 2 * π * 27 ≈ 169.646
 const CIRCLE_RADIUS = 27;
 const CIRCLE_LENGTH = 2 * Math.PI * CIRCLE_RADIUS;
 const CIRCLE_CENTER = 32;
@@ -4695,13 +4685,6 @@ function cssEscape(value) {
   return String(value).replace(/["\\]/g, '\\$&');
 }
 
-// Разбор строки разметки в первый элемент (использует DocumentFragment template)
-function parseFirstElement(html) {
-  const template = document.createElement('template');
-  template.innerHTML = html;
-  return template.content.firstElementChild;
-}
-
 // Привычка из текущего состояния по id
 function findHabit(habitId) {
   for (let i = 0; i < appState.habits.length; i++) {
@@ -4731,11 +4714,6 @@ function monthPercent(habit) {
   if (!weekStart) return 0;
   const dates = getMonthDatesToToday(weekStart.getFullYear(), weekStart.getMonth());
   return calcProgress(habit, dates);
-}
-
-// Сравнение значений записи (undefined = записи нет)
-function sameValue(a, b) {
-  return a === b;
 }
 
 // Высота, на которую клавиатура перекрывает окно. В медиа-запросе телефона
@@ -5329,6 +5307,14 @@ function bindEvents() {
     const modal = document.getElementById('habit-modal');
     if (modal && !modal.hidden) closeModal();
 
+    // Попап уровня открывается из таблицы, а не из формы задачи, но снимается
+    // тем же правилом: Escape гасит верхнюю шторку за раз
+    const levelSheet = document.getElementById('level-sheet');
+    if (levelSheet && !levelSheet.hidden) {
+      closeLevelSheet();
+      return;
+    }
+
     const timeSheet = document.getElementById('task-time-sheet');
     if (timeSheet && !timeSheet.hidden) {
       closeTaskTimeSheet();
@@ -5640,17 +5626,6 @@ function renderTable() {
   updateMobileTabs();
 }
 
-// Одна ячейка дня. Возвращает HTMLElement (разбирается из той же разметки,
-// что использует renderTable, — единый источник правды).
-function renderCell(habit, date) {
-  return parseFirstElement(cellMarkup(habit, date));
-}
-
-// Прогресс-круг. Возвращает SVGElement.
-function renderCircle(percent, monthPct) {
-  return parseFirstElement(circleMarkup(percent, null, monthPct));
-}
-
 /* --- Делегированные обработчики таблицы ---------------------------------- */
 
 // Контейнер ячейки: в таблице это <td class="cell">, в режиме «День» — блок
@@ -5690,7 +5665,7 @@ function onTableChange(event) {
   // boolean: галочка = true, снятая галочка = удаление записи
   if (target.classList.contains('cell-check')) {
     const value = target.checked ? true : undefined;
-    if (sameValue(current, value)) {
+    if (current === value) {
       syncBooleanCell(cell, current);
       return;
     }
@@ -5702,7 +5677,7 @@ function onTableChange(event) {
   // choice: пустая опция = удаление записи
   if (target.classList.contains('cell-select')) {
     const value = target.value === '' ? undefined : target.value;
-    if (sameValue(current, value)) return;
+    if (current === value) return;
     onCellChange(habit, date, value, kept === undefined ? defaultLevel(habit, value) : kept);
     syncLevelCell(cell, habitId, date);
     return;
@@ -5717,7 +5692,7 @@ function onTableChange(event) {
       const parsed = Number(target.value);
       value = (isFinite(parsed) && parsed >= 0) ? parsed : undefined;
     }
-    if (sameValue(current, value)) return;
+    if (current === value) return;
     onCellChange(habit, date, value, kept === undefined ? defaultLevel(habit, value) : kept);
     syncLevelCell(cell, habitId, date);
   }
@@ -6698,8 +6673,6 @@ function setHidden(id, hidden) {
 // Переключение разделов. Единая точка входа для таб-бара на телефоне,
 // кнопки «Каза-намазы» и «Назад» на ПК.
 function switchAppView(name) {
-  appView = name;
-
   document.getElementById('main').hidden = name !== 'main';
   document.getElementById('settings-view').hidden = name !== 'settings';
   document.getElementById('habits-edit-view').hidden = name !== 'edit-habits';
@@ -7804,8 +7777,7 @@ function validateHabitForm(data, excludeId) {
   return { ok: true };
 }
 
-
-    document.addEventListener('DOMContentLoaded', init);
+document.addEventListener('DOMContentLoaded', init);
 
 // Регистрация service worker для офлайн-работы.
 // По file:// регистрация невозможна — ошибку молча глотаем, страница работает как обычно.
