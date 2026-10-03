@@ -4259,6 +4259,13 @@ function syncFromCloud() {
         // и стёр серверный.
         if (Array.isArray(data.habits) && hasData(data.habits) && !hasData(loadHabits())) {
           localStorage.setItem(STORAGE_KEYS.habits, JSON.stringify(data.habits));
+          // Список только что сменился, а DOM остался прежним: показываем его
+          // тем же путём, что и применённый снимок (§11v)
+          appState.habits = loadHabits();
+          renderMainView();
+          renderQazaView();
+          renderTasksView();
+          renderPrayerView();
         }
         return { reachable: true, serverEmpty: false };
       }
