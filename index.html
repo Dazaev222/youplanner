@@ -3968,7 +3968,14 @@ function habitLevelByTime(habit, now) {
   if (plan === null) return null;
 
   const minutes = now.getHours() * 60 + now.getMinutes();
-  return Math.abs(minutes - plan) <= LEVEL_WINDOW_MIN ? LEVEL_ON_TIME : LEVEL_LATE;
+  // Окно вокруг назначенного момента может переходить через полночь: при
+  // time = '23:30' отметка в 00:15 ближе по короткой дуге (45 минут), чем
+  // линейно (1395). Расстояние берём меньшее из двух — тем же правилом живёт
+  // habitMarkDate (§4), иначе две функции одного окна расходятся (§11aa, В1).
+  const forward = Math.abs(minutes - plan);
+  const around = 1440 - forward;
+  const distance = Math.min(forward, around);
+  return distance <= LEVEL_WINDOW_MIN ? LEVEL_ON_TIME : LEVEL_LATE;
 }
 
 // День, к которому относится отметка (§4). time = '23:30', отметка в 00:15 —
@@ -4531,7 +4538,11 @@ function loadPrayer() {
     const lat = Number(parsed.lat);
     const lng = Number(parsed.lng);
     if (!isFinite(lat) || !isFinite(lng)) return null;
-    if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return null;
+    // Широта ограничена тем же порогом, что у prayerTimes (89.8):
+    // иначе координата в полосе (89.8; 90] проходит валидацию,
+    // приветственный экран скрывается, а расчёт отдаёт null — экран
+    // времён остаётся пустым без объяснения (§11aa, B4).
+    if (lat < -89.8 || lat > 89.8 || lng < -180 || lng > 180) return null;
 
     return {
       lat: lat,
@@ -4550,7 +4561,7 @@ function savePrayer(prayer) {
   const lat = Number(prayer && prayer.lat);
   const lng = Number(prayer && prayer.lng);
   if (!isFinite(lat) || !isFinite(lng)) return;
-  if (lat < -90 || lat > 90 || lng < -180 || lng > 180) return;
+  if (lat < -89.8 || lat > 89.8 || lng < -180 || lng > 180) return;
 
   localStorage.setItem(PRAYER_KEY, JSON.stringify({
     lat: lat,
@@ -4897,7 +4908,15 @@ function applyCloudData(data, ts) {
     // заведённый счётчик на этом устройстве.
     // История из снимка чистится, но раздел из-за неё не отклоняется:
     // битая запись — не повод терять счётчик (§5, validFastHistory)
+    // Остаток обязан быть конечным неотрицательным числом: снимок вида
+    // { remaining: "15" } или { junk: 1 } ключами непуст и раньше проходил
+    // проверку целиком. Дальше в счётчик писалась строка или undefined,
+    // undefined исчезал при JSON.stringify, следующий loadFast() возвращал
+    // null — и экран уразы показывал форму первого запуска, теряя остаток
+    // и историю. Раздел, не прошедший проверку, не применяется вовсе:
+    // локальный счётчик остаётся нетронутым (уровень защиты 1, §11aa, В2)
     if (data.fast && typeof data.fast === 'object' && !Array.isArray(data.fast) &&
+        Number.isFinite(data.fast.remaining) && data.fast.remaining >= 0 &&
         (hasData(data.fast) || !hasData(local.fast))) {
       localStorage.setItem(FAST_KEY, JSON.stringify({
         version: FAST_VERSION,
@@ -6793,7 +6812,10 @@ function renderCalendar() {
 // по порядку создания
 function compareTasks(a, b) {
   if (a.time && b.time) {
-    if (a.time === b.time) return 0;
+    // Второй ключ — createdAt: он заявлен в §10 и §2b, но не работал.
+    // Раньше порядок держался только на стабильности Array.prototype.sort,
+    // то есть на порядке вставки (§11aa, A1).
+    if (a.time === b.time) return (a.createdAt || 0) - (b.createdAt || 0);
     return a.time < b.time ? -1 : 1;
   }
   if (a.time) return -1;
@@ -8502,11 +8524,14 @@ function onPrayerManualSave() {
   const lngEl = document.getElementById('prayer-lng');
   const note = document.getElementById('prayer-welcome-note');
 
-  const lat = prayerParseCoord(latEl ? latEl.value : '', 90);
+  // Широта — тот же порог, что у prayerTimes (89.8). Иначе ввод
+  // 89.9 принимался бы полем и молча отбрасывался savePrayer
+  // (§11aa, B4).
+  const lat = prayerParseCoord(latEl ? latEl.value : '', 89.8);
   const lng = prayerParseCoord(lngEl ? lngEl.value : '', 180);
 
   if (lat === null || lng === null) {
-    if (note) note.textContent = 'Широта — число от −90 до 90, долгота — от −180 до 180.';
+    if (note) note.textContent = 'Широта — число от −89.8 до 89.8, долгота — от −180 до 180.';
     return;
   }
 
