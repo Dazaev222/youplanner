@@ -680,6 +680,15 @@ body {
 /* display у этих элементов перебивает атрибут hidden, поэтому правило нужно явно */
 #qaza-view[hidden],
 #prayer-view[hidden],
+#fast-view[hidden],
+#fast-init[hidden],
+#fast-main[hidden],
+#stats-view[hidden],
+#stats-qaza-view[hidden],
+#stats-habits-view[hidden],
+#stats-habit-view[hidden],
+#stats-tasks-view[hidden],
+#stats-fast-view[hidden],
 #prayer-settings-view[hidden],
 #main[hidden],
 #week-nav[hidden],
@@ -689,7 +698,10 @@ body {
   display: none;
 }
 
-#qaza-view {
+/* «Ураза» — карточка того же образца: раздел открывается из шапки каза
+   и живёт внутри той же вкладки */
+#qaza-view,
+#fast-view {
   margin-top: 20px;
   padding: 22px 26px 26px;
   border: 1px solid var(--border);
@@ -902,6 +914,14 @@ body {
   margin-top: 16px;
 }
 
+/* На экране уразы кнопок три, и они стоят строкой с переносом.
+   У каза кнопка одна, и правило её не касается. */
+#fast-view .qaza-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
 /* Блок ручного добавления пропущенного намаза */
 .qaza-add-hint {
   max-width: 68ch;
@@ -919,6 +939,7 @@ body {
 @media (prefers-reduced-motion: reduce) {
   #qaza-view,
   #prayer-view,
+  #fast-view,
   #toast {
     animation: none;
   }
@@ -979,9 +1000,31 @@ body {
 }
 
 /* --- Переключатель «День / Неделя» и карточки дня ------------------------ */
-/* Оба — принадлежность телефона: на ПК их нет, там всегда таблица недели */
+/* Оба — принадлежность телефона: на ПК их нет, там всегда таблица недели.
+   Сама кнопка сегмента живёт в общем слое: те же .view-switch-btn носят
+   периоды статистики, а они видны и на ПК (§11y). */
 #main-view-switch {
   display: none;
+}
+
+.view-switch-btn {
+  flex: 1 1 auto;
+  min-height: 44px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+}
+
+.view-switch-btn.is-active {
+  background: var(--surface);
+  color: var(--text);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, .08);
 }
 
 /* Пустая таблица без ответа сервера: пометка стоит над карточками дня
@@ -1956,7 +1999,14 @@ body {
   display: none;
 }
 
-#settings-view {
+/* Статистика открывается из Настроек и живёт карточкой того же образца */
+#settings-view,
+#stats-view,
+#stats-qaza-view,
+#stats-habits-view,
+#stats-habit-view,
+#stats-tasks-view,
+#stats-fast-view {
   margin-top: 20px;
   padding: 22px 26px 26px;
   border: 1px solid var(--border);
@@ -1970,7 +2020,9 @@ body {
 }
 
 /* Строка-переход в списке настроек */
-#settings-list {
+#settings-list,
+#stats-list,
+#stats-habits-list {
   margin: 12px 0 0;
   padding: 0;
   list-style: none;
@@ -2011,6 +2063,135 @@ body {
   color: var(--text-muted);
   font-size: 13px;
   cursor: default;
+}
+
+/* --- Раздел «Статистика» -------------------------------------------------- */
+/* Цифра строки хаба. Приглушена и набрана табличными цифрами: значения
+   меняются при смене периода, и без tabular-nums строка дёргалась бы. */
+.stats-row-value {
+  color: var(--text-muted);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Строка, за которой экрана ещё нет: гаснет атрибутом disabled, а не
+   подменой тега — <div> выпал бы из таб-навигации, а .settings-row
+   написан под кнопку. Вид остаётся строкой списка: она не «недоступна»,
+   а «пока никуда не ведёт», и приглушать её незачем */
+.stats-row-soon:disabled {
+  cursor: default;
+  opacity: 1;
+  color: var(--text);
+}
+
+/* Пустое состояние экрана статистики: вместо цифр или графика одна строка
+   текста. Приглушена и мельче строк — это пояснение, а не значение, и
+   отступ у неё как у подписи в карточке (.qaza-summary) */
+.stats-empty-note {
+  margin: 16px 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* Сегмент-контрол периодов: тот же вид и то же правило подсветки, что
+   у переключателя «День / Неделя» (.view-switch-btn) */
+#stats-period,
+#stats-qaza-period,
+#stats-habits-period,
+#stats-habit-period,
+#stats-tasks-period,
+#stats-fast-period {
+  display: flex;
+  gap: 0;
+  margin: 12px 0;
+  padding: 3px;
+  border-radius: 10px;
+  background: var(--surface-alt);
+}
+
+/* График по дням: столбики рисует statsChartMarkup, высота — сколько каза
+   за день. Столбики растягиваются по ширине карточки, поэтому
+   preserveAspectRatio у svg снят, а форма остаётся прямоугольной. */
+.stats-chart {
+  margin-top: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Линия основания: столбики стоят на ней, и без неё график сливался бы
+   с последней строкой цифр */
+.stats-chart svg {
+  display: block;
+  width: 100%;
+  height: 120px;
+  border-bottom: 1px solid var(--border);
+}
+
+.stats-chart rect {
+  fill: var(--accent);
+}
+
+/* Календарь-сетка: колонка — неделя, строка — день недели. Клетки заданы
+   в пикселях разметкой, поэтому сетка не сжимается под узкий экран, а
+   прокручивается контейнером: ужатая сетка слилась бы в полосу */
+#stats-habit-grid {
+  margin-top: 12px;
+  overflow-x: auto;
+}
+
+#stats-habit-grid svg {
+  display: block;
+}
+
+/* День без записи — рамка, день с весом больше нуля — акцент. Переменные
+   существующие: палитра итерации не менялась */
+.stats-grid-day {
+  fill: var(--border);
+}
+
+.stats-grid-day.is-on {
+  fill: var(--accent);
+}
+
+/* Панель навигации статистики (заход 4, §11z). Правила стоят здесь, до
+   мобильного запроса: он только показывает панель, а выезд, замок фокуса
+   и запрет движения описаны тут же подряд — иначе мобильный запрос перебил
+   бы запрет движения одним лишь порядком правил. */
+#stats-menu-btn,
+#stats-menu {
+  display: none;
+}
+
+#stats-menu {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 80%;
+  max-width: 320px;
+  padding: calc(20px + env(safe-area-inset-top, 0px)) 0 20px;
+  background: var(--surface);
+  box-shadow: 0 0 32px rgba(0, 0, 0, .18);
+  overflow-y: auto;
+  transform: translateX(-100%);
+  /* Закрытая панель уехала и в обходе Tab не участвует. visibility
+     снимается с задержкой, равной выезду: иначе пункты пропадали бы
+     раньше, чем панель доехала */
+  visibility: hidden;
+  transition: transform .25s ease-out, visibility 0s linear .25s;
+  z-index: 60;
+}
+
+#stats-menu.is-open {
+  transform: translateX(0);
+  visibility: visible;
+  transition: transform .25s ease-out, visibility 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #stats-menu,
+  #stats-menu.is-open {
+    transition: none;
+  }
 }
 
 /* --- Экран «Привычки» ---------------------------------------------------- */
@@ -2158,10 +2339,13 @@ body {
   width: 100%;
 }
 
-/* В каза и настройках шапка действий не нужна — и на ПК, и на телефоне */
+/* В каза, молитвах, уразе и настройках шапка действий не нужна — и на ПК,
+   и на телефоне: из этих экранов выходят своей кнопкой «Назад» и таб-баром */
 body.view-qaza #header-actions,
 body.view-prayer #header-actions,
-body.view-settings #header-actions {
+body.view-fast #header-actions,
+body.view-settings #header-actions,
+body.view-stats #header-actions {
   display: none;
 }
 
@@ -2209,26 +2393,6 @@ body.view-settings #header-actions {
     background: var(--surface-alt);
   }
 
-  .view-switch-btn {
-    flex: 1 1 auto;
-    min-height: 44px;
-    padding: 6px 12px;
-    border: 0;
-    border-radius: 8px;
-    background: transparent;
-    color: var(--text);
-    font: inherit;
-    font-size: 14px;
-    font-weight: 500;
-    cursor: pointer;
-  }
-
-  .view-switch-btn.is-active {
-    background: var(--surface);
-    color: var(--text);
-    box-shadow: 0 1px 3px rgba(0, 0, 0, .08);
-  }
-
   /* Карточка привычки в режиме «День» */
   .day-card {
     display: flex;
@@ -2270,8 +2434,11 @@ body.view-settings #header-actions {
   .day-card .cell-level-btn { width: 40px; min-height: 40px; margin-left: 0; }
   .day-card .cell-qaza { font-size: 17px; font-weight: 600; }
 
-  /* Шапка в столбик: логотип, подпись недели, действия */
+  /* Шапка в столбик: логотип, подпись недели, действия.
+     position: relative — точка отсчёта для кнопки статистики, которая
+     стоит в углу шапки и в потоке не участвует */
   #header {
+    position: relative;
     flex-direction: column;
     align-items: stretch;
     gap: 10px;
@@ -2316,6 +2483,89 @@ body.view-settings #header-actions {
   /* Настройки на телефоне открываются таб-баром — кнопка в шапке лишняя */
   #settings-btn {
     display: none;
+  }
+
+  /* Статистика на телефоне открывается гамбургером — строка в Настройках
+     там лишняя. Из разметки она не удаляется: на ПК это единственный вход
+     в раздел, и порядок строк #settings-list держит набор export-import */
+  #settings-stats {
+    display: none;
+  }
+
+  /* Кнопка статистики: телефон — её единственная платформа, там она стоит
+     в левом верхнем углу шапки. Парное правило по id обязательно: базовое
+     правило выше задаёт #stats-menu-btn display, и одиночный [hidden] его
+     не перебьёт — без пары кнопка осталась бы нарисованной вне главной */
+  #stats-menu-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    position: absolute;
+    top: 4px;
+    left: 0;
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    border: 0;
+    border-radius: 8px;
+    background: transparent;
+    color: var(--text);
+    cursor: pointer;
+  }
+
+  #stats-menu-btn[hidden] {
+    display: none;
+  }
+
+  #stats-menu-btn:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
+  }
+
+  /* Панель статистики на телефоне. display задан только здесь: на ПК панель
+     погашена базовым правилом, и вход в раздел остаётся строкой в Настройках */
+  #stats-menu {
+    display: block;
+  }
+
+  /* Подложка накрывает экран целиком, включая таб-бар (z-index 50).
+     Своего display у неё нет нигде: иначе он перебил бы атрибут hidden */
+  #stats-menu-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, .35);
+    z-index: 55;
+  }
+
+  /* Заголовок панели — подпись, а не пункт: приглушён и не кликается */
+  .stats-menu-title {
+    margin: 0 0 8px;
+    padding: 0 20px;
+    color: var(--text-muted);
+    font-size: 13px;
+    font-weight: 400;
+  }
+
+  /* Пункт панели — та же строка, что в Настройках, только во всю ширину */
+  .stats-menu-item {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    min-height: 44px;
+    padding: 12px 20px;
+    border: 0;
+    border-bottom: 1px solid var(--border);
+    background: transparent;
+    color: var(--text);
+    font: inherit;
+    font-size: 15px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .stats-menu-item:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
   }
 
   /* Таблица: дни компактнее, столбец привычки уже */
@@ -2476,8 +2726,10 @@ body.view-settings #header-actions {
     flex: 1 1 auto;
   }
 
-  /* Вкладка каза: меньше паддингов, шапка в столбик */
-  #qaza-view {
+  /* Вкладка каза: меньше паддингов, шапка в столбик. У уразы — то же самое:
+     она открывается из той же шапки и живёт внутри той же вкладки */
+  #qaza-view,
+  #fast-view {
     margin-top: 12px;
     padding: 14px 12px 18px;
     border-radius: 12px;
@@ -2493,25 +2745,32 @@ body.view-settings #header-actions {
     font-size: 17px;
   }
 
-  /* Шапка каза — исключение: кнопка «Молитвы» и заголовок стоят строкой,
-     колонкой они встали бы друг под друга */
+  /* Шапка каза — исключение: кнопки «Молитвы» и «Ураза» и заголовок стоят
+     строкой, колонкой они встали бы друг под друга. Отступ уменьшен до 8px
+     ради узкого случая: на экране 320px двум кнопкам и заголовку нужно
+     ровно 270px из 270, и без запаса «Каза-намазы» ломается на две строки */
   #qaza-view .qaza-head {
     flex-direction: row;
     align-items: center;
-    gap: 10px;
+    gap: 8px;
   }
 
-  /* У «Молитв» в шапке заголовок и «← Назад»: колонка растянула бы кнопку
-     во всю ширину карточки */
+  /* У «Молитв» и «Уразы» в шапке заголовок и «← Назад»: колонка растянула бы
+     кнопку во всю ширину карточки */
   #prayer-view .qaza-head,
-  #prayer-settings-view .qaza-head {
+  #prayer-settings-view .qaza-head,
+  #fast-view .qaza-head {
     flex-direction: row;
     align-items: center;
   }
 
-  #prayer-btn {
+  /* Две кнопки в шапке каза на узком экране должны влезать в строку
+     с заголовком: 320px — тесный случай, и при 10px по бокам две кнопки
+     вместе с заголовком оставляют запас 12px */
+  #prayer-btn,
+  #fast-btn {
     min-height: 38px;
-    padding: 8px 12px;
+    padding: 8px 10px;
     font-size: 14px;
   }
 
@@ -2727,10 +2986,11 @@ body.view-settings #header-actions {
     margin: 0 auto 12px;
   }
 
-  /* В каза и настройках половины недели не нужны.
+  /* В каза, молитвах, уразе и настройках половины недели не нужны.
      Шапка действий гасится общим правилом в основном блоке. */
   body.view-qaza #mobile-day-tabs,
   body.view-prayer #mobile-day-tabs,
+  body.view-fast #mobile-day-tabs,
   body.view-settings #mobile-day-tabs {
     display: none;
   }
@@ -2742,6 +3002,11 @@ body.view-settings #header-actions {
 <!-- Разметка страницы YouPlanner. Только содержимое <body>: шапка, таблица привычек, модалка. -->
 <div id="app">
   <header id="header">
+    <!-- Гамбургер статистики: только телефон и только главная. На телефоне
+         это единственный вход в раздел — строка в Настройках там погашена -->
+    <button type="button" id="stats-menu-btn" aria-label="Статистика">
+      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4 7h16"></path><path d="M4 12h16"></path><path d="M4 17h16"></path></svg>
+    </button>
     <div id="logo">YouPlanner</div>
     <nav id="week-nav">
       <button id="week-prev" class="btn btn-secondary" aria-label="Предыдущая неделя">‹</button>
@@ -2787,6 +3052,7 @@ body.view-settings #header-actions {
   <section id="qaza-view" hidden>
     <div class="qaza-head">
       <button type="button" id="prayer-btn" class="btn btn-secondary">Молитвы</button>
+      <button type="button" id="fast-btn" class="btn btn-secondary">Ураза</button>
       <h2>Каза-намазы</h2>
       <button id="qaza-back" class="btn btn-secondary">← Назад</button>
     </div>
@@ -2900,6 +3166,41 @@ body.view-settings #header-actions {
     </section>
   </section>
 
+  <!-- Вкладка «Ураза»: счётчик каза-постов. Открывается кнопкой из шапки каза.
+       Ключа нет — это первый запуск, и вместо обычного экрана показывается
+       форма ввода. Ноль — не пустое значение, а существующий счётчик. -->
+  <section id="fast-view" hidden>
+    <div class="qaza-head">
+      <h2>Ураза</h2>
+      <button type="button" id="fast-back" class="btn btn-secondary">← Назад</button>
+    </div>
+
+    <!-- Одна форма на три случая: первый запуск, «Добавить уразу»
+         и «Изменить счётчик». Меняются заголовок и поведение -->
+    <section id="fast-init" hidden>
+      <h3 class="qaza-subtitle">Сколько дней нужно возместить?</h3>
+      <label class="prayer-field">
+        <span>Дней</span>
+        <input type="text" id="fast-init-value" inputmode="numeric" autocomplete="off"
+               placeholder="0" aria-label="Количество дней">
+      </label>
+      <p id="fast-init-note" class="form-error" role="alert"></p>
+      <div class="qaza-actions">
+        <button type="button" id="fast-init-save" class="btn btn-primary">Сохранить</button>
+        <button type="button" id="fast-init-cancel" class="btn btn-secondary" hidden>Отмена</button>
+      </div>
+    </section>
+
+    <section id="fast-main" hidden>
+      <p id="fast-remaining" class="qaza-summary"></p>
+      <div class="qaza-actions">
+        <button type="button" id="fast-done" class="btn btn-primary">Возместить 1 день</button>
+        <button type="button" id="fast-add" class="btn btn-secondary">Добавить уразу</button>
+        <button type="button" id="fast-edit" class="btn btn-secondary">Изменить счётчик</button>
+      </div>
+    </section>
+  </section>
+
   <!-- Вкладка «Задачи»: календарь месяца и список задач выбранного дня -->
   <section id="tasks-view" hidden>
     <div class="qaza-head">
@@ -2930,6 +3231,11 @@ body.view-settings #header-actions {
       <li>
         <button type="button" id="settings-edit-habits" class="settings-row">
           <span>Редактировать привычки</span><span class="settings-chevron">›</span>
+        </button>
+      </li>
+      <li>
+        <button type="button" id="settings-stats" class="settings-row">
+          <span>Статистика</span><span class="settings-chevron">›</span>
         </button>
       </li>
       <li>
@@ -2968,6 +3274,136 @@ body.view-settings #header-actions {
     <p class="qaza-summary">Раздел в разработке. Здесь появится выбор цвета фона.</p>
   </section>
 
+  <!-- Раздел «Статистика», заход 1: хаб и категория «Каза-намазы».
+       Открывается строкой из Настроек. Хаб — четыре строки с цифрой справа;
+       ведёт пока только «Каза-намазы», остальные категории — следующие заходы. -->
+  <section id="stats-view" hidden>
+    <div class="qaza-head">
+      <h2>Статистика</h2>
+      <button type="button" id="stats-back" class="btn btn-secondary">← Назад</button>
+    </div>
+    <div id="stats-period" role="radiogroup" aria-label="Период статистики">
+      <button type="button" class="view-switch-btn" data-period="week">Неделя</button>
+      <button type="button" class="view-switch-btn is-active" data-period="month">Месяц</button>
+      <button type="button" class="view-switch-btn" data-period="year">Год</button>
+      <button type="button" class="view-switch-btn" data-period="all">Всё время</button>
+    </div>
+    <!-- Цифры заполняет renderStatsView(). Стрелок нет: раздел статистики
+         вглубь уходит вложенным экраном, а не переходом по строке -->
+    <ul id="stats-list">
+      <li>
+        <button type="button" id="stats-row-qaza" class="settings-row" data-stat="qaza">
+          <span>Каза-намазы</span><span class="stats-row-value"></span>
+        </button>
+      </li>
+      <li>
+        <button type="button" id="stats-row-tasks" class="settings-row" data-stat="tasks">
+          <span>Задачи</span><span class="stats-row-value"></span>
+        </button>
+      </li>
+      <li>
+        <button type="button" id="stats-row-fast" class="settings-row" data-stat="fast">
+          <span>Ураза</span><span class="stats-row-value"></span>
+        </button>
+      </li>
+      <li>
+        <button type="button" id="stats-row-habits" class="settings-row" data-stat="habits">
+          <span>Привычки</span><span class="stats-row-value"></span>
+        </button>
+      </li>
+    </ul>
+  </section>
+
+  <!-- Категория «Статистика → Каза-намазы». Источник данных — поле h6
+       в записях дня, а не история очереди (§5): история живёт только за сегодня -->
+  <section id="stats-qaza-view" hidden>
+    <div class="qaza-head">
+      <h2>Каза-намазы</h2>
+      <button type="button" id="stats-qaza-back" class="btn btn-secondary">← Назад</button>
+    </div>
+    <div id="stats-qaza-period" role="radiogroup" aria-label="Период статистики">
+      <button type="button" class="view-switch-btn" data-period="week">Неделя</button>
+      <button type="button" class="view-switch-btn is-active" data-period="month">Месяц</button>
+      <button type="button" class="view-switch-btn" data-period="year">Год</button>
+      <button type="button" class="view-switch-btn" data-period="all">Всё время</button>
+    </div>
+    <div id="stats-qaza-summary"></div>
+    <div id="stats-qaza-chart" class="stats-chart"></div>
+  </section>
+
+  <!-- Категория «Статистика → Привычки»: список привычек человека. Процент —
+       calcProgress за период, поэтому пустой день даёт ноль и без записей
+       выходит «0%», а не «—». Строка ведёт в карточку одной привычки. -->
+  <section id="stats-habits-view" hidden>
+    <div class="qaza-head">
+      <h2>Привычки</h2>
+      <button type="button" id="stats-habits-back" class="btn btn-secondary">← Назад</button>
+    </div>
+    <div id="stats-habits-period" role="radiogroup" aria-label="Период статистики">
+      <button type="button" class="view-switch-btn" data-period="week">Неделя</button>
+      <button type="button" class="view-switch-btn is-active" data-period="month">Месяц</button>
+      <button type="button" class="view-switch-btn" data-period="year">Год</button>
+      <button type="button" class="view-switch-btn" data-period="all">Всё время</button>
+    </div>
+    <ul id="stats-habits-list"></ul>
+  </section>
+
+  <!-- Карточка одной привычки. Заголовок — имя: рисует renderStatsHabitView,
+       id у него свой, а не селектор по h2: второй заголовок в карточке
+       сломал бы поиск. График — столбики по дням, сетка — календарь как
+       у GitHub: колонка неделя, закрашен день с весом больше нуля. -->
+  <section id="stats-habit-view" hidden>
+    <div class="qaza-head">
+      <h2 id="stats-habit-title"></h2>
+      <button type="button" id="stats-habit-back" class="btn btn-secondary">← Назад</button>
+    </div>
+    <div id="stats-habit-period" role="radiogroup" aria-label="Период статистики">
+      <button type="button" class="view-switch-btn" data-period="week">Неделя</button>
+      <button type="button" class="view-switch-btn is-active" data-period="month">Месяц</button>
+      <button type="button" class="view-switch-btn" data-period="year">Год</button>
+      <button type="button" class="view-switch-btn" data-period="all">Всё время</button>
+    </div>
+    <div id="stats-habit-summary"></div>
+    <div id="stats-habit-chart" class="stats-chart"></div>
+    <div id="stats-habit-grid"></div>
+  </section>
+
+  <!-- Категория «Статистика → Задачи». Источник — список задач (§5): экран
+       читает его из хранилища, как хаб, а не из состояния таблицы -->
+  <section id="stats-tasks-view" hidden>
+    <div class="qaza-head">
+      <h2>Задачи</h2>
+      <button type="button" id="stats-tasks-back" class="btn btn-secondary">← Назад</button>
+    </div>
+    <div id="stats-tasks-period" role="radiogroup" aria-label="Период статистики">
+      <button type="button" class="view-switch-btn" data-period="week">Неделя</button>
+      <button type="button" class="view-switch-btn is-active" data-period="month">Месяц</button>
+      <button type="button" class="view-switch-btn" data-period="year">Год</button>
+      <button type="button" class="view-switch-btn" data-period="all">Всё время</button>
+    </div>
+    <div id="stats-tasks-summary"></div>
+    <div id="stats-tasks-chart" class="stats-chart"></div>
+  </section>
+
+  <!-- Категория «Статистика → Ураза». #stats-fast-empty-note — одно пустое
+       состояние на два случая: счётчика нет вовсе или истории слишком мало
+       для графика. Текст пишет renderStatsFastView() -->
+  <section id="stats-fast-view" hidden>
+    <div class="qaza-head">
+      <h2>Ураза</h2>
+      <button type="button" id="stats-fast-back" class="btn btn-secondary">← Назад</button>
+    </div>
+    <div id="stats-fast-period" role="radiogroup" aria-label="Период статистики">
+      <button type="button" class="view-switch-btn" data-period="week">Неделя</button>
+      <button type="button" class="view-switch-btn is-active" data-period="month">Месяц</button>
+      <button type="button" class="view-switch-btn" data-period="year">Год</button>
+      <button type="button" class="view-switch-btn" data-period="all">Всё время</button>
+    </div>
+    <div id="stats-fast-summary"></div>
+    <div id="stats-fast-chart" class="stats-chart"></div>
+    <p id="stats-fast-empty-note" class="stats-empty-note" hidden>Счётчик не заведён</p>
+  </section>
+
   <!-- Экран «Привычки»: открывается строкой из Настроек. Своя карточка вместо
        модалки — на телефоне список привычек занимает отдельный экран. -->
   <section id="habits-edit-view" hidden>
@@ -2980,6 +3416,21 @@ body.view-settings #header-actions {
       <button type="button" id="habits-edit-add" class="btn btn-primary">+ Добавить привычку</button>
     </div>
   </section>
+
+  <!-- Панель навигации статистики (заход 4). У самой панели атрибута hidden
+       нет: его переключение не дало бы выезду сыграть — открытое состояние
+       помечено классом is-open, а гасит панель базовое display:none на ПК.
+       Подложка — отдельным элементом и со своим hidden: внутри панели она
+       накрыла бы только её ширину, а нужен весь экран. -->
+  <div id="stats-menu-backdrop" hidden></div>
+  <aside id="stats-menu">
+    <p class="stats-menu-title">Статистика</p>
+    <button type="button" class="stats-menu-item" data-stats-view="stats">Общая статистика</button>
+    <button type="button" class="stats-menu-item" data-stats-view="stats-fast">Ураза</button>
+    <button type="button" class="stats-menu-item" data-stats-view="stats-qaza">Каза-намазы</button>
+    <button type="button" class="stats-menu-item" data-stats-view="stats-tasks">Задачи</button>
+    <button type="button" class="stats-menu-item" data-stats-view="stats-habits">Привычки</button>
+  </aside>
 
   <!-- Нижний таб-бар: переключает разделы. Виден только на телефоне,
        на ПК скрыт атрибутом hidden и базовым display:none. -->
@@ -4110,6 +4561,233 @@ function savePrayer(prayer) {
   scheduleSync();
 }
 
+/* ---------- Ураза: счётчик каза-постов ----------------------------------- */
+
+// Ключ свой, отдельный от каза-намазов: счётчики независимы (§5).
+// Отсутствие ключа — это и есть первый запуск; дефолта у уразы нет,
+// начальное число задаёт человек.
+const FAST_KEY = 'youplanner.qaza.fast';
+
+// Версия схемы. 1 — растущая история событий с полем source.
+const FAST_VERSION = 1;
+
+// Источник записи истории: 'set' — первый запуск и «Изменить счётчик»,
+// 'done' — «Возместить 1 день», 'add' — «Добавить уразу».
+const FAST_SOURCE_SET = 'set';
+const FAST_SOURCE_DONE = 'done';
+const FAST_SOURCE_ADD = 'add';
+
+// Больше этого числа за раз не принимается: случайное нажатие не должно
+// раздувать счётчик, а опечатка — историю
+const FAST_MAX_INPUT = 100000;
+
+// Меньше этого числа событий за всё время — графика нет: три столбика на всю
+// ширину карточки читались бы как «истории достаточно», хотя её почти нет
+const FAST_HISTORY_MIN = 5;
+
+// Чистка истории. Пришла из хранилища, с сервера или из файла копии — правило
+// одно: элемент годится, если это объект с датой 'YYYY-MM-DD', неотрицательным
+// конечным числом и известным источником. Битые записи отбрасываются молча:
+// история растёт годами, и одна испорченная строка не должна ронять счётчик
+// или подменять цифры статистики (§5)
+function validFastHistory(history) {
+  if (!Array.isArray(history)) return [];
+
+  return history.filter(function (item) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(item.date)) return false;
+    if (!Number.isFinite(item.count) || item.count < 0) return false;
+    return item.source === FAST_SOURCE_SET || item.source === FAST_SOURCE_DONE ||
+      item.source === FAST_SOURCE_ADD;
+  });
+}
+
+// Чтение с проверкой. null — единственный признак первого запуска: нет ключа,
+// битый JSON, не объект, остаток не число или отрицательный, история не массив.
+// История при чтении чистится, а не отклоняется: счётчик из-за одной битой
+// записи не теряется — он важнее истории (§5). В отличие от loadQaza() ничего
+// не пишет: пустое хранилище здесь значит «число ещё не задано», а не «пора
+// поставить дефолт».
+function loadFast() {
+  try {
+    const raw = localStorage.getItem(FAST_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    if (!Number.isFinite(parsed.remaining) || parsed.remaining < 0) return null;
+    if (!Array.isArray(parsed.history)) return null;
+
+    return {
+      version: FAST_VERSION,
+      remaining: Math.floor(parsed.remaining),
+      history: validFastHistory(parsed.history),
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+// Запись ключа. Остаток приводится к целому и неотрицательному ещё раз:
+// счётчик не может уйти в минус, откуда бы значение ни пришло.
+function saveFast(fast) {
+  if (!fast || !Number.isFinite(fast.remaining)) return;
+
+  localStorage.setItem(FAST_KEY, JSON.stringify({
+    version: FAST_VERSION,
+    remaining: Math.max(0, Math.floor(fast.remaining)),
+    history: Array.isArray(fast.history) ? fast.history : [],
+  }));
+  scheduleSync();
+}
+
+// Общий помощник: одно событие в историю. Это растущий массив, а не стек:
+// он не чистится по датам и нужен целиком разделу «Статистика» (§5).
+// Интерфейс историю не читает — только пишет.
+function appendFastHistory(fast, count, source) {
+  if (!fast || !Array.isArray(fast.history)) return;
+  fast.history.push({ date: toISODate(new Date()), count: count, source: source });
+}
+
+// «Возместить 1 день». Возмещённый пост — факт, отмены у него нет.
+// Проверка на остаток обязательна и здесь: погашенная кнопка — подсказка,
+// а не защита, и обработчик не должен полагаться только на неё.
+function markFastDone(fast) {
+  if (!fast || !Number.isFinite(fast.remaining) || fast.remaining <= 0) return fast;
+
+  fast.remaining -= 1;
+  appendFastHistory(fast, 1, FAST_SOURCE_DONE);
+  saveFast(fast);
+  return fast;
+}
+
+// «Добавить уразу»: остаток растёт на введённое число
+function addFast(fast, count) {
+  if (!fast || !Number.isFinite(count) || count <= 0) return fast;
+
+  fast.remaining += count;
+  appendFastHistory(fast, count, FAST_SOURCE_ADD);
+  saveFast(fast);
+  return fast;
+}
+
+// «Изменить счётчик»: перезапись остатка, а не прибавка. Ошибки ввода
+// исправляются только здесь — отдельной отмены у раздела нет.
+function setFast(fast, count) {
+  if (!fast || !Number.isFinite(count) || count < 0) return fast;
+
+  fast.remaining = count;
+  appendFastHistory(fast, count, FAST_SOURCE_SET);
+  saveFast(fast);
+  return fast;
+}
+
+// Разбор введённого числа. Принимается только целое: пустое, дробное,
+// отрицательное, нечисловое и больше FAST_MAX_INPUT отклоняются — null.
+// mode 'counter' — первый запуск и «Изменить счётчик» (≥ 0),
+// mode 'add' — «Добавить уразу» (> 0, ноль не принимается: прибавлять нечего).
+function parseFastInput(text, mode) {
+  const raw = text === null || text === undefined ? '' : String(text).trim();
+  if (!/^\d+$/.test(raw)) return null;
+
+  const value = Number(raw);
+  if (!Number.isFinite(value) || value > FAST_MAX_INPUT) return null;
+  if (mode === 'add' && value === 0) return null;
+
+  return value;
+}
+
+// Склонение «день / дня / дней»: 1 и 21 — день, 2–4 и 22–24 — дня,
+// 0, 5–20 и 11–14 — дней
+function fastRemainingLabel(n) {
+  const mod100 = Math.abs(n) % 100;
+  const mod10 = mod100 % 10;
+
+  let word;
+  if (mod100 >= 11 && mod100 <= 14) word = 'дней';
+  else if (mod10 === 1) word = 'день';
+  else if (mod10 >= 2 && mod10 <= 4) word = 'дня';
+  else word = 'дней';
+
+  return 'Ураза: осталось ' + n + ' ' + word;
+}
+
+/* ---------- Раздел «Статистика» ------------------------------------------ */
+
+// Период — отметка устройства, как youplanner.mainView: в синхронизацию
+// и в файл резервной копии не входит (§5)
+const STATS_PERIOD_KEY = 'youplanner.stats.period';
+const STATS_PERIODS = ['week', 'month', 'year', 'all'];
+const STATS_PERIOD_DEFAULT = 'month';
+
+// «Всё время» — окно в 365 дней от сегодня, а не от первой записи: иначе
+// одна старая запись растянула бы график на годы пустых дней
+const STATS_ALL_DAYS = 365;
+
+// Битое значение и отсутствие ключа — одно и то же: «Месяц»
+function loadStatsPeriod() {
+  const value = localStorage.getItem(STATS_PERIOD_KEY);
+  return STATS_PERIODS.indexOf(value) === -1 ? STATS_PERIOD_DEFAULT : value;
+}
+
+function saveStatsPeriod(period) {
+  if (STATS_PERIODS.indexOf(period) === -1) return;
+  localStorage.setItem(STATS_PERIOD_KEY, period);
+}
+
+// Дни периода по сегодня включительно. Даты собираются существующими
+// toISODate и addDays, начало недели — getWeekStart.
+function statsPeriodDates(period, today) {
+  const dates = [];
+  let from;
+
+  if (period === 'week') {
+    from = getWeekStart(today);
+  } else if (period === 'year') {
+    from = new Date(today.getFullYear(), 0, 1);
+  } else if (period === 'all') {
+    from = addDays(today, -(STATS_ALL_DAYS - 1));
+  } else {
+    // «Месяц» и всё неизвестное: с 1-го числа по сегодня
+    from = new Date(today.getFullYear(), today.getMonth(), 1);
+  }
+
+  const last = new Date(today.getFullYear(), today.getMonth(), today.getDate());
+  const cur = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  while (cur <= last) {
+    dates.push(toISODate(cur));
+    cur.setDate(cur.getDate() + 1);
+  }
+  return dates;
+}
+
+// Сколько каза выполнено в конкретный день: поле h6 в записях дня (§5, §8).
+// Работает по готовому снимку записей — за период в 365 дней читать
+// хранилище на каждый день незачем.
+function qazaDoneOn(records, date) {
+  const day = records ? records[date] : null;
+  const value = day ? day[QAZA_HABIT_ID] : undefined;
+  return typeof value === 'number' && value > 0 ? value : 0;
+}
+
+// Текущая серия: сколько дней подряд по сегодня включительно есть хотя бы
+// один каза. Считается назад от сегодня и периода не касается. Цикл всегда
+// конечен: первый день без записи его обрывает.
+function qazaStreak(records, today) {
+  let streak = 0;
+  while (qazaDoneOn(records, toISODate(addDays(today, -streak))) > 0) streak++;
+  return streak;
+}
+
+// Средний процент по всем привычкам за набор дат. База — calcProgress,
+// поэтому непроставленный день даёт ноль, как и в кругах таблицы.
+function habitsAveragePercent(habits, dates) {
+  if (!habits || habits.length === 0 || !dates || dates.length === 0) return null;
+
+  let sum = 0;
+  for (let i = 0; i < habits.length; i++) sum += calcProgress(habits[i], dates);
+  return sum / habits.length;
+}
+
 /* ---------- Синхронизация с Firebase (REST, без SDK) --------------------- */
 
 const FIREBASE_URL = 'https://youplanner-5c2f5-default-rtdb.firebaseio.com/youplanner-a7x9k2';
@@ -4187,6 +4865,7 @@ function applyCloudData(data, ts) {
       qaza: loadQaza(),
       tasks: loadTasks(),
       prayer: loadPrayer() || {},
+      fast: loadFast() || null,
     };
 
     if (Array.isArray(data.habits) && (hasData(data.habits) || !hasData(local.habits))) {
@@ -4211,6 +4890,21 @@ function applyCloudData(data, ts) {
         (hasData(data.prayer) || !hasData(local.prayer))) {
       localStorage.setItem(PRAYER_KEY, JSON.stringify(data.prayer));
     }
+    // Счётчик уразы — один раздел целиком, как задачи и координаты. Ноль
+    // здесь значимое значение: объект с remaining: 0 непуст по ключам,
+    // поэтому hasData даёт true и счётчик с сервера применяется. Пустым
+    // (null) с сервера приходит только «счётчика нет» — он не затирает
+    // заведённый счётчик на этом устройстве.
+    // История из снимка чистится, но раздел из-за неё не отклоняется:
+    // битая запись — не повод терять счётчик (§5, validFastHistory)
+    if (data.fast && typeof data.fast === 'object' && !Array.isArray(data.fast) &&
+        (hasData(data.fast) || !hasData(local.fast))) {
+      localStorage.setItem(FAST_KEY, JSON.stringify({
+        version: FAST_VERSION,
+        remaining: data.fast.remaining,
+        history: validFastHistory(data.fast.history),
+      }));
+    }
     localStorage.setItem(SYNC_TS_KEY, String(ts));
 
     appState.habits = loadHabits();
@@ -4224,6 +4918,7 @@ function applyCloudData(data, ts) {
   renderQazaView();
   renderTasksView();
   renderPrayerView();
+  renderFastView();
 }
 
 // Уступает ли локальное состояние серверному снимку. Правило одно на все
@@ -4314,6 +5009,9 @@ function syncBody(ts, previous) {
       qaza: loadQaza(),
       tasks: loadTasks(),
       prayer: loadPrayer() || {},
+      // Счётчика нет — наверх уходит null. Ноль счётчиком быть не перестаёт:
+      // объект с remaining: 0 остаётся объектом и уезжает как есть.
+      fast: loadFast() || null,
       updatedAt: ts,
     });
   } finally {
@@ -4386,15 +5084,16 @@ function showSyncStatus(message) {
 
 // Версия формата резервной копии. Растёт, если меняется состав полей файла:
 // версия 2 добавила раздел tasks, версия 3 — раздел prayer, версия 4 —
-// время у привычки и уровень у записи (§8). Старые файлы читаются как раньше.
-const BACKUP_VERSION = 4;
+// время у привычки и уровень у записи (§8), версия 5 — раздел fast (§11x).
+// Старые файлы читаются как раньше.
+const BACKUP_VERSION = 5;
 
 // Что попадает в файл. Метка синхронизации и режим главного экрана — состояние
 // устройства, а не данные, поэтому в копию не входят. Координат может не быть;
 // тогда раздел уходит пустым объектом — так же, как пустой список задач, и
 // читается он по общим правилам.
 function buildBackup() {
-  return {
+  const backup = {
     version: BACKUP_VERSION,
     exportedAt: new Date().toISOString(),
     habits: loadHabits(),
@@ -4403,6 +5102,16 @@ function buildBackup() {
     tasks: loadTasks(),
     prayer: loadPrayer() || {},
   };
+
+  // Счётчика уразы может не быть вовсе: отсутствие ключа — это первый запуск,
+  // и записывать в файл нечего. Пустым объектом тут не отделаешься, как
+  // у координат: разбор считает fast без remaining битым и отверг бы
+  // собственную копию. Поэтому раздела просто нет — старые файлы и файлы
+  // без счётчика читаются одинаково, и текущий счётчик они не трогают.
+  const fast = loadFast();
+  if (fast) backup.fast = fast;
+
+  return backup;
 }
 
 // Скачивание резервной копии через Blob. Дата в имени — локальная, тем же
@@ -4439,6 +5148,16 @@ function parseBackup(text) {
   if (data.tasks !== undefined && !Array.isArray(data.tasks)) return null;
   if (data.prayer !== undefined &&
       (!data.prayer || typeof data.prayer !== 'object' || Array.isArray(data.prayer))) return null;
+  // Раздел fast необязателен, но если он есть — проверяется целиком:
+  // не объект, остаток не число и история не массив роняют разбор.
+  // Так битый счётчик не подменит рабочий нулём или мусором.
+  if (data.fast !== undefined &&
+      (!data.fast || typeof data.fast !== 'object' || Array.isArray(data.fast))) return null;
+  if (data.fast && (!Number.isFinite(data.fast.remaining) || data.fast.remaining < 0)) return null;
+  if (data.fast && !Array.isArray(data.fast.history)) return null;
+  // История чистится после проверок: битая запись внутри копии разбор
+  // не роняет, а молча отбрасывается (§5, validFastHistory)
+  if (data.fast) data.fast.history = validFastHistory(data.fast.history);
 
   return data;
 }
@@ -4457,6 +5176,11 @@ function applyBackup(data) {
   if (data.prayer && typeof data.prayer === 'object' && !Array.isArray(data.prayer)) {
     localStorage.setItem(PRAYER_KEY, JSON.stringify(data.prayer));
   }
+  // Счётчик уразы заменяется целиком, как очередь и задачи. Раздела в файле
+  // нет — текущий счётчик остаётся: импорт его не стирает.
+  if (data.fast && typeof data.fast === 'object' && !Array.isArray(data.fast)) {
+    localStorage.setItem(FAST_KEY, JSON.stringify(data.fast));
+  }
 
   appState.habits = loadHabits();
   appState.records = loadRecords();
@@ -4467,6 +5191,7 @@ function applyBackup(data) {
   renderQazaView();
   renderTasksView();
   renderPrayerView();
+  renderFastView();
 }
 
 // Импорт выбранного файла. Пока разбор не удался или пользователь не подтвердил
@@ -5014,6 +5739,116 @@ function bindEvents() {
   const prayerRefresh = document.getElementById('prayer-refresh');
   if (prayerRefresh) prayerRefresh.addEventListener('click', onPrayerRefresh);
 
+  // Раздел «Статистика»: строка из Настроек, возврат в них же,
+  // из категории каза — назад в хаб
+  const settingsStats = document.getElementById('settings-stats');
+  if (settingsStats) {
+    settingsStats.addEventListener('click', function () { switchAppView('stats'); });
+  }
+
+  // Панель навигации статистики: кнопка в шапке, подложка и пункты списка.
+  // Пункты — делегированием: экран живёт в data-stats-view, и обработчик
+  // не переписывается, когда в панель добавляется строка
+  const statsMenuBtn = document.getElementById('stats-menu-btn');
+  if (statsMenuBtn) statsMenuBtn.addEventListener('click', openStatsMenu);
+
+  const statsMenuBackdrop = document.getElementById('stats-menu-backdrop');
+  if (statsMenuBackdrop) statsMenuBackdrop.addEventListener('click', closeStatsMenu);
+
+  const statsMenu = document.getElementById('stats-menu');
+  if (statsMenu) {
+    statsMenu.addEventListener('click', function (event) {
+      const item = event.target.closest('.stats-menu-item');
+      if (!item) return;
+      switchAppView(item.getAttribute('data-stats-view'));
+    });
+  }
+
+  // «Назад» из хаба ведёт туда, откуда в раздел вошли: на ПК это Настройки,
+  // на телефоне — главная с гамбургером
+  const statsBack = document.getElementById('stats-back');
+  if (statsBack) statsBack.addEventListener('click', function () { switchAppView(statsReturnView); });
+
+  const statsQazaBack = document.getElementById('stats-qaza-back');
+  if (statsQazaBack) {
+    statsQazaBack.addEventListener('click', function () { switchAppView('stats'); });
+  }
+
+  const statsRowQaza = document.getElementById('stats-row-qaza');
+  if (statsRowQaza) {
+    statsRowQaza.addEventListener('click', function () { switchAppView('stats-qaza'); });
+  }
+
+  const statsRowTasks = document.getElementById('stats-row-tasks');
+  if (statsRowTasks) {
+    statsRowTasks.addEventListener('click', function () { switchAppView('stats-tasks'); });
+  }
+
+  const statsRowFast = document.getElementById('stats-row-fast');
+  if (statsRowFast) {
+    statsRowFast.addEventListener('click', function () { switchAppView('stats-fast'); });
+  }
+
+  const statsTasksBack = document.getElementById('stats-tasks-back');
+  if (statsTasksBack) {
+    statsTasksBack.addEventListener('click', function () { switchAppView('stats'); });
+  }
+
+  const statsFastBack = document.getElementById('stats-fast-back');
+  if (statsFastBack) {
+    statsFastBack.addEventListener('click', function () { switchAppView('stats'); });
+  }
+
+  const statsRowHabits = document.getElementById('stats-row-habits');
+  if (statsRowHabits) {
+    statsRowHabits.addEventListener('click', function () { switchAppView('stats-habits'); });
+  }
+
+  const statsHabitsBack = document.getElementById('stats-habits-back');
+  if (statsHabitsBack) {
+    statsHabitsBack.addEventListener('click', function () { switchAppView('stats'); });
+  }
+
+  const statsHabitBack = document.getElementById('stats-habit-back');
+  if (statsHabitBack) {
+    statsHabitBack.addEventListener('click', function () { switchAppView('stats-habits'); });
+  }
+
+  // Строка списка привычек: id едет в data-habit-id, карточка читает его из
+  // statsHabitId — так у выбора один источник, а не два. Слушатель один на
+  // список: строк в нём столько же, сколько привычек у человека
+  const statsHabitsList = document.getElementById('stats-habits-list');
+  if (statsHabitsList) {
+    statsHabitsList.addEventListener('click', function (event) {
+      const row = event.target.closest('[data-habit-id]');
+      if (!row) return;
+      statsHabitId = row.getAttribute('data-habit-id');
+      switchAppView('stats-habit');
+    });
+  }
+
+  // Сегмент-контрол периодов: общий для всех экранов статистики. Выбор
+  // запоминается на устройстве; перерисовываем все экраны — они делят одно
+  // значение (§11y), а скрытые просто остаются наготове
+  ['stats-period', 'stats-qaza-period',
+    'stats-habits-period', 'stats-habit-period',
+    'stats-tasks-period', 'stats-fast-period'].forEach(function (id) {
+    const box = document.getElementById(id);
+    if (!box) return;
+    box.addEventListener('click', function (event) {
+      const btn = event.target.closest('.view-switch-btn');
+      if (!btn) return;
+      statsPeriod = btn.getAttribute('data-period');
+      saveStatsPeriod(statsPeriod);
+      renderStatsView();
+      renderStatsQazaView();
+      renderStatsHabitsView();
+      renderStatsHabitView();
+      renderStatsTasksView();
+      renderStatsFastView();
+    });
+  });
+
   // Экран «Привычки» в настройках
   const settingsEdit = document.getElementById('settings-edit-habits');
   if (settingsEdit) {
@@ -5123,6 +5958,43 @@ function bindEvents() {
 
   const qazaAddButton = document.getElementById('qaza-add-btn');
   if (qazaAddButton) qazaAddButton.addEventListener('click', onQazaAddSubmit);
+
+  // Вкладка «Ураза»: кнопка в шапке каза, возврат в неё же и три кнопки
+  // обычного экрана. Форма ввода — одна на все случаи, поэтому и
+  // «Сохранить» у неё одно
+  const fastButton = document.getElementById('fast-btn');
+  if (fastButton) {
+    fastButton.addEventListener('click', function () { switchAppView('fast'); });
+  }
+
+  const fastBack = document.getElementById('fast-back');
+  if (fastBack) {
+    fastBack.addEventListener('click', function () { switchAppView('qaza'); });
+  }
+
+  const fastInitSave = document.getElementById('fast-init-save');
+  if (fastInitSave) fastInitSave.addEventListener('click', onFastInitSave);
+
+  const fastInitCancel = document.getElementById('fast-init-cancel');
+  if (fastInitCancel) fastInitCancel.addEventListener('click', onFastInitCancel);
+
+  const fastDoneButton = document.getElementById('fast-done');
+  if (fastDoneButton) fastDoneButton.addEventListener('click', onFastDone);
+
+  const fastAddButton = document.getElementById('fast-add');
+  if (fastAddButton) fastAddButton.addEventListener('click', onFastAdd);
+
+  const fastEditButton = document.getElementById('fast-edit');
+  if (fastEditButton) fastEditButton.addEventListener('click', onFastEdit);
+
+  // Enter в поле — то же, что «Сохранить»: экран первый, и лишний тап
+  // по кнопке на телефоне читается как помеха
+  const fastInitValue = document.getElementById('fast-init-value');
+  if (fastInitValue) {
+    fastInitValue.addEventListener('keydown', function (event) {
+      if (event.key === 'Enter') onFastInitSave();
+    });
+  }
 
   // Вкладка «Задачи»: кнопка в шапке ПК и таб-бар (таб-бар — общим циклом выше)
   const tasksButton = document.getElementById('tasks-btn');
@@ -5271,7 +6143,13 @@ function bindEvents() {
   const taskSheetText = document.getElementById('task-sheet-text');
   if (taskSheetText) {
     taskSheetText.addEventListener('keydown', function (event) {
-      if (event.key === 'Enter') saveTaskFromSheet();
+      if (event.key !== 'Enter') return;
+      // Галочка «Сохранить» в панели гаснет, когда сохранять нечего: правка
+      // без изменений, пустой текст. Enter уважает её состояние, иначе на
+      // каждый Enter уходил бы лишний PUT с неизменёнными данными.
+      const saveInline = document.getElementById('task-sheet-save-inline');
+      if (saveInline && saveInline.disabled) return;
+      saveTaskFromSheet();
     });
     taskSheetText.addEventListener('input', updateTaskSaveInline);
   }
@@ -5311,6 +6189,14 @@ function bindEvents() {
   // висеть на экране.
   document.addEventListener('keydown', function (event) {
     if (event.key !== 'Escape') return;
+
+    // Панель статистики — верхний слой и в цепочке проверяется первой:
+    // она висит поверх таб-бара, и Escape обязан снять сначала её
+    if (isStatsMenuOpen()) {
+      closeStatsMenu();
+      return;
+    }
+
     const modal = document.getElementById('habit-modal');
     if (modal && !modal.hidden) closeModal();
 
@@ -5977,9 +6863,10 @@ function renderTasksView() {
 // id правимой задачи. null — форма открыта на новую задачу.
 let editingTaskId = null;
 
-// Текст, время и дата на момент открытия формы правки. Галочка сохранения в
-// панели активна только при отличии от снимка: иначе «ввёл и стёр» выглядел
-// бы как изменение. У новой задачи снимка нет — там решает непустое поле.
+// Текст, время, дата и пара (приоритет, ручной выбор) на момент открытия формы.
+// По нему галочка сохранения решает, менять ли что-то: иначе «ввёл и стёр»
+// выглядело бы как изменение. Снимок есть и у новой задачи; галочку там решает
+// непустое поле — ветка editingTaskId === null в updateTaskSaveInline.
 let originalFormState = null;
 
 // Приоритет, выбранный в форме, и признак «человек выбрал его в это
@@ -6043,6 +6930,12 @@ function openTaskSheet(id) {
   const sheet = document.getElementById('task-sheet');
   if (!sheet) return;
 
+  // Прошедший день форму не открывает. Кнопка «＋» на нём погашена, но это
+  // единственная преграда: программный вызов открыл бы форму с прошлой датой,
+  // а сохранить её всё равно не даст проверка в saveTaskFromSheet. Правку
+  // существующей задачи проверка не трогает — у неё своя ветка с подменой даты.
+  if (id == null && selectedTaskDate < toISODate(new Date())) return;
+
   editingTaskId = id == null ? null : id;
   formPriorityManual = false;
 
@@ -6064,17 +6957,25 @@ function openTaskSheet(id) {
 
   if (text) text.value = task ? task.text : '';
 
-  // Снимок берём с формы, а не с задачи: сравнение идёт с тем, что видно
-  originalFormState = task
-    ? { text: (text ? text.value : '').trim(), time: formTime || '', date: formDate }
-    : null;
+  // Приоритет формы: у правки — приоритет задачи, у новой — низкий. Ручного
+  // выбора ещё нет: его ставит только выбор в меню
+  formPriority = task ? task.priority : 'low';
+  updatePriorityIcon();
+
+  // Снимок берём с формы, а не с задачи: сравнение идёт с тем, что видно.
+  // Кроме текста, времени и даты в снимок входит пара (приоритет, ручной
+  // выбор): смена одного приоритета — такая же правка, как и остальные
+  originalFormState = {
+    text: (text ? text.value : '').trim(),
+    time: formTime || '',
+    date: formDate,
+    priority: formPriority,
+    manualPriority: formPriorityManual,
+  };
 
   // Кнопка даты не гаснет никогда: дата у задачи есть всегда
   if (dateButton) dateButton.disabled = false;
   updateTaskDateLabel();
-
-  formPriority = task ? task.priority : 'low';
-  updatePriorityIcon();
 
   if (title) title.textContent = task ? 'Редактировать' : 'Новая задача';
 
@@ -6107,7 +7008,7 @@ function closeTaskSheet() {
 
 // Галочка в панели формы. На новой задаче её зажигает непустой текст,
 // на правке — отличие от снимка: сохранять нечего, пока ничего не изменил.
-// Приоритет в сравнение не входит: его меняют отдельным меню.
+// Сравниваются текст, время, дата и пара (приоритет, ручной выбор).
 function updateTaskSaveInline() {
   const button = document.getElementById('task-sheet-save-inline');
   const text = document.getElementById('task-sheet-text');
@@ -6121,7 +7022,9 @@ function updateTaskSaveInline() {
     enabled = !!originalFormState &&
       (value !== originalFormState.text ||
         (formTime || '') !== originalFormState.time ||
-        formDate !== originalFormState.date);
+        formDate !== originalFormState.date ||
+        formPriority !== originalFormState.priority ||
+        formPriorityManual !== originalFormState.manualPriority);
   }
 
   button.disabled = !enabled;
@@ -6413,9 +7316,14 @@ function onPriorityPick(event) {
   const option = event.target.closest('.priority-option');
   if (!option) return;
   formPriority = option.getAttribute('data-priority');
-  formPriorityManual = true;
+  // Возврат к приоритету, который был в форме при открытии, — не выбор:
+  // пара (приоритет, ручной выбор) снова совпадает со снимком, и галочка
+  // сохранения гаснет. Иначе «потыкал и вернул» выглядело бы правкой.
+  formPriorityManual = formPriority !== originalFormState.priority ||
+    !!originalFormState.manualPriority;
   updatePriorityIcon();
   closePrioritySheet();
+  updateTaskSaveInline();
 }
 
 /* --- Пикер даты и времени -------------------------------------------------- */
@@ -6677,15 +7585,74 @@ function setHidden(id, hidden) {
   if (element) element.hidden = hidden;
 }
 
+/* --- Панель навигации статистики (заход 4) ------------------------------- */
+
+// Панель открыта — на панели класс is-open: по нему едет transform,
+// а visibility снимается без задержки. Подложка отдельным элементом
+// и гасится атрибутом hidden.
+function openStatsMenu() {
+  const menu = document.getElementById('stats-menu');
+  const backdrop = document.getElementById('stats-menu-backdrop');
+  if (!menu || !backdrop) return;
+  menu.classList.add('is-open');
+  backdrop.hidden = false;
+}
+
+function closeStatsMenu() {
+  const menu = document.getElementById('stats-menu');
+  const backdrop = document.getElementById('stats-menu-backdrop');
+  if (!menu || !backdrop) return;
+  menu.classList.remove('is-open');
+  backdrop.hidden = true;
+}
+
+// Открыта ли панель. Спрашивает Escape: он разбирает шторки по слоям
+function isStatsMenuOpen() {
+  const menu = document.getElementById('stats-menu');
+  return !!menu && menu.classList.contains('is-open');
+}
+
+// Экраны раздела «Статистика»: у них общий вход и общий возврат «Назад»
+function isStatsView(name) {
+  return name === 'stats' || name === 'stats-qaza' || name === 'stats-habits' ||
+    name === 'stats-habit' || name === 'stats-tasks' || name === 'stats-fast';
+}
+
+// Куда вернёт «Назад» с экранов статистики. Входов два — строка в Настройках
+// на ПК и гамбургер на телефоне, — и вернуть надо туда, откуда вошли.
+// Значение снимается один раз, на входе в раздел: иначе переход между
+// категориями переписывал бы его, и возврат уводил бы в прошлый экран
+let statsReturnView = 'settings';
+
+// Текущий вид приложения. Нужен затем, чтобы отличить вход в статистику
+// от перехода внутри неё
+let currentView = 'main';
+
 // Переключение разделов. Единая точка входа для таб-бара на телефоне,
 // кнопки «Каза-намазы» и «Назад» на ПК.
 function switchAppView(name) {
+  // Панель статистики принадлежит главной: любой переход её закрывает
+  closeStatsMenu();
+  // Попап уровня — тоже: программный переход (из консоли, теста или будущего
+  // кода) без этого оставил бы его висеть поверх нового экрана
+  closeLevelSheet();
+
+  // Вход в раздел запоминает, откуда вошли, — туда «Назад» из хаба и вернёт
+  if (isStatsView(name) && !isStatsView(currentView)) statsReturnView = currentView;
+
   document.getElementById('main').hidden = name !== 'main';
   document.getElementById('settings-view').hidden = name !== 'settings';
   document.getElementById('habits-edit-view').hidden = name !== 'edit-habits';
   document.getElementById('qaza-view').hidden = name !== 'qaza';
   document.getElementById('prayer-view').hidden = name !== 'prayer';
   document.getElementById('prayer-settings-view').hidden = name !== 'prayer-settings';
+  document.getElementById('fast-view').hidden = name !== 'fast';
+  document.getElementById('stats-view').hidden = name !== 'stats';
+  document.getElementById('stats-qaza-view').hidden = name !== 'stats-qaza';
+  document.getElementById('stats-habits-view').hidden = name !== 'stats-habits';
+  document.getElementById('stats-habit-view').hidden = name !== 'stats-habit';
+  document.getElementById('stats-tasks-view').hidden = name !== 'stats-tasks';
+  document.getElementById('stats-fast-view').hidden = name !== 'stats-fast';
   document.getElementById('tasks-view').hidden = name !== 'tasks';
   document.getElementById('mobile-day-tabs').hidden = name !== 'main' || !isMobileView();
   document.getElementById('tab-bar').hidden = !isMobileView();
@@ -6693,24 +7660,36 @@ function switchAppView(name) {
   document.getElementById('qaza-btn').hidden = name !== 'main';
   document.getElementById('tasks-btn').hidden = name !== 'main';
   document.getElementById('settings-btn').hidden = name !== 'main';
+  // Кнопка статистики открывает панель с экранами раздела: на других
+  // экранах ей нечего делать
+  document.getElementById('stats-menu-btn').hidden = name !== 'main';
   // Кнопка «＋» принадлежит вкладке задач: вне неё она бы висела поверх
   document.getElementById('task-add-btn').hidden = name !== 'tasks';
 
-  // Вложенные экраны подсвечивают вкладку, из которой открыты: «Привычки» и
-  // настройки молитв — «Настройки», «Молитвы» — «Каза»
-  const tabView = name === 'edit-habits' || name === 'prayer-settings' ? 'settings'
-    : name === 'prayer' ? 'qaza'
+  // Вложенные экраны подсвечивают вкладку, из которой открыты: «Привычки»,
+  // настройки молитв и статистика — «Настройки», «Молитвы» и «Ураза» — «Каза»
+  const tabView = name === 'edit-habits' || name === 'prayer-settings' ||
+    name === 'stats' || name === 'stats-qaza' ||
+    name === 'stats-habits' || name === 'stats-habit' ||
+    name === 'stats-tasks' || name === 'stats-fast' ? 'settings'
+    : name === 'prayer' || name === 'fast' ? 'qaza'
       : name;
   document.querySelectorAll('#tab-bar .tab-item').forEach(function (item) {
     item.classList.toggle('is-active', item.getAttribute('data-view') === tabView);
   });
 
-  // Классы на body гасят шапку действий в каза, молитвах и настройках
+  // Классы на body гасят шапку действий в каза, молитвах, уразе, настройках
+  // и статистике. У статистики свой класс, а не view-settings: гасят они одно
+  // и то же, но имя читается по экрану
   const isSettings = name === 'settings' || name === 'edit-habits' ||
     name === 'prayer-settings';
   document.body.classList.toggle('view-qaza', name === 'qaza');
   document.body.classList.toggle('view-prayer', name === 'prayer');
+  document.body.classList.toggle('view-fast', name === 'fast');
   document.body.classList.toggle('view-settings', isSettings);
+  document.body.classList.toggle('view-stats', name === 'stats' || name === 'stats-qaza' ||
+    name === 'stats-habits' || name === 'stats-habit' ||
+    name === 'stats-tasks' || name === 'stats-fast');
 
   if (name === 'qaza') {
     if (!qazaState) qazaState = loadQaza();
@@ -6731,6 +7710,33 @@ function switchAppView(name) {
     renderSettingsView();
   }
 
+  if (name === 'stats') {
+    renderStatsView();
+  }
+
+  if (name === 'stats-qaza') {
+    renderStatsQazaView();
+  }
+
+  if (name === 'stats-habits') {
+    // Вход в список обнуляет выбранную привычку: карточка открывается только
+    // тапом по строке, а не остатком прошлого захода
+    statsHabitId = null;
+    renderStatsHabitsView();
+  }
+
+  if (name === 'stats-habit') {
+    renderStatsHabitView();
+  }
+
+  if (name === 'stats-tasks') {
+    renderStatsTasksView();
+  }
+
+  if (name === 'stats-fast') {
+    renderStatsFastView();
+  }
+
   if (name === 'tasks') {
     renderTasksView();
   }
@@ -6745,13 +7751,411 @@ function switchAppView(name) {
     renderPrayerSettings();
   }
 
+  if (name === 'fast') {
+    // Незакрытая форма не переживает уход с экрана: возвращаться к наполовину
+    // заполненному полю незачем, а первый запуск снова покажет форму сам
+    fastInitMode = null;
+    renderFastView();
+  }
+
   window.scrollTo(0, 0);
+  currentView = name;
 }
 
 // Строка версии в Настройках
 function renderSettingsView() {
   const version = document.getElementById('settings-version');
   if (version) version.textContent = 'Версия: ' + APP_VERSION + ' · сборка ' + APP_BUILD;
+}
+
+/* ---------- Экран «Статистика» ------------------------------------------- */
+
+// Выбранный период. Живёт на устройстве, а не в данных человека:
+// как mainView, это отметка последнего просмотра, а не запись
+let statsPeriod = loadStatsPeriod();
+
+// Строка цифр: подпись слева, значение справа — тем же .settings-row,
+// что и список хаба. data-stat нужен проверкам, разметку не украшает.
+function statsSummaryMarkup(rows) {
+  return rows.map(function (row) {
+    return '<p class="settings-row" data-stat="' + escapeHtml(row[0]) + '">' +
+      '<span>' + escapeHtml(row[1]) + '</span>' +
+      '<span class="stats-row-value">' + escapeHtml(row[2]) + '</span></p>';
+  }).join('');
+}
+
+// Столбики по дням: высота — значение дня. Строка SVG собирается вручную
+// через innerHTML, как circleMarkup; библиотек нет (§4). Подпись — второй
+// параметр: у каза и у привычек она своя, а рисование одно и то же.
+function statsChartMarkup(values, label) {
+  let max = 0;
+  for (let i = 0; i < values.length; i++) {
+    if (values[i] > max) max = values[i];
+  }
+  if (max <= 0) return '';
+
+  // 94, а не 100: самый высокий столбик не должен упираться в верх графика
+  let bars = '';
+  for (let i = 0; i < values.length; i++) {
+    if (values[i] <= 0) continue;
+    // Минимум 2 единицы: день с одним каза иначе был бы не виден
+    const height = Math.max(2, Math.round(values[i] / max * 94));
+    bars += '<rect x="' + i + '" y="' + (100 - height) + '" width="0.7" height="' +
+      height + '"></rect>';
+  }
+
+  return '<svg viewBox="0 0 ' + values.length + ' 100" preserveAspectRatio="none" ' +
+    'role="img" aria-label="' + escapeHtml(label || 'Каза по дням') + '">' + bars + '</svg>';
+}
+
+// Подсветка выбранного периода. Разметка кнопок статична, поэтому
+// пересобирать её не нужно — как у переключателя «День / Неделя»
+function markStatsPeriod(boxId) {
+  const box = document.getElementById(boxId);
+  if (!box) return;
+  box.querySelectorAll('.view-switch-btn').forEach(function (btn) {
+    btn.classList.toggle('is-active', btn.getAttribute('data-period') === statsPeriod);
+  });
+}
+
+function setStatsValue(selector, value) {
+  const el = document.querySelector(selector);
+  if (el) el.textContent = value;
+}
+
+// Хаб: четыре строки. Цифры считаются по хранилищу, а не по appState:
+// раздел открывается из Настроек, где состояние таблицы могло устареть.
+function renderStatsView() {
+  markStatsPeriod('stats-period');
+
+  const today = new Date();
+  const dates = statsPeriodDates(statsPeriod, today);
+  const todayISO = toISODate(today);
+
+  if (!qazaState) qazaState = loadQaza();
+  setStatsValue('#stats-list [data-stat="qaza"] .stats-row-value',
+    qazaTotalRemaining(qazaState));
+
+  const open = loadTasks().filter(function (task) {
+    return task.date === todayISO && !task.done;
+  });
+  setStatsValue('#stats-list [data-stat="tasks"] .stats-row-value', open.length);
+
+  const fast = loadFast();
+  setStatsValue('#stats-list [data-stat="fast"] .stats-row-value',
+    fast ? fast.remaining : '—');
+
+  const average = habitsAveragePercent(loadHabits(), dates);
+  setStatsValue('#stats-list [data-stat="habits"] .stats-row-value',
+    average === null ? '—' : Math.round(average) + '%');
+}
+
+function renderStatsQazaView() {
+  markStatsPeriod('stats-qaza-period');
+
+  const today = new Date();
+  const dates = statsPeriodDates(statsPeriod, today);
+  const records = loadRecords();
+
+  // Источник — поле h6: история очереди живёт только за сегодня (§5)
+  let done = 0;
+  const values = [];
+  for (let i = 0; i < dates.length; i++) {
+    const count = qazaDoneOn(records, dates[i]);
+    values.push(count);
+    done += count;
+  }
+
+  if (!qazaState) qazaState = loadQaza();
+  const average = done / dates.length;
+
+  const summary = document.getElementById('stats-qaza-summary');
+  if (summary) {
+    summary.innerHTML = statsSummaryMarkup([
+      ['done', 'Выполнено за период', String(done)],
+      ['average', 'Средний темп в день', average.toFixed(1).replace('.', ',')],
+      ['streak', 'Текущая серия, дней', String(qazaStreak(records, today))],
+      ['total', 'Общий остаток', String(qazaTotalRemaining(qazaState))],
+    ]);
+  }
+
+  const chart = document.getElementById('stats-qaza-chart');
+  if (chart) chart.innerHTML = statsChartMarkup(values);
+}
+
+// Категория «Задачи». Список читается из хранилища, как в хабе: раздел
+// открывают из Настроек, где состояние таблицы могло устареть.
+// «За период» у создания и выполнения — разное поле: задача, созданная
+// в прошлом месяце, но выполненная сегодня, в графе «создано» не появится
+function renderStatsTasksView() {
+  markStatsPeriod('stats-tasks-period');
+
+  const summary = document.getElementById('stats-tasks-summary');
+  const chart = document.getElementById('stats-tasks-chart');
+  if (!summary || !chart) return;
+
+  const today = toISODate(new Date());
+  const dates = statsPeriodDates(statsPeriod, new Date());
+
+  // День периода → его место в графике: список задач перебирается один раз,
+  // а поиск по дате внутри цикла был бы квадратом на окне в 365 дней
+  const dayIndex = {};
+  const values = [];
+  for (let i = 0; i < dates.length; i++) {
+    dayIndex[dates[i]] = i;
+    values.push(0);
+  }
+
+  const tasks = loadTasks();
+  let created = 0;
+  let done = 0;
+  let overdue = 0;
+  let high = 0;
+  let normal = 0;
+
+  for (let i = 0; i < tasks.length; i++) {
+    const task = tasks[i];
+
+    // Создано — по дню создания, а не по сроку: срок у задачи может стоять
+    // и в будущем, и в прошлом
+    if (dayIndex[toISODate(new Date(task.createdAt))] !== undefined) {
+      created++;
+      if (task.priority === 'high') high++;
+      else normal++;
+      // Просрочена — невыполненная задача периода, срок которой уже прошёл
+      if (!task.done && task.date < today) overdue++;
+    }
+
+    if (task.done === true) {
+      const marked = dayIndex[task.date];
+      if (marked !== undefined) {
+        done++;
+        values[marked]++;
+      }
+    }
+  }
+
+  summary.innerHTML = statsSummaryMarkup([
+    ['created', 'Создано за период', String(created)],
+    ['done', 'Выполнено за период', String(done)],
+    ['overdue', 'Просрочено за период', String(overdue)],
+    ['priority', 'Приоритеты', high + ' высоких / ' + normal + ' обычных'],
+  ]);
+
+  chart.innerHTML = statsChartMarkup(values, 'Отметки задач по дням');
+}
+
+// Категория «Ураза». Источник — растущая история счётчика (§5): интерфейс
+// уразы её только пишет, читает раздел статистики. Счётчика нет — ни цифр,
+// ни графика: собрать их не из чего
+function renderStatsFastView() {
+  markStatsPeriod('stats-fast-period');
+
+  const summary = document.getElementById('stats-fast-summary');
+  const chart = document.getElementById('stats-fast-chart');
+  const note = document.getElementById('stats-fast-empty-note');
+  if (!summary || !chart || !note) return;
+
+  const fast = loadFast();
+  if (!fast) {
+    summary.innerHTML = '';
+    summary.hidden = true;
+    chart.innerHTML = '';
+    chart.hidden = true;
+    note.textContent = 'Счётчик не заведён';
+    note.hidden = false;
+    return;
+  }
+
+  summary.hidden = false;
+
+  const dates = statsPeriodDates(statsPeriod, new Date());
+  const dayIndex = {};
+  const values = [];
+  for (let i = 0; i < dates.length; i++) {
+    dayIndex[dates[i]] = i;
+    values.push(0);
+  }
+
+  let done = 0;
+  let added = 0;
+  let since = null;
+
+  for (let i = 0; i < fast.history.length; i++) {
+    const event = fast.history[i];
+    // Начало истории — по всей истории, а не по периоду: «с какого дня
+    // копится» не должно меняться от выбранного окна
+    if (since === null || event.date < since) since = event.date;
+
+    const day = dayIndex[event.date];
+    if (day === undefined) continue;
+    if (event.source === FAST_SOURCE_DONE) {
+      done += event.count;
+      values[day] += event.count;
+    } else if (event.source === FAST_SOURCE_ADD) {
+      added += event.count;
+    }
+  }
+
+  summary.innerHTML = statsSummaryMarkup([
+    ['remaining', 'Остаток', String(fast.remaining)],
+    ['done', 'Возмещено за период', String(done)],
+    ['added', 'Добавлено за период', String(added)],
+    ['since', 'История копится с', since === null ? '—' : since],
+  ]);
+
+  // Истории мало — вместо графика строка текста: три столбика на всю ширину
+  // читались бы как «данных достаточно», хотя это ещё начало
+  if (fast.history.length < FAST_HISTORY_MIN) {
+    chart.innerHTML = '';
+    chart.hidden = true;
+    note.textContent = 'История копится с ' + (since === null ? '—' : since) +
+      '. Данных пока мало для графика';
+    note.hidden = false;
+  } else {
+    chart.hidden = false;
+    chart.innerHTML = statsChartMarkup(values, 'Возмещено по дням');
+    note.hidden = true;
+  }
+}
+
+/* ---------- Статистика: привычки ----------------------------------------- */
+
+// Выбранная привычка. Живёт только в интерфейсе: список обнуляет её при входе,
+// строка списка ставит своё значение перед показом карточки
+let statsHabitId = null;
+
+// Отмечен ли день: вес больше нуля. Единый критерий серии, сетки и счётчика
+// отметок — считается через calcProgress по одному дню, как прогресс в кругах
+function habitMarked(habit, date) {
+  return calcProgress(habit, [date]) > 0;
+}
+
+// Дни периода с отметкой
+function habitMarkedDays(habit, dates) {
+  const days = [];
+  for (let i = 0; i < dates.length; i++) {
+    if (habitMarked(habit, dates[i])) days.push(dates[i]);
+  }
+  return days;
+}
+
+// Текущая серия: сколько дней подряд по сегодня включительно привычка отмечена.
+// Как у каза, периода не касается — серия принадлежит сегодняшнему дню, и цикл
+// конечен: первый неотмеченный день его обрывает
+function habitCurrentStreak(habit, today) {
+  let streak = 0;
+  while (habitMarked(habit, toISODate(addDays(today, -streak)))) streak++;
+  return streak;
+}
+
+// Лучшая серия внутри периода: самый длинный ряд подряд идущих отмеченных дней
+function habitBestStreak(habit, dates) {
+  let best = 0;
+  let run = 0;
+  for (let i = 0; i < dates.length; i++) {
+    run = habitMarked(habit, dates[i]) ? run + 1 : 0;
+    if (run > best) best = run;
+  }
+  return best;
+}
+
+// Календарь-сетка: колонка — неделя (понедельник сверху), строка — день недели.
+// Клетки одинаковые и заданы в пикселях, поэтому ширина сетки растёт вместе
+// с числом недель, а не подгоняется под экран: на телефоне её прокручивает
+// контейнер. Новых переменных палитры нет — цвета берёт §9
+function statsHabitGridMarkup(habit, dates) {
+  if (!dates || dates.length === 0) return '';
+
+  const CELL = 10;
+  const GAP = 2;
+  const STEP = CELL + GAP;
+
+  // Сдвиг первого дня от понедельника: 0 — понедельник, 6 — воскресенье
+  const offset = (parseISODate(dates[0]).getDay() + 6) % 7;
+  const weeks = Math.ceil((offset + dates.length) / 7);
+
+  let cells = '';
+  for (let i = 0; i < dates.length; i++) {
+    const slot = offset + i;
+    cells += '<rect class="stats-grid-day' +
+      (habitMarked(habit, dates[i]) ? ' is-on' : '') +
+      '" x="' + Math.floor(slot / 7) * STEP + '" y="' + slot % 7 * STEP +
+      '" width="' + CELL + '" height="' + CELL + '" rx="2"></rect>';
+  }
+
+  return '<svg width="' + (weeks * STEP - GAP) + '" height="' + (7 * STEP - GAP) +
+    '" role="img" aria-label="Отметки по дням">' + cells + '</svg>';
+}
+
+// Список привычек. Процент за период — calcProgress, и это же делает «0%»
+// при полном отсутствии записей: пустой день даёт ноль, ветка «—» не нужна
+function renderStatsHabitsView() {
+  markStatsPeriod('stats-habits-period');
+
+  const list = document.getElementById('stats-habits-list');
+  if (!list) return;
+
+  const dates = statsPeriodDates(statsPeriod, new Date());
+  const habits = loadHabits();
+
+  // Строка — кнопка, как строка хаба: <div> выпал бы из таб-навигации
+  let markup = '';
+  for (let i = 0; i < habits.length; i++) {
+    const habit = habits[i];
+    markup += '<li><button type="button" class="settings-row" data-habit-id="' +
+      escapeHtml(habit.id) + '"><span>' + escapeHtml(habit.name) + '</span>' +
+      '<span class="stats-row-value">' + Math.round(calcProgress(habit, dates)) +
+      '%</span></button></li>';
+  }
+  list.innerHTML = markup;
+}
+
+// Карточка одной привычки. Без выбранного id рисовать нечего: экран
+// открывается только тапом по строке списка
+function renderStatsHabitView() {
+  if (statsHabitId === null) return;
+
+  markStatsPeriod('stats-habit-period');
+
+  // Список читается из хранилища, как в хабе: раздел открывают из Настроек,
+  // где состояние таблицы могло устареть
+  const habits = loadHabits();
+  let habit = null;
+  for (let i = 0; i < habits.length; i++) {
+    if (habits[i].id === statsHabitId) habit = habits[i];
+  }
+  if (!habit) return;
+
+  const today = new Date();
+  const dates = statsPeriodDates(statsPeriod, today);
+
+  const title = document.getElementById('stats-habit-title');
+  if (title) title.textContent = habit.name;
+
+  const summary = document.getElementById('stats-habit-summary');
+  if (summary) {
+    summary.innerHTML = statsSummaryMarkup([
+      ['average', 'Средний процент за период', Math.round(calcProgress(habit, dates)) + '%'],
+      ['streak', 'Текущая серия, дней', String(habitCurrentStreak(habit, today))],
+      ['best', 'Лучшая серия за период, дней', String(habitBestStreak(habit, dates))],
+      ['marks', 'Всего отметок за период', String(habitMarkedDays(habit, dates).length)],
+    ]);
+  }
+
+  const values = [];
+  for (let i = 0; i < dates.length; i++) values.push(calcProgress(habit, [dates[i]]));
+
+  const chart = document.getElementById('stats-habit-chart');
+  if (chart) chart.innerHTML = statsChartMarkup(values, 'Отметки по дням');
+
+  const grid = document.getElementById('stats-habit-grid');
+  if (grid) {
+    grid.innerHTML = statsHabitGridMarkup(habit, dates);
+    // Свежие отметки лежат справа: без этого «Всё время» открывалось бы
+    // на неделях пустоты, а сегодняшний край оставался за кадром
+    grid.scrollLeft = grid.scrollWidth;
+  }
 }
 
 /* ---------- Экран «Молитвы» ---------------------------------------------- */
@@ -7404,6 +8808,120 @@ function updateQazaCells() {
 
   // В режиме «День» таблица скрыта — обновляем ещё и карточки
   if (isMainDayView()) renderDayCards();
+}
+
+/* --- Вкладка «Ураза» ----------------------------------------------------- */
+
+// Форма открыта кнопкой обычного экрана: 'add' или 'edit'. Первый запуск
+// сюда не пишется — он выводится из отсутствия ключа. Иначе «ключ стёрли»
+// и «форму ещё не закрыли» стали бы одним состоянием.
+let fastInitMode = null;
+
+// Экран раздела: форма ввода или обычный экран. Признак первого запуска —
+// только loadFast() === null. Остаток 0 — существующий счётчик, и экран
+// у него обычный: возмещать нечего, но добавлять и править есть что.
+function renderFastView() {
+  const fast = loadFast();
+  const mode = fastInitMode || (fast === null ? 'start' : null);
+
+  setHidden('fast-init', mode === null);
+  setHidden('fast-main', mode !== null || fast === null);
+
+  if (mode !== null) {
+    // Заголовок и «Отмена» зависят от случая: на первом запуске обычного
+    // экрана ещё нет, и отменять нечего
+    const title = document.querySelector('#fast-init .qaza-subtitle');
+    if (title) {
+      title.textContent = mode === 'add' ? 'Сколько дней добавить?'
+        : mode === 'edit' ? 'Сколько дней осталось?'
+          : 'Сколько дней нужно возместить?';
+    }
+    setHidden('fast-init-cancel', mode === 'start');
+
+    // Сообщение об ошибке снимается при каждом открытии формы заново
+    const note = document.getElementById('fast-init-note');
+    if (note) note.textContent = '';
+    return;
+  }
+
+  const label = document.getElementById('fast-remaining');
+  if (label) label.textContent = fastRemainingLabel(fast.remaining);
+
+  // При нулевом остатке «Возместить» гаснет: возмещённых постов не бывает
+  // больше, чем дней к возмещению
+  const done = document.getElementById('fast-done');
+  if (done) done.disabled = fast.remaining <= 0;
+}
+
+// Открыть форму кнопкой обычного экрана
+function openFastForm(mode) {
+  fastInitMode = mode;
+
+  const field = document.getElementById('fast-init-value');
+  if (field) field.value = '';
+  renderFastView();
+  if (field) field.focus();
+}
+
+function onFastAdd() {
+  openFastForm('add');
+}
+
+function onFastEdit() {
+  openFastForm('edit');
+}
+
+function onFastInitCancel() {
+  fastInitMode = null;
+  renderFastView();
+}
+
+// «Возместить 1 день». Кнопка при нулевом остатке погашена, но обработчик
+// проверяет остаток сам: погашенная кнопка — подсказка, а не защита,
+// и остаток не должен уйти в минус нажатием из консоли или скрипта.
+function onFastDone() {
+  const fast = loadFast();
+  if (!fast || fast.remaining <= 0) return;
+
+  markFastDone(fast);
+  renderFastView();
+}
+
+// «Сохранить» формы. Один обработчик на три случая: режим решает, что делать
+// с введённым числом. Неверный ввод оставляет форму открытой — исправлять
+// его здесь же, а не в обычном экране.
+function onFastInitSave() {
+  const field = document.getElementById('fast-init-value');
+  const note = document.getElementById('fast-init-note');
+  const fast = loadFast();
+
+  const mode = fastInitMode || (fast === null ? 'start' : null);
+  if (mode === null) return;
+
+  // Первый запуск и «Изменить счётчик» задают остаток целиком (≥ 0),
+  // «Добавить уразу» — только прибавку (> 0, ноль не принимается)
+  const value = parseFastInput(field ? field.value : '', mode === 'add' ? 'add' : 'counter');
+  if (value === null) {
+    if (note) {
+      note.textContent = mode === 'add'
+        ? 'Введите целое число больше нуля, не больше ' + FAST_MAX_INPUT + '.'
+        : 'Введите целое число от 0 до ' + FAST_MAX_INPUT + '.';
+    }
+    return;
+  }
+
+  if (note) note.textContent = '';
+  if (field) field.value = '';
+
+  if (mode === 'add') {
+    addFast(fast, value);
+  } else {
+    // Первого ключа ещё нет — заводим его здесь же
+    setFast(fast || { version: FAST_VERSION, remaining: 0, history: [] }, value);
+  }
+
+  fastInitMode = null;
+  renderFastView();
 }
 
 /* --- Модальное окно ------------------------------------------------------ */
