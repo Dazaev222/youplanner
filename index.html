@@ -4335,6 +4335,120 @@ function saveQaza(qaza) {
   scheduleSync();
 }
 
+/* ---------- Каза-намазы: растущий журнал выполнений ---------------------- */
+
+// Ключ растущего журнала выполнений — сосед youplanner.qaza, но не его
+// часть: там стек отмены за сегодня, здесь история на годы (§5).
+const QAZA_LOG_KEY = 'youplanner.qaza.log';
+
+// Версия схемы журнала. 1 — записи с полем source, как у истории уразы (§5).
+const QAZA_LOG_VERSION = 1;
+
+// Календарный день 'YYYY-MM-DD' — и у since, и у даты записи
+function validQazaLogDate(value) {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
+}
+
+// Чистка записей журнала. Правило то же, что у истории уразы
+// (validFastHistory, §5): элемент годится, если это объект с датой
+// 'YYYY-MM-DD', известным намазом и известным источником. Битые записи
+// отбрасываются молча: журнал растёт годами, и одна испорченная строка
+// не должна ронять статистику
+function validQazaLogEntries(entries) {
+  if (!Array.isArray(entries)) return [];
+
+  return entries.filter(function (item) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
+    if (!validQazaLogDate(item.date)) return false;
+    if (NAMAZ_ORDER.indexOf(item.namaz) === -1) return false;
+    return item.source === QAZA_SOURCE_DONE || item.source === QAZA_SOURCE_MANUAL;
+  });
+}
+
+// Чтение журнала. null — единственный признак «журнала нет»: нет ключа,
+// битый JSON, не объект, since не дата или entries не массив. Записи при
+// чтении чистятся, а не отклоняются: из-за одной битой строки журнал
+// не теряется (§5). Как loadFast(), ничего не пишет.
+function loadQazaLog() {
+  try {
+    const raw = localStorage.getItem(QAZA_LOG_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    if (!validQazaLogDate(parsed.since)) return null;
+    if (!Array.isArray(parsed.entries)) return null;
+
+    return {
+      version: QAZA_LOG_VERSION,
+      since: parsed.since,
+      entries: validQazaLogEntries(parsed.entries),
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+// Запись ключа. Журнал не чистится по датам и не обрезается: ограничения
+// размера нет, как у истории уразы (§5).
+function saveQazaLog(log) {
+  if (!log || !validQazaLogDate(log.since)) return;
+
+  localStorage.setItem(QAZA_LOG_KEY, JSON.stringify({
+    version: QAZA_LOG_VERSION,
+    since: log.since,
+    entries: Array.isArray(log.entries) ? log.entries : [],
+  }));
+  scheduleSync();
+}
+
+// Одно событие в журнал. Журнала нет — он заводится с since по дате первой
+// записи: за дни до неё статистика читает h6, за неё и позже — журнал (§5).
+function appendQazaLog(namaz, date, source) {
+  if (NAMAZ_ORDER.indexOf(namaz) === -1) return;
+  if (source !== QAZA_SOURCE_DONE && source !== QAZA_SOURCE_MANUAL) return;
+  if (!validQazaLogDate(date)) return;
+
+  const log = loadQazaLog() ||
+    { version: QAZA_LOG_VERSION, since: date, entries: [] };
+  log.entries.push({ date: date, namaz: namaz, source: source });
+  saveQazaLog(log);
+}
+
+// Снятие последней подходящей записи. Отмена в очереди (§6.4) снимает
+// и запись журнала: иначе отменённое выполнение навсегда осталось бы
+// в статистике дня. Ищется с конца — тем же порядком, каким записи
+// добавлялись. Журнала нет или записи в нём нет (она старше since) —
+// ничего не делается.
+function dropLastQazaLog(namaz, date, source) {
+  const log = loadQazaLog();
+  if (!log) return;
+
+  for (let i = log.entries.length - 1; i >= 0; i--) {
+    const entry = log.entries[i];
+    if (entry.date === date && entry.namaz === namaz && entry.source === source) {
+      log.entries.splice(i, 1);
+      saveQazaLog(log);
+      return;
+    }
+  }
+}
+
+// Выполнения каза по дням из журнала: одна запись — один выполненный намаз.
+// Ручные добавления пропусков не считаются: намаз не выполнен, а вспомнен
+// (§6.6). Возвращается карта «день → число», а не поиск по журналу на каждый
+// день периода: на окне в 365 дней это был бы квадрат (§11y)
+function qazaLogDoneByDay(log) {
+  const byDay = {};
+  if (!log || !Array.isArray(log.entries)) return byDay;
+
+  for (let i = 0; i < log.entries.length; i++) {
+    const entry = log.entries[i];
+    if (entry.source === QAZA_SOURCE_MANUAL) continue;
+    byDay[entry.date] = (byDay[entry.date] || 0) + 1;
+  }
+  return byDay;
+}
+
 /* ---------- Молитвы: координаты, мазхаб и расчёт времён ------------------ */
 
 // Координаты и мазхаб живут одним ключом и ходят на сервер одним разделом,
@@ -4730,19 +4844,62 @@ const STATS_PERIOD_KEY = 'youplanner.stats.period';
 const STATS_PERIODS = ['week', 'month', 'year', 'all'];
 const STATS_PERIOD_DEFAULT = 'month';
 
+// Пять категорий статистики: у каждой свой период
+const STATS_PERIOD_CATEGORIES = ['hub', 'qaza', 'habits', 'tasks', 'fast'];
+
+// Блок периодов → категория. Блоков шесть, категорий пять: список привычек
+// и карточка одной привычки делят период категории «habits»
+const STATS_PERIOD_BOXES = {
+  'stats-period': 'hub',
+  'stats-qaza-period': 'qaza',
+  'stats-habits-period': 'habits',
+  'stats-habit-period': 'habits',
+  'stats-tasks-period': 'tasks',
+  'stats-fast-period': 'fast',
+};
+
 // «Всё время» — окно в 365 дней от сегодня, а не от первой записи: иначе
 // одна старая запись растянула бы график на годы пустых дней
 const STATS_ALL_DAYS = 365;
 
-// Битое значение и отсутствие ключа — одно и то же: «Месяц»
-function loadStatsPeriod() {
-  const value = localStorage.getItem(STATS_PERIOD_KEY);
+// Содержимое ключа как объект периодов. Ключа нет и мусор в нём — пустой
+// объект: обе ветки читаются как «Месяц». Строка из списка — след прежней
+// версии, где период был один: переносится на все пять категорий, и первая
+// же правка периода кладёт в ключ объект
+function readStatsPeriods() {
+  const raw = localStorage.getItem(STATS_PERIOD_KEY);
+  if (!raw) return {};
+
+  if (STATS_PERIODS.indexOf(raw) !== -1) {
+    const legacy = {};
+    for (let i = 0; i < STATS_PERIOD_CATEGORIES.length; i++) {
+      legacy[STATS_PERIOD_CATEGORIES[i]] = raw;
+    }
+    return legacy;
+  }
+
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === 'object' ? parsed : {};
+  } catch (err) {
+    return {};
+  }
+}
+
+// Период одной категории. Битое значение, отсутствие поля и отсутствие ключа —
+// одно и то же: «Месяц»
+function loadStatsPeriod(category) {
+  const value = readStatsPeriods()[category];
   return STATS_PERIODS.indexOf(value) === -1 ? STATS_PERIOD_DEFAULT : value;
 }
 
-function saveStatsPeriod(period) {
+// Пишет одно поле, остальные четыре не трогает. Значение вне списка не
+// пишется — как и у единственного периода до этой правки
+function saveStatsPeriod(category, period) {
   if (STATS_PERIODS.indexOf(period) === -1) return;
-  localStorage.setItem(STATS_PERIOD_KEY, period);
+  const periods = readStatsPeriods();
+  periods[category] = period;
+  localStorage.setItem(STATS_PERIOD_KEY, JSON.stringify(periods));
 }
 
 // Дни периода по сегодня включительно. Даты собираются существующими
@@ -4877,6 +5034,7 @@ function applyCloudData(data, ts) {
       tasks: loadTasks(),
       prayer: loadPrayer() || {},
       fast: loadFast() || null,
+      qazaLog: loadQazaLog() || null,
     };
 
     if (Array.isArray(data.habits) && (hasData(data.habits) || !hasData(local.habits))) {
@@ -4922,6 +5080,22 @@ function applyCloudData(data, ts) {
         version: FAST_VERSION,
         remaining: data.fast.remaining,
         history: validFastHistory(data.fast.history),
+      }));
+    }
+    // Журнал выполнений каза — седьмой раздел, один целиком, как счётчик
+    // уразы. Пустой журнал (entries: []) ключами непуст, поэтому hasData даёт
+    // true и он применяется, затирая локальный: «журнала нет» выражается
+    // только null. Битый since раздел не пропускает — иначе журнал записался
+    // бы и при следующем чтении пропал бы вовсе (§5, loadQazaLog).
+    // Записи из снимка чистятся, но раздел из-за них не отклоняется:
+    // битая запись — не повод терять историю (§5, validQazaLogEntries)
+    if (data.qazaLog && typeof data.qazaLog === 'object' && !Array.isArray(data.qazaLog) &&
+        validQazaLogDate(data.qazaLog.since) &&
+        (hasData(data.qazaLog) || !hasData(local.qazaLog))) {
+      localStorage.setItem(QAZA_LOG_KEY, JSON.stringify({
+        version: QAZA_LOG_VERSION,
+        since: data.qazaLog.since,
+        entries: validQazaLogEntries(data.qazaLog.entries),
       }));
     }
     localStorage.setItem(SYNC_TS_KEY, String(ts));
@@ -5031,6 +5205,9 @@ function syncBody(ts, previous) {
       // Счётчика нет — наверх уходит null. Ноль счётчиком быть не перестаёт:
       // объект с remaining: 0 остаётся объектом и уезжает как есть.
       fast: loadFast() || null,
+      // Журнала нет — наверх уходит null. Пустой журнал (entries: [])
+      // остаётся объектом и уезжает как есть.
+      qazaLog: loadQazaLog() || null,
       updatedAt: ts,
     });
   } finally {
@@ -5103,9 +5280,9 @@ function showSyncStatus(message) {
 
 // Версия формата резервной копии. Растёт, если меняется состав полей файла:
 // версия 2 добавила раздел tasks, версия 3 — раздел prayer, версия 4 —
-// время у привычки и уровень у записи (§8), версия 5 — раздел fast (§11x).
-// Старые файлы читаются как раньше.
-const BACKUP_VERSION = 5;
+// время у привычки и уровень у записи (§8), версия 5 — раздел fast (§11x),
+// версия 6 — раздел qazaLog (§5). Старые файлы читаются как раньше.
+const BACKUP_VERSION = 6;
 
 // Что попадает в файл. Метка синхронизации и режим главного экрана — состояние
 // устройства, а не данные, поэтому в копию не входят. Координат может не быть;
@@ -5129,6 +5306,12 @@ function buildBackup() {
   // без счётчика читаются одинаково, и текущий счётчик они не трогают.
   const fast = loadFast();
   if (fast) backup.fast = fast;
+
+  // Журнала выполнений может не быть по той же причине: ключа нет — заводить
+  // нечего, а пустым объектом не отделаешься: разбор считает qazaLog без
+  // since битым и отверг бы собственную копию.
+  const qazaLog = loadQazaLog();
+  if (qazaLog) backup.qazaLog = qazaLog;
 
   return backup;
 }
@@ -5178,6 +5361,19 @@ function parseBackup(text) {
   // не роняет, а молча отбрасывается (§5, validFastHistory)
   if (data.fast) data.fast.history = validFastHistory(data.fast.history);
 
+  // Раздел qazaLog необязателен, но если он есть — проверяется так же
+  // целиком: не объект, since не дата и entries не массив роняют разбор.
+  // Так битый журнал не подменит рабочий — пустым или мусором, который
+  // при следующем чтении пропал бы вовсе (§5, loadQazaLog).
+  if (data.qazaLog !== undefined &&
+      (!data.qazaLog || typeof data.qazaLog !== 'object' ||
+        Array.isArray(data.qazaLog))) return null;
+  if (data.qazaLog && !validQazaLogDate(data.qazaLog.since)) return null;
+  if (data.qazaLog && !Array.isArray(data.qazaLog.entries)) return null;
+  // Записи чистятся после проверок: битая запись внутри entries разбор
+  // не роняет, а молча отбрасывается (§5, validQazaLogEntries)
+  if (data.qazaLog) data.qazaLog.entries = validQazaLogEntries(data.qazaLog.entries);
+
   return data;
 }
 
@@ -5199,6 +5395,12 @@ function applyBackup(data) {
   // нет — текущий счётчик остаётся: импорт его не стирает.
   if (data.fast && typeof data.fast === 'object' && !Array.isArray(data.fast)) {
     localStorage.setItem(FAST_KEY, JSON.stringify(data.fast));
+  }
+  // Журнал выполнений каза заменяется целиком, как счётчик уразы. Раздела
+  // в файле нет — текущий журнал остаётся: импорт его не стирает.
+  if (data.qazaLog && typeof data.qazaLog === 'object' &&
+      !Array.isArray(data.qazaLog)) {
+    localStorage.setItem(QAZA_LOG_KEY, JSON.stringify(data.qazaLog));
   }
 
   appState.habits = loadHabits();
@@ -5290,6 +5492,7 @@ function markQazaDone(qaza, today) {
 
   qaza.remaining[key] -= 1;
   qaza.history.push({ namaz: key, date: today, source: QAZA_SOURCE_DONE });
+  appendQazaLog(key, today, QAZA_SOURCE_DONE);
   setRecord(today, QAZA_HABIT_ID, qazaDoneCount(qaza, today));
   qaza.cursor = nextQazaIndex(qaza, qaza.cursor);
   saveQaza(qaza);
@@ -5304,6 +5507,7 @@ function addMissedQaza(qaza, key, today) {
 
   qaza.remaining[key] += 1;
   qaza.history.push({ namaz: key, date: today, source: QAZA_SOURCE_MANUAL });
+  appendQazaLog(key, today, QAZA_SOURCE_MANUAL);
 
   // Если очередь была исчерпана, курсор стоял на нулевом остатке.
   // Возвращаем инвариант «курсор указывает на намаз с остатком > 0».
@@ -5319,6 +5523,9 @@ function addMissedQaza(qaza, key, today) {
 // поэтому при пустой или вчерашней истории функция ничего не делает.
 // Откат ручного добавления возвращает только остаток: курсор оно не двигало,
 // а счётчик дня его не учитывал.
+// Запись журнала снимается вместе со стековой: журнал — второй свидетель
+// того же события, и без снятия отменённое выполнение осталось бы в статистике
+// дня навсегда (§5).
 function undoQazaDone(qaza, today) {
   if (qaza.history.length === 0) return qaza;
 
@@ -5326,6 +5533,7 @@ function undoQazaDone(qaza, today) {
   if (last.date !== today) return qaza;
 
   qaza.history.pop();
+  dropLastQazaLog(last.namaz, last.date, last.source);
 
   if (last.source === QAZA_SOURCE_MANUAL) {
     // Ручное добавление остаток увеличивало — откат его уменьшает.
@@ -5846,25 +6054,19 @@ function bindEvents() {
     });
   }
 
-  // Сегмент-контрол периодов: общий для всех экранов статистики. Выбор
-  // запоминается на устройстве; перерисовываем все экраны — они делят одно
-  // значение (§11y), а скрытые просто остаются наготове
-  ['stats-period', 'stats-qaza-period',
-    'stats-habits-period', 'stats-habit-period',
-    'stats-tasks-period', 'stats-fast-period'].forEach(function (id) {
+  // Сегмент-контрол периодов. Категория берётся из id блока, а не из общей
+  // переменной: у каждой категории свой период (§11y), поэтому выбор в каза
+  // период привычек не трогает. Выбор запоминается на устройстве,
+  // перерисовываются экраны только этой категории
+  Object.keys(STATS_PERIOD_BOXES).forEach(function (id) {
     const box = document.getElementById(id);
     if (!box) return;
+    const category = STATS_PERIOD_BOXES[id];
     box.addEventListener('click', function (event) {
       const btn = event.target.closest('.view-switch-btn');
       if (!btn) return;
-      statsPeriod = btn.getAttribute('data-period');
-      saveStatsPeriod(statsPeriod);
-      renderStatsView();
-      renderStatsQazaView();
-      renderStatsHabitsView();
-      renderStatsHabitView();
-      renderStatsTasksView();
-      renderStatsFastView();
+      saveStatsPeriod(category, btn.getAttribute('data-period'));
+      renderStatsCategory(category);
     });
   });
 
@@ -7792,9 +7994,26 @@ function renderSettingsView() {
 
 /* ---------- Экран «Статистика» ------------------------------------------- */
 
-// Выбранный период. Живёт на устройстве, а не в данных человека:
-// как mainView, это отметка последнего просмотра, а не запись
-let statsPeriod = loadStatsPeriod();
+// Выбранный период живёт на устройстве, а не в данных человека: как mainView,
+// это отметка последнего просмотра, а не запись. Категория у каждой своя,
+// поэтому общей переменной нет — её читает loadStatsPeriod(category)
+
+// Перерисовка экранов одной категории. Скрытые трогать незачем: их нарисует
+// вход на экран (switchAppView)
+function renderStatsCategory(category) {
+  if (category === 'hub') {
+    renderStatsView();
+  } else if (category === 'qaza') {
+    renderStatsQazaView();
+  } else if (category === 'habits') {
+    renderStatsHabitsView();
+    renderStatsHabitView();
+  } else if (category === 'tasks') {
+    renderStatsTasksView();
+  } else if (category === 'fast') {
+    renderStatsFastView();
+  }
+}
 
 // Строка цифр: подпись слева, значение справа — тем же .settings-row,
 // что и список хаба. data-stat нужен проверкам, разметку не украшает.
@@ -7830,13 +8049,15 @@ function statsChartMarkup(values, label) {
     'role="img" aria-label="' + escapeHtml(label || 'Каза по дням') + '">' + bars + '</svg>';
 }
 
-// Подсветка выбранного периода. Разметка кнопок статична, поэтому
-// пересобирать её не нужно — как у переключателя «День / Неделя»
+// Подсветка выбранного периода. Период читается для категории этого блока:
+// у каждой свой. Разметка кнопок статична, поэтому пересобирать её не нужно —
+// как у переключателя «День / Неделя»
 function markStatsPeriod(boxId) {
   const box = document.getElementById(boxId);
   if (!box) return;
+  const period = loadStatsPeriod(STATS_PERIOD_BOXES[boxId]);
   box.querySelectorAll('.view-switch-btn').forEach(function (btn) {
-    btn.classList.toggle('is-active', btn.getAttribute('data-period') === statsPeriod);
+    btn.classList.toggle('is-active', btn.getAttribute('data-period') === period);
   });
 }
 
@@ -7851,7 +8072,7 @@ function renderStatsView() {
   markStatsPeriod('stats-period');
 
   const today = new Date();
-  const dates = statsPeriodDates(statsPeriod, today);
+  const dates = statsPeriodDates(loadStatsPeriod('hub'), today);
   const todayISO = toISODate(today);
 
   if (!qazaState) qazaState = loadQaza();
@@ -7876,14 +8097,22 @@ function renderStatsQazaView() {
   markStatsPeriod('stats-qaza-period');
 
   const today = new Date();
-  const dates = statsPeriodDates(statsPeriod, today);
+  const dates = statsPeriodDates(loadStatsPeriod('qaza'), today);
   const records = loadRecords();
 
-  // Источник — поле h6: история очереди живёт только за сегодня (§5)
+  // Источник за день зависит от журнала (§5). Журнала нет — как было: поле h6
+  // в записях дня, единственный свидетель каза за день. Журнал заведён — за
+  // дни до since всё ещё h6, а с since и позже считает журнал: стек очереди
+  // живёт только за сегодня, журнал же по датам не чистится
+  const log = loadQazaLog();
+  const logDone = qazaLogDoneByDay(log);
+
   let done = 0;
   const values = [];
   for (let i = 0; i < dates.length; i++) {
-    const count = qazaDoneOn(records, dates[i]);
+    const count = log && dates[i] >= log.since
+      ? (logDone[dates[i]] || 0)
+      : qazaDoneOn(records, dates[i]);
     values.push(count);
     done += count;
   }
@@ -7917,7 +8146,7 @@ function renderStatsTasksView() {
   if (!summary || !chart) return;
 
   const today = toISODate(new Date());
-  const dates = statsPeriodDates(statsPeriod, new Date());
+  const dates = statsPeriodDates(loadStatsPeriod('tasks'), new Date());
 
   // День периода → его место в графике: список задач перебирается один раз,
   // а поиск по дате внутри цикла был бы квадратом на окне в 365 дней
@@ -7991,7 +8220,7 @@ function renderStatsFastView() {
 
   summary.hidden = false;
 
-  const dates = statsPeriodDates(statsPeriod, new Date());
+  const dates = statsPeriodDates(loadStatsPeriod('fast'), new Date());
   const dayIndex = {};
   const values = [];
   for (let i = 0; i < dates.length; i++) {
@@ -8118,7 +8347,7 @@ function renderStatsHabitsView() {
   const list = document.getElementById('stats-habits-list');
   if (!list) return;
 
-  const dates = statsPeriodDates(statsPeriod, new Date());
+  const dates = statsPeriodDates(loadStatsPeriod('habits'), new Date());
   const habits = loadHabits();
 
   // Строка — кнопка, как строка хаба: <div> выпал бы из таб-навигации
@@ -8150,7 +8379,7 @@ function renderStatsHabitView() {
   if (!habit) return;
 
   const today = new Date();
-  const dates = statsPeriodDates(statsPeriod, today);
+  const dates = statsPeriodDates(loadStatsPeriod('habits'), today);
 
   const title = document.getElementById('stats-habit-title');
   if (title) title.textContent = habit.name;
