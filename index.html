@@ -689,6 +689,7 @@ body {
 #stats-habit-view[hidden],
 #stats-tasks-view[hidden],
 #stats-fast-view[hidden],
+#sleep-view[hidden],
 #prayer-settings-view[hidden],
 #main[hidden],
 #week-nav[hidden],
@@ -699,9 +700,11 @@ body {
 }
 
 /* «Ураза» — карточка того же образца: раздел открывается из шапки каза
-   и живёт внутри той же вкладки */
+   и живёт внутри той же вкладки. «Цикл сна» — тоже: свой вход, но та же
+   карточка с появлением */
 #qaza-view,
-#fast-view {
+#fast-view,
+#sleep-view {
   margin-top: 20px;
   padding: 22px 26px 26px;
   border: 1px solid var(--border);
@@ -922,6 +925,109 @@ body {
   gap: 10px;
 }
 
+/* Раздел «Цикл сна». Поля — столбиком: их три, и подписи длиннее поля.
+   Поле взято разметкой у приветственного экрана молитв, поэтому высота,
+   радиус и 16px шрифта пришли из §11q без дублирования значений */
+.sleep-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+/* Галочка «встану по рекомендации» — строка, а не поле: живёт в том же
+   столбике, что и три поля, и отступ ей даёт его gap. Размер и цвет
+   квадратика взяты у галочки привычек, чтобы одинаковые вещи выглядели
+   одинаково */
+.sleep-follow-rec {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 15px;
+  cursor: pointer;
+}
+
+.sleep-follow-rec input {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+#sleep-result {
+  margin-top: 20px;
+}
+
+/* Крупный будильник: tabular-nums держит цифры на месте, пока считаются
+   минуты засыпания */
+.sleep-alarm {
+  margin: 0;
+  font-size: 28px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Что уйдёт в историю: не приглушено, в отличие от пояснения ниже — это
+   не справка, а само решение, и оно важнее числа циклов */
+.sleep-actual {
+  margin: 6px 0 0;
+  font-size: 15px;
+}
+
+.sleep-duration {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+}
+
+.sleep-detail {
+  margin: 4px 0 0;
+  color: var(--text-muted);
+}
+
+.sleep-cycles {
+  margin-top: 16px;
+}
+
+/* Рамка прозрачная у всех строк, а не только у подсвеченной: так при
+   появлении акцентной строки список не дёргается на пиксель */
+.sleep-cycles p {
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  font-size: 15px;
+}
+
+.sleep-cycles .is-recommended {
+  border-color: var(--accent);
+  background-color: var(--accent-soft);
+}
+
+/* Полоска: viewBox растягивается по ширине карточки, поэтому засечки
+   и метка нарисованы прямоугольниками, а не линиями — толщина штриха
+   поехала бы вместе с растяжением */
+.sleep-bar {
+  margin-top: 16px;
+}
+
+.sleep-bar svg {
+  display: block;
+  width: 100%;
+  height: 40px;
+}
+
+.sleep-bar-track {
+  fill: var(--accent-soft);
+}
+
+.sleep-bar-tick {
+  fill: var(--text-muted);
+}
+
+.sleep-bar-wake {
+  fill: var(--accent);
+}
+
 /* Блок ручного добавления пропущенного намаза */
 .qaza-add-hint {
   max-width: 68ch;
@@ -940,6 +1046,7 @@ body {
   #qaza-view,
   #prayer-view,
   #fast-view,
+  #sleep-view,
   #toast {
     animation: none;
   }
@@ -2492,6 +2599,10 @@ body.view-stats #header-actions {
     display: none;
   }
 
+  #settings-sleep {
+    display: none;
+  }
+
   /* Кнопка статистики: телефон — её единственная платформа, там она стоит
      в левом верхнем углу шапки. Парное правило по id обязательно: базовое
      правило выше задаёт #stats-menu-btn display, и одиночный [hidden] его
@@ -2566,6 +2677,77 @@ body.view-stats #header-actions {
   .stats-menu-item:focus-visible {
     outline: 2px solid var(--accent);
     outline-offset: -2px;
+  }
+
+  /* Строка «Общая статистика» и стрелка аккордеона стоят рядом: пункт
+     тянется на всю оставшуюся ширину, стрелка держит свои 44px */
+  .stats-menu-row {
+    display: flex;
+    align-items: stretch;
+  }
+
+  .stats-menu-row .stats-menu-item {
+    width: auto;
+    flex: 1 1 auto;
+    min-width: 0;
+  }
+
+  /* Стрелка — заметная тап-цель не меньше 44×44 и читается кнопкой, а не
+     голой галочкой: фон --surface-alt и разделитель слева отделяют её от
+     пункта. Разделитель снизу тот же, что у пункта: строка остаётся одной
+     линией списка */
+  .stats-menu-toggle {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 44px;
+    min-height: 44px;
+    padding: 0;
+    border: 0;
+    border-left: 1px solid var(--border);
+    border-bottom: 1px solid var(--border);
+    background: var(--surface-alt);
+    color: var(--text);
+    font: inherit;
+    font-size: 15px;
+    cursor: pointer;
+  }
+
+  .stats-menu-toggle:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: -2px;
+  }
+
+  /* Крутится сама иконка, а не кнопка: у кнопки нижний разделитель и
+     не квадратная геометрия — её поворот читался бы как поломка */
+  .stats-menu-toggle-icon {
+    display: block;
+    transition: transform .2s ease-out;
+  }
+
+  /* Раскрытые категории помечают панель классом is-hub-open. Класс is-open
+     занят открытой панелью: он двигает выезд и по нему Escape гасит панель,
+     поэтому состояние аккордеона живёт отдельным классом */
+  #stats-menu.is-hub-open .stats-menu-toggle-icon {
+    transform: rotate(90deg);
+  }
+
+  /* Запрет движения объявлен сразу за правилом иконки, а не в общем блоке
+     выше: тот стоит раньше, и правило перехода перебило бы его порядком */
+  @media (prefers-reduced-motion: reduce) {
+    .stats-menu-toggle-icon {
+      transition: none;
+    }
+  }
+
+  /* Категории внутри панели: отступ и линия вложения показывают, что они
+     подчинены строке «Общая статистика». Своего display у списка нет,
+     поэтому hidden гасит его сам, без парного правила */
+  .stats-menu-sub {
+    padding-left: 12px;
+    margin-left: 20px;
+    border-left: 2px solid var(--border);
   }
 
   /* Таблица: дни компактнее, столбец привычки уже */
@@ -2729,7 +2911,8 @@ body.view-stats #header-actions {
   /* Вкладка каза: меньше паддингов, шапка в столбик. У уразы — то же самое:
      она открывается из той же шапки и живёт внутри той же вкладки */
   #qaza-view,
-  #fast-view {
+  #fast-view,
+  #sleep-view {
     margin-top: 12px;
     padding: 14px 12px 18px;
     border-radius: 12px;
@@ -2759,7 +2942,8 @@ body.view-stats #header-actions {
      кнопку во всю ширину карточки */
   #prayer-view .qaza-head,
   #prayer-settings-view .qaza-head,
-  #fast-view .qaza-head {
+  #fast-view .qaza-head,
+  #sleep-view .qaza-head {
     flex-direction: row;
     align-items: center;
   }
@@ -3244,6 +3428,11 @@ body.view-stats #header-actions {
         </button>
       </li>
       <li>
+        <button type="button" id="settings-sleep" class="settings-row">
+          <span>Цикл сна</span><span class="settings-chevron">›</span>
+        </button>
+      </li>
+      <li>
         <button type="button" id="settings-export" class="settings-row">
           <span>Экспорт данных</span><span class="settings-chevron">›</span>
         </button>
@@ -3404,6 +3593,40 @@ body.view-stats #header-actions {
     <p id="stats-fast-empty-note" class="stats-empty-note" hidden>Счётчик не заведён</p>
   </section>
 
+  <!-- Раздел «Цикл сна»: концы циклов по времени отхода, засыпания и подъёма.
+       Открывается пунктом гамбургера на главной, данные живут на устройстве
+       (youplanner.sleep). Полей три, и все три нужны расчёту: пустое любое —
+       результата нет -->
+  <section id="sleep-view" hidden>
+    <div class="qaza-head">
+      <h2>Цикл сна</h2>
+      <button type="button" id="sleep-back" class="btn btn-secondary">← Назад</button>
+    </div>
+
+    <div class="sleep-fields">
+      <label class="prayer-field">
+        <span>Во сколько лёг</span>
+        <input type="time" id="sleep-bed">
+      </label>
+      <label class="prayer-field">
+        <span>Через сколько заснул, мин</span>
+        <input type="number" id="sleep-fall" min="0" max="120" step="1" placeholder="0">
+      </label>
+      <label class="prayer-field">
+        <span>Во сколько хочешь встать</span>
+        <input type="time" id="sleep-wake">
+      </label>
+      <!-- Галочка стоит под полем подъёма и снята по умолчанию: без неё
+           в историю идёт своё время, а рекомендация остаётся подсказкой -->
+      <label class="sleep-follow-rec">
+        <input type="checkbox" id="sleep-follow-rec">
+        <span>Встану по рекомендации, а не в своё время</span>
+      </label>
+    </div>
+
+    <div id="sleep-result"></div>
+  </section>
+
   <!-- Экран «Привычки»: открывается строкой из Настроек. Своя карточка вместо
        модалки — на телефоне список привычек занимает отдельный экран. -->
   <section id="habits-edit-view" hidden>
@@ -3424,12 +3647,33 @@ body.view-stats #header-actions {
        накрыла бы только её ширину, а нужен весь экран. -->
   <div id="stats-menu-backdrop" hidden></div>
   <aside id="stats-menu">
-    <p class="stats-menu-title">Статистика</p>
-    <button type="button" class="stats-menu-item" data-stats-view="stats">Общая статистика</button>
-    <button type="button" class="stats-menu-item" data-stats-view="stats-fast">Ураза</button>
-    <button type="button" class="stats-menu-item" data-stats-view="stats-qaza">Каза-намазы</button>
-    <button type="button" class="stats-menu-item" data-stats-view="stats-tasks">Задачи</button>
-    <button type="button" class="stats-menu-item" data-stats-view="stats-habits">Привычки</button>
+    <p class="stats-menu-title">Меню</p>
+
+    <!-- «Общая статистика» ведёт в хаб, стрелка рядом раскрывает категории
+         под строкой. Кнопка и стрелка стоят в одной flex-строке, поэтому
+         стрелка не попадает в делегирование по .stats-menu-item — у неё
+         свой класс и свой обработчик. Категории скрыты атрибутом hidden,
+         пока стрелку не тронули; раскрытие помечает панель классом
+         is-hub-open, по нему разворачивается иконка -->
+    <div class="stats-menu-row">
+      <button type="button" class="stats-menu-item" data-stats-view="stats">Общая статистика</button>
+      <button type="button" class="stats-menu-toggle" id="stats-hub-toggle"
+              aria-label="Показать категории статистики" aria-expanded="false"
+              aria-controls="stats-hub-sub"><span class="stats-menu-toggle-icon" aria-hidden="true">▸</span></button>
+    </div>
+
+    <div class="stats-menu-sub" id="stats-hub-sub" hidden>
+      <button type="button" class="stats-menu-item" data-stats-view="stats-qaza">Каза-намазы</button>
+      <button type="button" class="stats-menu-item" data-stats-view="stats-fast">Ураза</button>
+      <button type="button" class="stats-menu-item" data-stats-view="stats-tasks">Задачи</button>
+      <button type="button" class="stats-menu-item" data-stats-view="stats-habits">Привычки</button>
+    </div>
+
+    <!-- «Цикл сна» стоит на верхнем уровне панели, а не внутри категорий
+         статистики: экран к статистике не относится. Свой атрибут вместо
+         data-stats-view — экран берётся из него, и общего обработчика
+         панели это не ломает -->
+    <button type="button" class="stats-menu-item" data-sleep-view>Цикл сна</button>
   </aside>
 
   <!-- Нижний таб-бар: переключает разделы. Виден только на телефоне,
@@ -4836,6 +5080,302 @@ function fastRemainingLabel(n) {
   return 'Ураза: осталось ' + n + ' ' + word;
 }
 
+/* ---------- Цикл сна: расчёт и хранилище --------------------------------- */
+
+// Длина одного цикла сна в минутах и потолок расчёта. Циклов шесть:
+// от 90 минут до 9 часов. Раздел живёт по ключу youplanner.sleep и ходит
+// и в синхронизацию, и в файл копии восьмым разделом (§5).
+// Версия 2 добавила к трём опорам расчёта пару actualWake/sleepMin — время,
+// которое пойдёт в историю, и длительность сна. У записи версии 1 её нет,
+// и это не порча, а другой возраст: читается она по-прежнему, а недостающая
+// пара подставляется целью («встаю в своё время»).
+// Версия 3 добавила историю — массив записей по дням, растущий, как у уразы.
+// Отдельного ключа у неё нет: запись дня ищется проходом по полю date
+const SLEEP_KEY = 'youplanner.sleep';
+const SLEEP_VERSION = 3;
+// Больше суток от засыпания до подъёма быть не может: оба конца лежат
+// на одной ночи. Потолок нужен только для чтения чужой записи
+const SLEEP_MAX_MINUTES = 1440;
+const SLEEP_CYCLE_MIN = 90;
+const SLEEP_CYCLE_COUNT = 6;
+// Больше двух часов засыпания в поле не влезает: это уже не засыпание
+const SLEEP_MAX_FALL = 120;
+
+// 'HH:MM' → минуты от полуночи. Всё прочее, включая '7:30' и '24:00', —
+// null: поле времени браузера даёт ровно такой формат
+function sleepTimeMinutes(text) {
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(String(text));
+  if (!match) return null;
+  return Number(match[1]) * 60 + Number(match[2]);
+}
+
+// Минуты от полуночи → 'HH:MM'. Значение сворачивается по суткам: конец
+// шестого цикла у позднего отхода уходит на следующий день
+function sleepTimeLabel(minutes) {
+  const day = ((Math.round(minutes) % 1440) + 1440) % 1440;
+  return pad2(Math.floor(day / 60)) + ':' + pad2(day % 60);
+}
+
+// Значение поля «Через сколько заснул» — и оно же поле хранилища: целое
+// 0…120. Пустая строка, дробное, отрицательное и большее потолка — null
+function sleepFallMinutes(value) {
+  const text = String(value).trim();
+  if (!/^\d+$/.test(text)) return null;
+  const minutes = Number(text);
+  return minutes > SLEEP_MAX_FALL ? null : minutes;
+}
+
+// Три момента на одной шкале: отход, засыпание и подъём. Будильник раньше
+// отхода — значит следующие сутки, поэтому к нему прибавляется 1440.
+// Сравнивается он с отходом, а не с засыпанием: «встать раньше, чем лёг»
+// и «встать раньше, чем заснул» — разные вещи, и первое и есть смена суток
+function sleepAnchors(bed, fall, wake) {
+  const bedMinutes = sleepTimeMinutes(bed);
+  const wakeMinutes = sleepTimeMinutes(wake);
+  if (bedMinutes === null || wakeMinutes === null) return null;
+  if (!Number.isInteger(fall) || fall < 0 || fall > SLEEP_MAX_FALL) return null;
+
+  return {
+    bedMinutes: bedMinutes,
+    asleepMinutes: bedMinutes + fall,
+    wakeMinutes: wakeMinutes < bedMinutes ? wakeMinutes + 1440 : wakeMinutes,
+  };
+}
+
+// Концы циклов и рекомендуемый будильник. Время в cycle.time свёрнуто
+// по суткам, а в recommended — нет: слева и справа ищется ближайший
+// по времени, и пара «раньше / позже» должна остаться парой
+function sleepCycleTimes(bed, fall, wake) {
+  const anchors = sleepAnchors(bed, fall, wake);
+  if (!anchors) return null;
+
+  const cycles = [];
+  for (let n = 1; n <= SLEEP_CYCLE_COUNT; n++) {
+    cycles.push({
+      time: sleepTimeLabel(anchors.asleepMinutes + n * SLEEP_CYCLE_MIN),
+      cycles: n,
+      sleepMinutes: n * SLEEP_CYCLE_MIN,
+    });
+  }
+
+  // Будильник ровно на конце цикла — один вариант. Иначе берутся соседние
+  // слева и справа; за пределами шести циклов соседа с одной стороны нет,
+  // и остаётся один — ближайший
+  let exact = null;
+  let left = null;
+  let right = null;
+  for (let i = 0; i < cycles.length; i++) {
+    const end = anchors.asleepMinutes + cycles[i].sleepMinutes;
+    if (end === anchors.wakeMinutes) exact = cycles[i];
+    else if (end < anchors.wakeMinutes) left = cycles[i];
+    else if (!right) right = cycles[i];
+  }
+
+  return {
+    cycles: cycles,
+    recommended: exact ? [exact] : left && right ? [left, right] : [left || right],
+  };
+}
+
+// Ближайший к будильнику конец цикла. Перебираются все шесть; при равном
+// расстоянии побеждает более поздний — «<=» вместо «<» при переборе
+// по возрастанию. Обоснование: встать на сорок минут позже, чем просил,
+// безобиднее, чем оборвать цикл ровно на середине
+function nearestSleepCycle(anchors) {
+  let best = null;
+  for (let n = 1; n <= SLEEP_CYCLE_COUNT; n++) {
+    const end = anchors.asleepMinutes + n * SLEEP_CYCLE_MIN;
+    if (best === null ||
+        Math.abs(end - anchors.wakeMinutes) <= Math.abs(best - anchors.wakeMinutes)) {
+      best = end;
+    }
+  }
+  return best;
+}
+
+// Время, которое пойдёт в историю. Галочка снята — своё время; отмечена —
+// ближайший конец цикла. Считается из состояния галочки при каждом рендере:
+// отдельной константы режима нет, второй источник правды не нужен.
+// Возврат свёрнут по суткам — как и всё, что показывается человеку
+function actualWakeTime(bed, fall, wake, followRec) {
+  const anchors = sleepAnchors(bed, fall, wake);
+  if (!anchors) return null;
+  if (followRec !== true) return sleepTimeLabel(anchors.wakeMinutes);
+  return sleepTimeLabel(nearestSleepCycle(anchors));
+}
+
+// Минуты от засыпания до подъёма. Подъём раньше засыпания по циферблату —
+// значит следующие сутки, и они добавляются, пока конец не окажется позже
+// засыпания. «Пока», а не «если»: при отходе 23:30 и засыпании 120 минут
+// засыпание (25:30) уже перевалило за полночь, и одного добавления мало —
+// разница ушла бы в минус
+function sleepDurationMinutes(bed, fall, actualWake) {
+  const bedMinutes = sleepTimeMinutes(bed);
+  const wakeMinutes = sleepTimeMinutes(actualWake);
+  if (bedMinutes === null || wakeMinutes === null) return null;
+  if (!Number.isInteger(fall) || fall < 0 || fall > SLEEP_MAX_FALL) return null;
+
+  const asleepMinutes = bedMinutes + fall;
+  let end = wakeMinutes;
+  while (end < asleepMinutes) end += SLEEP_MAX_MINUTES;
+  return end - asleepMinutes;
+}
+
+// «30 мин», «1 ч», «1 ч 30 мин», «9 ч»
+function sleepFormatDuration(minutes) {
+  const total = Math.max(0, Math.round(minutes));
+  const hours = Math.floor(total / 60);
+  const rest = total % 60;
+  if (hours === 0) return rest + ' мин';
+  if (rest === 0) return hours + ' ч';
+  return hours + ' ч ' + rest + ' мин';
+}
+
+// «1 цикл», «4 цикла», «5 циклов»
+function sleepCycleLabel(count) {
+  const word = count === 1 ? 'цикл' : count >= 2 && count <= 4 ? 'цикла' : 'циклов';
+  return count + ' ' + word;
+}
+
+// История сна: массив записей по дням. Чистится при чтении, как история уразы:
+// битый элемент отбрасывается молча, массив из-за него не отклоняется (§5).
+// Годная запись — объект, у которого date — день, bed и wake — время суток,
+// fall — целое 0…120, actualWake — время суток, sleepMin — целое 0…1440,
+// и оно сходится с полями. Сходимость проверяется не для порядка: битая пара
+// роняет всю запись и при чтении ключа, и в истории ей не место — иначе
+// однажды день вернулся бы в раздел с чужой длительностью
+function validSleepHistory(history) {
+  if (!Array.isArray(history)) return [];
+
+  return history.filter(function (item) {
+    if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(item.date)) return false;
+    if (sleepTimeMinutes(item.bed) === null) return false;
+    if (sleepTimeMinutes(item.wake) === null) return false;
+    const fall = sleepFallMinutes(item.fall);
+    if (fall === null) return false;
+    if (sleepTimeMinutes(item.actualWake) === null) return false;
+    if (!Number.isInteger(item.sleepMin) ||
+        item.sleepMin < 0 || item.sleepMin >= SLEEP_MAX_MINUTES) return false;
+    return sleepDurationMinutes(item.bed, fall, item.actualWake) === item.sleepMin;
+  });
+}
+
+// Запись дня в историю. Одна запись на день: день ищется проходом по полю
+// date и перезаписывается на месте — второй записи об одном дне не заводится.
+// Прохода, а не отдельного ключа с датой: ещё один ключ пришлось бы гасить
+// при импорте копии, и он разошёлся бы с содержимым истории. Дата — день
+// сохранения формы, тем же toISODate, что и у истории уразы: раздел
+// заполняют перед сном, и она отвечает на вопрос «день, когда лёг»
+function sleepHistoryEntry(history, entry) {
+  const entries = Array.isArray(history) ? history.slice() : [];
+  for (let i = 0; i < entries.length; i++) {
+    if (entries[i] && entries[i].date === entry.date) {
+      entries[i] = entry;
+      return entries;
+    }
+  }
+  entries.push(entry);
+  return entries;
+}
+
+// Чтение с проверкой. null — записей нет: нет ключа, битый JSON, не объект,
+// bed или wake не в виде 'HH:MM', fall не целое 0…120, пара actualWake/sleepMin
+// битая. Ничего не пишет: незаполненный раздел и есть отсутствие ключа
+function loadSleep() {
+  try {
+    const raw = localStorage.getItem(SLEEP_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
+    if (sleepTimeMinutes(parsed.bed) === null) return null;
+    if (sleepTimeMinutes(parsed.wake) === null) return null;
+
+    // Засыпание читается тем же правилом, что и поле ввода: строка '20'
+    // из чужой записи принимается, 20.5 и 200 — нет
+    const fall = sleepFallMinutes(parsed.fall);
+    if (fall === null) return null;
+
+    // Пары в записи нет вовсе — это версия 1, а не порча: подставляется цель,
+    // «встаю в своё время», и запись читается как читалась. Пара есть, но
+    // битая — запись отбрасывается целиком: битое значение не чинится
+    // подстановкой, иначе поле на экране разошлось бы с хранилищем
+    let actualWake = parsed.wake;
+    let sleepMin = sleepDurationMinutes(parsed.bed, fall, parsed.wake);
+    if (parsed.actualWake !== undefined || parsed.sleepMin !== undefined) {
+      if (sleepTimeMinutes(parsed.actualWake) === null) return null;
+      if (!Number.isInteger(parsed.sleepMin) ||
+          parsed.sleepMin < 0 || parsed.sleepMin >= SLEEP_MAX_MINUTES) return null;
+      actualWake = parsed.actualWake;
+      sleepMin = parsed.sleepMin;
+    }
+
+    // Истории может не быть вовсе — это запись версий 1–2, и её возраст,
+    // а не порча: раздел читается как читался, а история заводится пустой
+    // и наполнится при следующем сохранении формы. История есть, но
+    // не массив — теряется только она: три опоры расчёта важнее дневника,
+    // как счётчик уразы важнее её истории (§5)
+    return {
+      version: SLEEP_VERSION,
+      bed: parsed.bed,
+      fall: fall,
+      wake: parsed.wake,
+      actualWake: actualWake,
+      sleepMin: sleepMin,
+      history: validSleepHistory(parsed.history),
+    };
+  } catch (e) {
+    return null;
+  }
+}
+
+// Запись ключа. Проверки те же, что при чтении: неверный набор не пишется
+// вовсе, а не подменяется дефолтом. Пара actualWake/sleepMin здесь обязательна,
+// хотя при чтении её отсутствие — признак версии 1: пишем только полный набор,
+// а неполный оставляем версии 1. Сохранённая пара обязана сходиться с полями —
+// время из неё и уходит в историю, — поэтому проверяется и это. Отложенная
+// отправка ставится здесь же: запись входит в снимок узла и в файл копии
+// восьмым разделом (§5)
+function saveSleep(sleep) {
+  if (!sleep || typeof sleep !== 'object') return;
+  if (sleepTimeMinutes(sleep.bed) === null) return;
+  if (sleepTimeMinutes(sleep.wake) === null) return;
+  const fall = sleepFallMinutes(sleep.fall);
+  if (fall === null) return;
+  if (sleepTimeMinutes(sleep.actualWake) === null) return;
+  if (!Number.isInteger(sleep.sleepMin) ||
+      sleep.sleepMin < 0 || sleep.sleepMin >= SLEEP_MAX_MINUTES) return;
+  if (sleepDurationMinutes(sleep.bed, fall, sleep.actualWake) !== sleep.sleepMin) return;
+
+  // История ведётся тем же сохранением, что и ядро: каждое сохранение формы
+  // кладёт день в дневник. Прежняя история берётся из хранилища, а не из
+  // аргумента: вызывающему нечего о ней знать, а передача её снаружи означала
+  // бы, что любой вызов без неё стирает дневник. Читается она тем же
+  // loadSleep(): копится в дневник только то, что прошло проверку. Дата —
+  // день сохранения формы: раздел заполняют перед сном, и другой даты
+  // у записи нет
+  const previous = loadSleep();
+  const entry = {
+    date: toISODate(new Date()),
+    bed: sleep.bed,
+    fall: fall,
+    wake: sleep.wake,
+    actualWake: sleep.actualWake,
+    sleepMin: sleep.sleepMin,
+  };
+
+  localStorage.setItem(SLEEP_KEY, JSON.stringify({
+    version: SLEEP_VERSION,
+    bed: sleep.bed,
+    fall: fall,
+    wake: sleep.wake,
+    actualWake: sleep.actualWake,
+    sleepMin: sleep.sleepMin,
+    history: sleepHistoryEntry(previous ? previous.history : [], entry),
+  }));
+  scheduleSync();
+}
+
 /* ---------- Раздел «Статистика» ------------------------------------------ */
 
 // Период — отметка устройства, как youplanner.mainView: в синхронизацию
@@ -5035,6 +5575,7 @@ function applyCloudData(data, ts) {
       prayer: loadPrayer() || {},
       fast: loadFast() || null,
       qazaLog: loadQazaLog() || null,
+      sleep: loadSleep() || null,
     };
 
     if (Array.isArray(data.habits) && (hasData(data.habits) || !hasData(local.habits))) {
@@ -5097,6 +5638,14 @@ function applyCloudData(data, ts) {
         since: data.qazaLog.since,
         entries: validQazaLogEntries(data.qazaLog.entries),
       }));
+    }
+    // Запись о сне — восьмой раздел, один целиком, как счётчик уразы.
+    // Пустой объект с сервера не затирает заведённую запись: он приходит
+    // следом неполного снимка, а не осознанным удалением (§5)
+    if (data.sleep && typeof data.sleep === 'object' &&
+        !Array.isArray(data.sleep) &&
+        (hasData(data.sleep) || !hasData(local.sleep))) {
+      localStorage.setItem(SLEEP_KEY, JSON.stringify(data.sleep));
     }
     localStorage.setItem(SYNC_TS_KEY, String(ts));
 
@@ -5208,6 +5757,9 @@ function syncBody(ts, previous) {
       // Журнала нет — наверх уходит null. Пустой журнал (entries: [])
       // остаётся объектом и уезжает как есть.
       qazaLog: loadQazaLog() || null,
+      // Записи о сне нет — наверх уходит null. Пустого объекта здесь быть
+      // не может: loadSleep() возвращает либо полную запись, либо null.
+      sleep: loadSleep() || null,
       updatedAt: ts,
     });
   } finally {
@@ -5281,8 +5833,9 @@ function showSyncStatus(message) {
 // Версия формата резервной копии. Растёт, если меняется состав полей файла:
 // версия 2 добавила раздел tasks, версия 3 — раздел prayer, версия 4 —
 // время у привычки и уровень у записи (§8), версия 5 — раздел fast (§11x),
-// версия 6 — раздел qazaLog (§5). Старые файлы читаются как раньше.
-const BACKUP_VERSION = 6;
+// версия 6 — раздел qazaLog (§5), 7 — раздел sleep, 8 — история сна (§11ab).
+// Старые файлы читаются как раньше.
+const BACKUP_VERSION = 8;
 
 // Что попадает в файл. Метка синхронизации и режим главного экрана — состояние
 // устройства, а не данные, поэтому в копию не входят. Координат может не быть;
@@ -5312,6 +5865,12 @@ function buildBackup() {
   // since битым и отверг бы собственную копию.
   const qazaLog = loadQazaLog();
   if (qazaLog) backup.qazaLog = qazaLog;
+
+  // Записи о сне может не быть по той же причине: ключа нет — заводить
+  // нечего, а пустым объектом не отделаешься: разбор считает sleep без
+  // bed, wake или fall битым и отверг бы собственную копию.
+  const sleep = loadSleep();
+  if (sleep) backup.sleep = sleep;
 
   return backup;
 }
@@ -5374,6 +5933,42 @@ function parseBackup(text) {
   // не роняет, а молча отбрасывается (§5, validQazaLogEntries)
   if (data.qazaLog) data.qazaLog.entries = validQazaLogEntries(data.qazaLog.entries);
 
+  // Раздел sleep необязателен, но если он есть — проверяется целиком:
+  // не объект, bed или wake не в виде 'HH:MM' и fall не целое 0…120
+  // роняют разбор. Так битая запись о сне не подменит рабочую (§5).
+  if (data.sleep !== undefined &&
+      (!data.sleep || typeof data.sleep !== 'object' ||
+       Array.isArray(data.sleep))) return null;
+  if (data.sleep) {
+    // Время проверяется тем же разбором, что и при чтении ключа: он один
+    // знает и про тип, и про часы 0…23, и про минуты 0…59. Своя регулярка
+    // пропускала '25:00' и '99:99' — файл разбирался, а следующий loadSleep()
+    // возвращал null, и заведённая запись пропадала
+    if (sleepTimeMinutes(data.sleep.bed) === null) return null;
+    if (sleepTimeMinutes(data.sleep.wake) === null) return null;
+    if (!Number.isInteger(data.sleep.fall) ||
+        data.sleep.fall < 0 || data.sleep.fall > 120) return null;
+
+    // Пара actualWake/sleepMin есть только у файла версии 2 и моложе: файл
+    // без неё — старая копия, и разбирается как разбирался, а loadSleep()
+    // подставит недостающее целью. Пара есть, но битая — отказ целиком,
+    // иначе loadSleep() на следующем чтении вернул бы null и подменил
+    // заведённую запись пустотой
+    if (data.sleep.actualWake !== undefined || data.sleep.sleepMin !== undefined) {
+      if (sleepTimeMinutes(data.sleep.actualWake) === null) return null;
+      if (!Number.isInteger(data.sleep.sleepMin) ||
+          data.sleep.sleepMin < 0 || data.sleep.sleepMin >= SLEEP_MAX_MINUTES) return null;
+    }
+
+    // История необязательна, как и у уразы: файл версии 7 её не знает, и он
+    // разбирается как разбирался. История есть, но не массив — отказ целиком:
+    // запись легла бы в ключ, а следующий loadSleep() отбросил бы историю,
+    // и она бы молча пропала. Битые элементы внутри массива разбор, наоборот,
+    // не роняют — они отбрасываются (validSleepHistory, §5)
+    if (data.sleep.history !== undefined && !Array.isArray(data.sleep.history)) return null;
+    if (data.sleep.history) data.sleep.history = validSleepHistory(data.sleep.history);
+  }
+
   return data;
 }
 
@@ -5401,6 +5996,12 @@ function applyBackup(data) {
   if (data.qazaLog && typeof data.qazaLog === 'object' &&
       !Array.isArray(data.qazaLog)) {
     localStorage.setItem(QAZA_LOG_KEY, JSON.stringify(data.qazaLog));
+  }
+  // Запись о сне заменяется целиком, как счётчик уразы. Раздела в файле
+  // нет — текущая запись остаётся: импорт её не стирает.
+  if (data.sleep && typeof data.sleep === 'object' &&
+      !Array.isArray(data.sleep)) {
+    localStorage.setItem(SLEEP_KEY, JSON.stringify(data.sleep));
   }
 
   appState.habits = loadHabits();
@@ -5987,9 +6588,60 @@ function bindEvents() {
     statsMenu.addEventListener('click', function (event) {
       const item = event.target.closest('.stats-menu-item');
       if (!item) return;
-      switchAppView(item.getAttribute('data-stats-view'));
+      // У пунктов статистики экран лежит в data-stats-view, у «Цикла сна»
+      // его нет: экран живёт вне раздела, и атрибут у него свой. Без этой
+      // проверки switchAppView получил бы null и не открыл ничего
+      if (item.hasAttribute('data-sleep-view')) {
+        closeStatsMenu();
+        switchAppView('sleep');
+        return;
+      }
+      if (item.hasAttribute('data-stats-view')) {
+        switchAppView(item.getAttribute('data-stats-view'));
+      }
     });
   }
+
+  // Стрелка аккордеона. Класс у неё свой, и делегирование по .stats-menu-item
+  // её не ловит — обработчик отдельный. Раскрытие помечает панель классом
+  // is-hub-open (по нему разворачивается иконка), а aria-expanded говорит
+  // то же самое голосом
+  const statsHubToggle = document.getElementById('stats-hub-toggle');
+  const statsHubSub = document.getElementById('stats-hub-sub');
+  if (statsHubToggle && statsHubSub && statsMenu) {
+    statsHubToggle.addEventListener('click', function () {
+      const willOpen = statsHubSub.hidden;
+      statsHubSub.hidden = !willOpen;
+      statsMenu.classList.toggle('is-hub-open', willOpen);
+      statsHubToggle.setAttribute('aria-expanded', willOpen ? 'true' : 'false');
+    });
+  }
+
+  // Строка «Цикл сна» в Настройках: на ПК это единственный вход в раздел,
+  // на телефоне — второй, после пункта гамбургера
+  const settingsSleep = document.getElementById('settings-sleep');
+  if (settingsSleep) {
+    settingsSleep.addEventListener('click', function () {
+      switchAppView('sleep');
+    });
+  }
+
+  // Экран «Цикл сна»: возврат туда, откуда вошли, и пересчёт при правке любого
+  // поля. Слушаются оба события — колесо времени на телефоне присылает только change
+  const sleepBack = document.getElementById('sleep-back');
+  if (sleepBack) sleepBack.addEventListener('click', function () { switchAppView(sleepReturnView); });
+
+  ['sleep-bed', 'sleep-fall', 'sleep-wake'].forEach(function (id) {
+    const field = document.getElementById(id);
+    if (!field) return;
+    field.addEventListener('input', onSleepFieldChange);
+    field.addEventListener('change', onSleepFieldChange);
+  });
+
+  // Галочка «встану по рекомендации» пересчитывает итог тем же обработчиком:
+  // она меняет время для истории, а не только подсказку
+  const sleepFollow = document.getElementById('sleep-follow-rec');
+  if (sleepFollow) sleepFollow.addEventListener('change', onSleepFieldChange);
 
   // «Назад» из хаба ведёт туда, откуда в раздел вошли: на ПК это Настройки,
   // на телефоне — главная с гамбургером
@@ -7827,6 +8479,14 @@ function closeStatsMenu() {
   const backdrop = document.getElementById('stats-menu-backdrop');
   if (!menu || !backdrop) return;
   menu.classList.remove('is-open');
+  // Аккордеон категорий возвращается в свёрнутый вид: следующее открытие
+  // панели не должно показывать чужое состояние. Работает для всех способов
+  // закрытия — Escape, тап по подложке, выбор пункта: все они идут сюда
+  menu.classList.remove('is-hub-open');
+  const sub = document.getElementById('stats-hub-sub');
+  if (sub) sub.hidden = true;
+  const toggle = document.getElementById('stats-hub-toggle');
+  if (toggle) toggle.setAttribute('aria-expanded', 'false');
   backdrop.hidden = true;
 }
 
@@ -7848,6 +8508,11 @@ function isStatsView(name) {
 // категориями переписывал бы его, и возврат уводил бы в прошлый экран
 let statsReturnView = 'settings';
 
+// Куда вернёт «Назад» с экрана «Цикл сна». Входов два — строка в Настройках
+// на ПК и пункт гамбургера на телефоне, — и вернуть надо туда, откуда вошли.
+// Снимается один раз, на входе в экран, как у статистики
+let sleepReturnView = 'main';
+
 // Текущий вид приложения. Нужен затем, чтобы отличить вход в статистику
 // от перехода внутри неё
 let currentView = 'main';
@@ -7864,6 +8529,10 @@ function switchAppView(name) {
   // Вход в раздел запоминает, откуда вошли, — туда «Назад» из хаба и вернёт
   if (isStatsView(name) && !isStatsView(currentView)) statsReturnView = currentView;
 
+  // То же для «Цикла сна»: у экрана два входа — строка в Настройках и пункт
+  // гамбургера, — и «Назад» должен вернуть в тот, откуда вошли
+  if (name === 'sleep' && currentView !== 'sleep') sleepReturnView = currentView;
+
   document.getElementById('main').hidden = name !== 'main';
   document.getElementById('settings-view').hidden = name !== 'settings';
   document.getElementById('habits-edit-view').hidden = name !== 'edit-habits';
@@ -7877,6 +8546,7 @@ function switchAppView(name) {
   document.getElementById('stats-habit-view').hidden = name !== 'stats-habit';
   document.getElementById('stats-tasks-view').hidden = name !== 'stats-tasks';
   document.getElementById('stats-fast-view').hidden = name !== 'stats-fast';
+  document.getElementById('sleep-view').hidden = name !== 'sleep';
   document.getElementById('tasks-view').hidden = name !== 'tasks';
   document.getElementById('mobile-day-tabs').hidden = name !== 'main' || !isMobileView();
   document.getElementById('tab-bar').hidden = !isMobileView();
@@ -7891,9 +8561,11 @@ function switchAppView(name) {
   document.getElementById('task-add-btn').hidden = name !== 'tasks';
 
   // Вложенные экраны подсвечивают вкладку, из которой открыты: «Привычки»,
-  // настройки молитв и статистика — «Настройки», «Молитвы» и «Ураза» — «Каза»
+  // настройки молитв, статистика и «Цикл сна» — «Настройки», «Молитвы»
+  // и «Ураза» — «Каза». У сна вкладки нет своей: вход в него из гамбургера,
+  // а он принадлежит главной, и подсвечивать там нечего
   const tabView = name === 'edit-habits' || name === 'prayer-settings' ||
-    name === 'stats' || name === 'stats-qaza' ||
+    name === 'sleep' || name === 'stats' || name === 'stats-qaza' ||
     name === 'stats-habits' || name === 'stats-habit' ||
     name === 'stats-tasks' || name === 'stats-fast' ? 'settings'
     : name === 'prayer' || name === 'fast' ? 'qaza'
@@ -7906,7 +8578,7 @@ function switchAppView(name) {
   // и статистике. У статистики свой класс, а не view-settings: гасят они одно
   // и то же, но имя читается по экрану
   const isSettings = name === 'settings' || name === 'edit-habits' ||
-    name === 'prayer-settings';
+    name === 'prayer-settings' || name === 'sleep';
   document.body.classList.toggle('view-qaza', name === 'qaza');
   document.body.classList.toggle('view-prayer', name === 'prayer');
   document.body.classList.toggle('view-fast', name === 'fast');
@@ -7959,6 +8631,10 @@ function switchAppView(name) {
 
   if (name === 'stats-fast') {
     renderStatsFastView();
+  }
+
+  if (name === 'sleep') {
+    renderSleepView();
   }
 
   if (name === 'tasks') {
@@ -9176,6 +9852,175 @@ function onFastInitSave() {
 
   fastInitMode = null;
   renderFastView();
+}
+
+/* --- Раздел «Цикл сна» --------------------------------------------------- */
+
+// Значение поля экрана. Поля читаются как есть: набор, который видит человек
+function sleepFieldValue(id) {
+  const field = document.getElementById(id);
+  return field ? field.value : '';
+}
+
+// Состояние галочки «встану по рекомендации». Снятая галочка и отсутствие
+// элемента — одно и то же: без экрана решения нет, и по умолчанию идёт цель
+function sleepFollowRec() {
+  const box = document.getElementById('sleep-follow-rec');
+  return !!box && box.checked === true;
+}
+
+// Решение по текущим полям: что уйдёт в историю и сколько это минут. Одно
+// место, где из трёх полей и галочки собирается ответ; им пользуются и
+// отрисовка, и запись, поэтому разойтись они не могут. Пустое или неверное
+// любое из полей — null
+function sleepDecision() {
+  const bed = sleepFieldValue('sleep-bed');
+  const wake = sleepFieldValue('sleep-wake');
+  const fall = sleepFallMinutes(sleepFieldValue('sleep-fall'));
+  if (fall === null) return null;
+
+  const followRec = sleepFollowRec();
+  const actualWake = actualWakeTime(bed, fall, wake, followRec);
+  if (actualWake === null) return null;
+
+  const sleepMin = sleepDurationMinutes(bed, fall, actualWake);
+  if (sleepMin === null) return null;
+
+  return {
+    bed: bed,
+    fall: fall,
+    wake: wake,
+    followRec: followRec,
+    actualWake: actualWake,
+    sleepMin: sleepMin,
+  };
+}
+
+// Вход на экран: три поля и галочка заполняются сохранённым, затем считается
+// итог. Записи нет — поля остаются пустыми, галочка снята, и итог тоже пуст.
+// Галочка ставится сравнением actualWake с wake: отдельного поля у неё нет,
+// а «встаю по рекомендации» — это ровно случай, когда времена разошлись.
+// Совпадение (будильник ровно на конце цикла) галочку не вернёт, но разницы
+// там нет: оба режима дают одно и то же время
+function renderSleepView() {
+  const sleep = loadSleep();
+  const follow = document.getElementById('sleep-follow-rec');
+  if (follow) follow.checked = !!sleep && sleep.actualWake !== sleep.wake;
+  if (sleep) {
+    const bed = document.getElementById('sleep-bed');
+    const fall = document.getElementById('sleep-fall');
+    const wake = document.getElementById('sleep-wake');
+    if (bed) bed.value = sleep.bed;
+    if (fall) fall.value = String(sleep.fall);
+    if (wake) wake.value = sleep.wake;
+  }
+  renderSleepResult();
+}
+
+// Итог по трём полям и галочке. Пустое или неверное любое из полей —
+// результата нет вовсе: половина расчёта хуже, чем его отсутствие
+function renderSleepResult() {
+  const box = document.getElementById('sleep-result');
+  if (!box) return;
+
+  const decision = sleepDecision();
+  const result = decision === null
+    ? null
+    : sleepCycleTimes(decision.bed, decision.fall, decision.wake);
+
+  if (!decision || !result) {
+    box.innerHTML = '';
+    return;
+  }
+  box.innerHTML = sleepResultMarkup(decision, result);
+}
+
+// Разметка итога: крупный будильник, время для истории, длительность сна,
+// пояснение, список циклов и полоска. Крупным у пары вариантов идёт первый —
+// тот, что раньше: подсвечены в списке оба, а решает человек. Время для
+// истории считается от галочки и с крупным может не совпасть: там ближайший
+// конец цикла, здесь — то, что человек выбрал
+function sleepResultMarkup(decision, result) {
+  const pick = result.recommended[0];
+  const parts = [];
+
+  parts.push('<p class="sleep-alarm">Будильник: ' + pick.time + '</p>');
+  parts.push('<p class="sleep-actual">В историю: ' + decision.actualWake +
+    (decision.followRec ? ' (по рекомендации)' : ' (по цели)') + '</p>');
+  parts.push('<p class="sleep-duration">Сон: ' +
+    sleepFormatDuration(decision.sleepMin) + '</p>');
+
+  let detail = sleepCycleLabel(pick.cycles) + ', ' + sleepFormatDuration(pick.sleepMinutes);
+  if (result.recommended.length === 2) {
+    detail += ' · встать раньше — ' + result.recommended[0].time +
+      ', встать позже — ' + result.recommended[1].time;
+  }
+  parts.push('<p class="sleep-detail">' + detail + '</p>');
+
+  parts.push('<div class="sleep-cycles">');
+  for (let i = 0; i < result.cycles.length; i++) {
+    const cycle = result.cycles[i];
+    const recommended = result.recommended.indexOf(cycle) !== -1;
+    parts.push('<p' + (recommended ? ' class="is-recommended"' : '') + '>' +
+      sleepCycleLabel(cycle.cycles) + ' — ' + cycle.time + '</p>');
+  }
+  parts.push('</div>');
+
+  parts.push(sleepBarMarkup(decision.bed, decision.fall, decision.wake, result.cycles));
+  return parts.join('');
+}
+
+// Полоска: по горизонтали — от отхода до конца последнего цикла. Засечки
+// нарисованы узкими прямоугольниками, а не линиями: viewBox растягивается
+// по ширине карточки неравномерно (preserveAspectRatio="none"), и толщина
+// штриха у линии поехала бы вместе с растяжением. Метка подъёма — акцентная
+// и заметно шире засечки; за последним циклом она прижимается к краю
+function sleepBarMarkup(bed, fall, wake, cycles) {
+  const anchors = sleepAnchors(bed, fall, wake);
+  if (!anchors || !cycles.length) return '';
+
+  const span = anchors.asleepMinutes + cycles[cycles.length - 1].sleepMinutes -
+    anchors.bedMinutes;
+  if (span <= 0) return '';
+
+  function at(minutes) {
+    const percent = ((minutes - anchors.bedMinutes) / span) * 100;
+    return Math.max(0, Math.min(100, percent));
+  }
+
+  const parts = [];
+  parts.push('<div class="sleep-bar">');
+  parts.push('<svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">');
+  parts.push('<rect class="sleep-bar-track" x="0" y="17" width="100" height="6"></rect>');
+  for (let i = 0; i < cycles.length; i++) {
+    const tick = (at(anchors.asleepMinutes + cycles[i].sleepMinutes) - 0.3).toFixed(2);
+    parts.push('<rect class="sleep-bar-tick" x="' + tick +
+      '" y="11" width="0.6" height="18"></rect>');
+  }
+  const mark = (at(anchors.wakeMinutes) - 0.5).toFixed(2);
+  parts.push('<rect class="sleep-bar-wake" x="' + mark +
+    '" y="5" width="1" height="30"></rect>');
+  parts.push('</svg>');
+  parts.push('</div>');
+  return parts.join('');
+}
+
+// Правка любого поля или галочки: сначала пересчёт, потом запись. Галочка
+// идёт сюда же — она меняет то же решение, а формы на экране нет, отправлять
+// нечего. Сохраняется то, что в полях сейчас, — неполный набор saveSleep
+// отбросит сам. Слушаются оба события полей: колесо времени на телефоне
+// присылает только change
+function onSleepFieldChange() {
+  renderSleepResult();
+  const decision = sleepDecision();
+  if (!decision) return;
+  saveSleep({
+    bed: decision.bed,
+    fall: decision.fall,
+    wake: decision.wake,
+    actualWake: decision.actualWake,
+    sleepMin: decision.sleepMin,
+  });
 }
 
 /* --- Модальное окно ------------------------------------------------------ */
