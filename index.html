@@ -689,6 +689,7 @@ body {
 #stats-habit-view[hidden],
 #stats-tasks-view[hidden],
 #stats-fast-view[hidden],
+#stats-sleep-view[hidden],
 #sleep-view[hidden],
 #prayer-settings-view[hidden],
 #main[hidden],
@@ -2113,7 +2114,8 @@ body {
 #stats-habits-view,
 #stats-habit-view,
 #stats-tasks-view,
-#stats-fast-view {
+#stats-fast-view,
+#stats-sleep-view {
   margin-top: 20px;
   padding: 22px 26px 26px;
   border: 1px solid var(--border);
@@ -2207,7 +2209,8 @@ body {
 #stats-habits-period,
 #stats-habit-period,
 #stats-tasks-period,
-#stats-fast-period {
+#stats-fast-period,
+#stats-sleep-period {
   display: flex;
   gap: 0;
   margin: 12px 0;
@@ -3491,6 +3494,11 @@ body.view-stats #header-actions {
         </button>
       </li>
       <li>
+        <button type="button" id="stats-row-sleep" class="settings-row" data-stat="sleep">
+          <span>Сон</span><span class="stats-row-value"></span>
+        </button>
+      </li>
+      <li>
         <button type="button" id="stats-row-fast" class="settings-row" data-stat="fast">
           <span>Ураза</span><span class="stats-row-value"></span>
         </button>
@@ -3593,6 +3601,27 @@ body.view-stats #header-actions {
     <p id="stats-fast-empty-note" class="stats-empty-note" hidden>Счётчик не заведён</p>
   </section>
 
+  <!-- Категория «Статистика → Сон». Источник — история раздела «Цикл сна»
+       (youplanner.sleep), та же, что копит форма: экран только читает её.
+       Пустых состояний два, поэтому и текст у пометки пустой: истории нет
+       вовсе и истории нет за выбранный период — это разные вещи, и пишет
+       их renderStatsSleepView() -->
+  <section id="stats-sleep-view" hidden>
+    <div class="qaza-head">
+      <h2>Сон</h2>
+      <button type="button" id="stats-sleep-back" class="btn btn-secondary">← Назад</button>
+    </div>
+    <div id="stats-sleep-period" role="radiogroup" aria-label="Период статистики">
+      <button type="button" class="view-switch-btn" data-period="week">Неделя</button>
+      <button type="button" class="view-switch-btn is-active" data-period="month">Месяц</button>
+      <button type="button" class="view-switch-btn" data-period="year">Год</button>
+      <button type="button" class="view-switch-btn" data-period="all">Всё время</button>
+    </div>
+    <div id="stats-sleep-summary"></div>
+    <div id="stats-sleep-chart" class="stats-chart"></div>
+    <p id="stats-sleep-empty-note" class="stats-empty-note" hidden></p>
+  </section>
+
   <!-- Раздел «Цикл сна»: концы циклов по времени отхода, засыпания и подъёма.
        Открывается пунктом гамбургера на главной, данные живут на устройстве
        (youplanner.sleep). Полей три, и все три нужны расчёту: пустое любое —
@@ -3664,8 +3693,9 @@ body.view-stats #header-actions {
 
     <div class="stats-menu-sub" id="stats-hub-sub" hidden>
       <button type="button" class="stats-menu-item" data-stats-view="stats-qaza">Каза-намазы</button>
-      <button type="button" class="stats-menu-item" data-stats-view="stats-fast">Ураза</button>
       <button type="button" class="stats-menu-item" data-stats-view="stats-tasks">Задачи</button>
+      <button type="button" class="stats-menu-item" data-stats-view="stats-sleep">Сон</button>
+      <button type="button" class="stats-menu-item" data-stats-view="stats-fast">Ураза</button>
       <button type="button" class="stats-menu-item" data-stats-view="stats-habits">Привычки</button>
     </div>
 
@@ -4366,6 +4396,31 @@ function calcProgress(habit, dates) {
     return (sum / base) / habit.goal * 100;
   }
   return sum / base * 100;
+}
+
+// Среднее по массиву минут от полуночи — точка на циферблате, а не сумма.
+// Время живёт на сутках, и обычное среднее на нём врёт: отбой 23:30 и 00:30
+// — это полночь, а не 12:00. Поэтому значение строго меньше 18:00 (1080)
+// считается после полуночи и сдвигается на сутки вперёд, а 1080 и больше
+// не сдвигается. Порог — не догадка: отбой вечером, подъём утром, и 18:00
+// лежит между ними. Среднее сворачивается по модулю 1440 — обратно
+// на циферблат. Пустой массив — null: среднего нет
+function sleepAverageMinutes(minutes) {
+  if (!minutes || minutes.length === 0) return null;
+
+  // Только числа: null, undefined и строки сюда не проходят.
+  // Проверка стояла бы и без фильтра — validSleepHistory их
+  // отбрасывает, — но инвариант «на входе числа» держится тогда
+  // на комментарии в другом месте, а не на самой функции
+  const clean = minutes.filter(Number.isFinite);
+  if (clean.length === 0) return null;
+
+  let sum = 0;
+  for (let i = 0; i < clean.length; i++) {
+    sum += clean[i] < 18 * 60 ? clean[i] + SLEEP_MAX_MINUTES : clean[i];
+  }
+
+  return Math.round(sum / clean.length) % SLEEP_MAX_MINUTES;
 }
 
 /* ---------- Работа с датами (локальное время, без UTC) ---------- */
@@ -5240,7 +5295,7 @@ function sleepCycleLabel(count) {
 // История сна: массив записей по дням. Чистится при чтении, как история уразы:
 // битый элемент отбрасывается молча, массив из-за него не отклоняется (§5).
 // Годная запись — объект, у которого date — день, bed и wake — время суток,
-// fall — целое 0…120, actualWake — время суток, sleepMin — целое 0…1440,
+// fall — целое 0…120, actualWake — время суток, sleepMin — целое 0…1439,
 // и оно сходится с полями. Сходимость проверяется не для порядка: битая пара
 // роняет всю запись и при чтении ключа, и в истории ей не место — иначе
 // однажды день вернулся бы в раздел с чужой длительностью
@@ -5384,10 +5439,10 @@ const STATS_PERIOD_KEY = 'youplanner.stats.period';
 const STATS_PERIODS = ['week', 'month', 'year', 'all'];
 const STATS_PERIOD_DEFAULT = 'month';
 
-// Пять категорий статистики: у каждой свой период
-const STATS_PERIOD_CATEGORIES = ['hub', 'qaza', 'habits', 'tasks', 'fast'];
+// Шесть категорий статистики: у каждой свой период
+const STATS_PERIOD_CATEGORIES = ['hub', 'qaza', 'habits', 'tasks', 'fast', 'sleep'];
 
-// Блок периодов → категория. Блоков шесть, категорий пять: список привычек
+// Блок периодов → категория. Блоков семь, категорий шесть: список привычек
 // и карточка одной привычки делят период категории «habits»
 const STATS_PERIOD_BOXES = {
   'stats-period': 'hub',
@@ -5396,6 +5451,7 @@ const STATS_PERIOD_BOXES = {
   'stats-habit-period': 'habits',
   'stats-tasks-period': 'tasks',
   'stats-fast-period': 'fast',
+  'stats-sleep-period': 'sleep',
 };
 
 // «Всё время» — окно в 365 дней от сегодня, а не от первой записи: иначе
@@ -5404,7 +5460,7 @@ const STATS_ALL_DAYS = 365;
 
 // Содержимое ключа как объект периодов. Ключа нет и мусор в нём — пустой
 // объект: обе ветки читаются как «Месяц». Строка из списка — след прежней
-// версии, где период был один: переносится на все пять категорий, и первая
+// версии, где период был один: переносится на все шесть категорий, и первая
 // же правка периода кладёт в ключ объект
 function readStatsPeriods() {
   const raw = localStorage.getItem(STATS_PERIOD_KEY);
@@ -5433,7 +5489,7 @@ function loadStatsPeriod(category) {
   return STATS_PERIODS.indexOf(value) === -1 ? STATS_PERIOD_DEFAULT : value;
 }
 
-// Пишет одно поле, остальные четыре не трогает. Значение вне списка не
+// Пишет одно поле, остальные пять не трогает. Значение вне списка не
 // пишется — как и у единственного периода до этой правки
 function saveStatsPeriod(category, period) {
   if (STATS_PERIODS.indexOf(period) === -1) return;
@@ -6668,6 +6724,11 @@ function bindEvents() {
     statsRowFast.addEventListener('click', function () { switchAppView('stats-fast'); });
   }
 
+  const statsRowSleep = document.getElementById('stats-row-sleep');
+  if (statsRowSleep) {
+    statsRowSleep.addEventListener('click', function () { switchAppView('stats-sleep'); });
+  }
+
   const statsTasksBack = document.getElementById('stats-tasks-back');
   if (statsTasksBack) {
     statsTasksBack.addEventListener('click', function () { switchAppView('stats'); });
@@ -6676,6 +6737,11 @@ function bindEvents() {
   const statsFastBack = document.getElementById('stats-fast-back');
   if (statsFastBack) {
     statsFastBack.addEventListener('click', function () { switchAppView('stats'); });
+  }
+
+  const statsSleepBack = document.getElementById('stats-sleep-back');
+  if (statsSleepBack) {
+    statsSleepBack.addEventListener('click', function () { switchAppView('stats'); });
   }
 
   const statsRowHabits = document.getElementById('stats-row-habits');
@@ -8499,7 +8565,8 @@ function isStatsMenuOpen() {
 // Экраны раздела «Статистика»: у них общий вход и общий возврат «Назад»
 function isStatsView(name) {
   return name === 'stats' || name === 'stats-qaza' || name === 'stats-habits' ||
-    name === 'stats-habit' || name === 'stats-tasks' || name === 'stats-fast';
+    name === 'stats-habit' || name === 'stats-tasks' || name === 'stats-fast' ||
+    name === 'stats-sleep';
 }
 
 // Куда вернёт «Назад» с экранов статистики. Входов два — строка в Настройках
@@ -8546,6 +8613,7 @@ function switchAppView(name) {
   document.getElementById('stats-habit-view').hidden = name !== 'stats-habit';
   document.getElementById('stats-tasks-view').hidden = name !== 'stats-tasks';
   document.getElementById('stats-fast-view').hidden = name !== 'stats-fast';
+  document.getElementById('stats-sleep-view').hidden = name !== 'stats-sleep';
   document.getElementById('sleep-view').hidden = name !== 'sleep';
   document.getElementById('tasks-view').hidden = name !== 'tasks';
   document.getElementById('mobile-day-tabs').hidden = name !== 'main' || !isMobileView();
@@ -8567,7 +8635,8 @@ function switchAppView(name) {
   const tabView = name === 'edit-habits' || name === 'prayer-settings' ||
     name === 'sleep' || name === 'stats' || name === 'stats-qaza' ||
     name === 'stats-habits' || name === 'stats-habit' ||
-    name === 'stats-tasks' || name === 'stats-fast' ? 'settings'
+    name === 'stats-tasks' || name === 'stats-fast' ||
+    name === 'stats-sleep' ? 'settings'
     : name === 'prayer' || name === 'fast' ? 'qaza'
       : name;
   document.querySelectorAll('#tab-bar .tab-item').forEach(function (item) {
@@ -8585,7 +8654,8 @@ function switchAppView(name) {
   document.body.classList.toggle('view-settings', isSettings);
   document.body.classList.toggle('view-stats', name === 'stats' || name === 'stats-qaza' ||
     name === 'stats-habits' || name === 'stats-habit' ||
-    name === 'stats-tasks' || name === 'stats-fast');
+    name === 'stats-tasks' || name === 'stats-fast' ||
+    name === 'stats-sleep');
 
   if (name === 'qaza') {
     if (!qazaState) qazaState = loadQaza();
@@ -8631,6 +8701,10 @@ function switchAppView(name) {
 
   if (name === 'stats-fast') {
     renderStatsFastView();
+  }
+
+  if (name === 'stats-sleep') {
+    renderStatsSleepView();
   }
 
   if (name === 'sleep') {
@@ -8688,6 +8762,8 @@ function renderStatsCategory(category) {
     renderStatsTasksView();
   } else if (category === 'fast') {
     renderStatsFastView();
+  } else if (category === 'sleep') {
+    renderStatsSleepView();
   }
 }
 
@@ -8742,7 +8818,7 @@ function setStatsValue(selector, value) {
   if (el) el.textContent = value;
 }
 
-// Хаб: четыре строки. Цифры считаются по хранилищу, а не по appState:
+// Хаб: пять строк. Цифры считаются по хранилищу, а не по appState:
 // раздел открывается из Настроек, где состояние таблицы могло устареть.
 function renderStatsView() {
   markStatsPeriod('stats-period');
@@ -8759,6 +8835,26 @@ function renderStatsView() {
     return task.date === todayISO && !task.done;
   });
   setStatsValue('#stats-list [data-stat="tasks"] .stats-row-value', open.length);
+
+  // Сон — средняя длительность записи за период хаба. Дни берутся уже
+  // собранные: период у строки тот же, что у остальных цифр
+  const sleep = loadSleep();
+  let sleepValue = '—';
+  if (sleep && sleep.history.length > 0) {
+    const dayIndex = {};
+    for (let i = 0; i < dates.length; i++) dayIndex[dates[i]] = i;
+
+    let sum = 0;
+    let count = 0;
+    for (let i = 0; i < sleep.history.length; i++) {
+      const entry = sleep.history[i];
+      if (dayIndex[entry.date] === undefined) continue;
+      sum += entry.sleepMin;
+      count++;
+    }
+    if (count > 0) sleepValue = sleepFormatDuration(Math.round(sum / count));
+  }
+  setStatsValue('#stats-list [data-stat="sleep"] .stats-row-value', sleepValue);
 
   const fast = loadFast();
   setStatsValue('#stats-list [data-stat="fast"] .stats-row-value',
@@ -8944,6 +9040,88 @@ function renderStatsFastView() {
     chart.innerHTML = statsChartMarkup(values, 'Возмещено по дням');
     note.hidden = true;
   }
+}
+
+// Категория «Сон». Источник — история раздела «Цикл сна» (§11ab): форма её
+// только пишет, читает раздел статистики. Пустых состояний два, и это разные
+// вещи: истории нет вовсе — показывать нечего, истории нет за выбранное окно
+// — данные есть, но не здесь. Средние отбоя и подъёма считает
+// sleepAverageMinutes: у времени суток своя арифметика, и обычное среднее
+// на ней врёт. Средний подъём — по полю actualWake, а не wake: в историю
+// идёт то, что вышло на самом деле, а wake — цель
+function renderStatsSleepView() {
+  markStatsPeriod('stats-sleep-period');
+
+  const sleep = loadSleep();
+  const summary = document.getElementById('stats-sleep-summary');
+  const chart = document.getElementById('stats-sleep-chart');
+  const note = document.getElementById('stats-sleep-empty-note');
+  if (!summary || !chart || !note) return;
+
+  if (!sleep || sleep.history.length === 0) {
+    summary.innerHTML = '';
+    summary.hidden = true;
+    chart.innerHTML = '';
+    chart.hidden = true;
+    note.textContent = 'Истории сна нет';
+    note.hidden = false;
+    return;
+  }
+
+  const dates = statsPeriodDates(loadStatsPeriod('sleep'), new Date());
+  const dayIndex = {};
+  const values = [];
+  for (let i = 0; i < dates.length; i++) {
+    dayIndex[dates[i]] = i;
+    values.push(0);
+  }
+
+  // Записи периода. Одна запись на день — держит sleepHistoryEntry, — но
+  // сумма на день, а не присваивание: вторая запись о том же дне сложилась бы
+  // в значение дня, а не затёрла первую
+  const inPeriod = [];
+  for (let i = 0; i < sleep.history.length; i++) {
+    const entry = sleep.history[i];
+    const day = dayIndex[entry.date];
+    if (day === undefined) continue;
+    inPeriod.push(entry);
+    values[day] += entry.sleepMin;
+  }
+
+  if (inPeriod.length === 0) {
+    summary.innerHTML = '';
+    summary.hidden = true;
+    chart.innerHTML = '';
+    chart.hidden = true;
+    note.textContent = 'За выбранный период записей нет';
+    note.hidden = false;
+    return;
+  }
+
+  summary.hidden = false;
+
+  // Оба конца ночи — время суток, и history их уже проверила при чтении:
+  // каждое значение здесь число, а не null
+  const bedMinutes = inPeriod.map(function (e) { return sleepTimeMinutes(e.bed); });
+  const wakeMinutes = inPeriod.map(function (e) { return sleepTimeMinutes(e.actualWake); });
+
+  let durationSum = 0;
+  for (let i = 0; i < inPeriod.length; i++) durationSum += inPeriod[i].sleepMin;
+  const averageDuration = Math.round(durationSum / inPeriod.length);
+
+  const averageBed = sleepAverageMinutes(bedMinutes);
+  const averageWake = sleepAverageMinutes(wakeMinutes);
+
+  summary.innerHTML = statsSummaryMarkup([
+    ['bed',     'Средний отбой',        averageBed === null ? '—' : sleepTimeLabel(averageBed)],
+    ['wake',    'Средний подъём',       averageWake === null ? '—' : sleepTimeLabel(averageWake)],
+    ['average', 'Средняя длительность', sleepFormatDuration(averageDuration)],
+    ['count',   'Записей за период',    String(inPeriod.length)],
+  ]);
+
+  chart.hidden = false;
+  chart.innerHTML = statsChartMarkup(values, 'Длительность сна по дням');
+  note.hidden = true;
 }
 
 /* ---------- Статистика: привычки ----------------------------------------- */
