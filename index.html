@@ -687,7 +687,6 @@ body {
 #stats-qaza-view[hidden],
 #stats-habits-view[hidden],
 #stats-habit-view[hidden],
-#stats-tasks-view[hidden],
 #stats-fast-view[hidden],
 #stats-sleep-view[hidden],
 #sleep-view[hidden],
@@ -955,6 +954,14 @@ body {
   accent-color: var(--accent);
 }
 
+/* Поле факта подъёма скрыто, пока отмечена галочка «встал по плану».
+   Парное правило обязательно: .prayer-field задаёт display: flex, а одиночный
+   [hidden] из настроек браузера правилу класса уступает — и поле осталось бы
+   на экране вместе со снятым атрибутом */
+#sleep-real-wake-field[hidden] {
+  display: none;
+}
+
 #sleep-result {
   margin-top: 20px;
 }
@@ -1166,22 +1173,18 @@ body {
 /* --- Вкладка «Задачи» ---------------------------------------------------- */
 
 /* display у элемента перебил бы атрибут hidden */
-#tasks-view[hidden] {
-  display: none;
-}
-
 /* Кнопка в шапке ПК: на телефоне её заменяет таб-бар. Пара к display нужна
    своя: id-правило сильнее общего .btn[hidden] из блока каза, поэтому без
-   него кнопка оставалась бы нарисованной внутри вкладки задач. */
-#tasks-btn {
+   него кнопка оставалась бы нарисованной внутри вкладки расписания. */
+#schedule-btn {
   display: inline-flex;
 }
 
-#tasks-btn[hidden] {
+#schedule-btn[hidden] {
   display: none;
 }
 
-#tasks-view {
+#schedule-view {
   margin-top: 20px;
   padding: 22px 26px 26px;
   border: 1px solid var(--border);
@@ -1190,172 +1193,76 @@ body {
   box-shadow: var(--shadow);
 }
 
-/* Полоса «‹ месяц ›» над сеткой календаря */
-#calendar-head {
+#schedule-view[hidden] {
+  display: none;
+}
+
+#schedule-switch {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 0 12px;
-}
-
-#calendar-label {
-  font-weight: 600;
-  font-size: 15px;
-  text-transform: capitalize;
-}
-
-/* Ширина ограничена: квадратные ячейки на всю ширину карточки ПК раздували
-   месяц до тысячи пикселей по высоте. На телефоне предел не мешает. */
-#calendar-grid {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: 2px 0;
-  max-width: 480px;
-  margin: 0 auto;
-}
-
-.cal-dow {
-  text-align: center;
-  font-size: 11px;
-  color: var(--text-muted);
-  padding: 6px 0;
-}
-
-/* День — круглая кнопка; точка-маркер внутри неё */
-.cal-day {
-  position: relative;
-  aspect-ratio: 1/1;
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: 3px;
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  font-size: 14px;
-  cursor: pointer;
-  border-radius: 50%;
-}
-
-.cal-day.is-outside {
-  color: var(--text-muted);
-  opacity: .45;
-}
-
-/* Прошедший день: задача на него не встанет, сохранение остановит тост.
-   Класс есть только у пикера, календарь вкладки прошлое не приглушает.
-   Правило стоит до .is-selected — выбранный день важнее приглушения. */
-.cal-day.is-past {
-  color: var(--text-muted);
-}
-
-.cal-day.is-today {
-  font-weight: 600;
-}
-
-.cal-day.is-selected {
-  background: var(--accent);
-  color: var(--on-accent);
-}
-
-.cal-day.is-selected .cal-marker {
-  background: var(--on-accent) !important;
-}
-
-.cal-marker {
-  width: 5px;
-  height: 5px;
-  border-radius: 50%;
-}
-
-.cal-marker.is-red {
-  background: #dc2626;
-}
-
-.cal-marker.is-green {
-  background: #16a34a;
-}
-
-.cal-marker.is-blue {
-  background: var(--accent);
-}
-
-/* Запас снизу — под висящую кнопку «＋»: у прокрученного до конца списка
-   последняя строка должна оставаться целой. Отступ одинаков на ПК и телефоне. */
-#tasks-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  margin-top: 8px;
-  padding-bottom: 80px;
-}
-
-.task-row {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 12px 14px;
-  /* Справа — место под висящую кнопку «＋»: без него она накрывала бы
-     время и флаг у строк, которые проходят через её полосу при скролле. */
-  padding-right: 56px;
-  border: 1px solid var(--border);
+  gap: 0;
+  margin: 12px 0;
+  padding: 3px;
   border-radius: 10px;
   background: var(--surface-alt);
 }
 
-.task-check {
-  width: 22px;
-  height: 22px;
+#schedule-list {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+#schedule-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  padding: 12px 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.schedule-time {
   flex: 0 0 auto;
-  margin: 0;
-  accent-color: var(--accent);
-}
-
-.task-text {
-  flex: 1 1 auto;
-  font-size: 15px;
-}
-
-.task-time {
-  font-size: 13px;
+  min-width: 52px;
   color: var(--text-muted);
+  font-size: 15px;
   font-variant-numeric: tabular-nums;
 }
 
-.task-flag {
-  font-size: 16px;
-  line-height: 1;
+.schedule-text {
+  flex: 1 1 auto;
+  color: var(--text);
+  font-size: 15px;
 }
 
-.task-flag.is-high {
-  color: #dc2626;
+@media (max-width: 700px) {
+  #schedule-view {
+    padding: 14px 14px 20px;
+    margin-top: 12px;
+  }
+
+  #schedule-view .qaza-head {
+    display: block;
+  }
+
+  #schedule-view .qaza-head h2 {
+    font-size: 17px;
+  }
 }
 
-.task-flag.is-low {
-  color: #16a34a;
+/* Полоса «‹ месяц ›» над сеткой календаря */
+/* Ширина ограничена: квадратные ячейки на всю ширину карточки ПК раздували
+   месяц до тысячи пикселей по высоте. На телефоне предел не мешает. */
+/* День — круглая кнопка; точка-маркер внутри неё */
+/* Прошедший день: задача на него не встанет, сохранение остановит тост.
+   Класс есть только у пикера, календарь вкладки прошлое не приглушает.
+   Правило стоит до .is-selected — выбранный день важнее приглушения. */
+.cal-day.is-selected .cal-marker {
+  background: var(--on-accent) !important;
 }
 
+/* Запас снизу — под висящую кнопку «＋»: у прокрученного до конца списка
+   последняя строка должна оставаться целой. Отступ одинаков на ПК и телефоне. */
 /* Круглая кнопка «＋» — над таб-баром, чтобы не перекрывать его */
-#task-add-btn {
-  position: fixed;
-  right: 16px;
-  bottom: 88px;
-  z-index: 40;
-  width: 56px;
-  height: 56px;
-  border-radius: 50%;
-  border: 0;
-  background: var(--accent);
-  color: var(--on-accent);
-  font-size: 28px;
-  line-height: 1;
-  cursor: pointer;
-  box-shadow: 0 4px 16px rgba(0, 98, 204, .35);
-}
-
 #task-add-btn:disabled {
   background: var(--text-muted);
   cursor: not-allowed;
@@ -1400,55 +1307,12 @@ body {
   overflow-y: auto;
 }
 
-.sheet-grip {
-  display: none;
-}
-
-.sheet-input {
-  width: 100%;
-  border: 0;
-  background: transparent;
-  font: inherit;
-  font-size: 17px;
-  padding: 8px 0;
-  color: var(--text);
-}
-
 .sheet-input:focus {
   outline: none;
 }
 
-.sheet-toolbar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 10px 0;
-  border-top: 1px solid var(--border);
-  margin-top: 8px;
-}
-
-.sheet-tool {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  padding: 6px 10px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text-muted);
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-}
-
 /* Галочка сохранения в панели формы. Отжимает себя вправо и красится
    в акцент, пока есть что сохранять; пустое поле гасит её. */
-.sheet-save-inline {
-  margin-left: auto;
-  color: var(--accent);
-  padding: 6px 10px;
-}
-
 .sheet-save-inline svg {
   display: block;
 }
@@ -1475,47 +1339,10 @@ body {
 }
 
 /* Кнопка «⋯» — тап-цель 48px; иконка прижата к правому краю панели */
-.sheet-menu-btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  flex: 0 0 auto;
-  width: 48px;
-  height: 48px;
-  margin-right: -12px;
-  border: 0;
-  background: transparent;
-  color: var(--text);
-  cursor: pointer;
-}
-
 /* Второе меню — ручной выбор приоритета поверх формы задачи. Слой выше
    .sheet: иначе подложка меню осталась бы под панелью формы. */
-#priority-sheet {
-  z-index: 120;
-}
-
 /* Третье меню — действия формы. Лежит выше меню приоритета: открыть его
    можно только из шапки формы, а приоритет — тоже из формы. */
-#task-actions-sheet {
-  z-index: 130;
-}
-
-.action-row {
-  display: block;
-  width: 100%;
-  min-height: 48px;
-  padding: 12px 16px;
-  border: 0;
-  background: transparent;
-  color: var(--accent);
-  font: inherit;
-  font-size: 17px;
-  text-align: center;
-  cursor: pointer;
-  border-radius: 10px;
-}
-
 .action-row:active {
   background: var(--surface-alt);
 }
@@ -1531,34 +1358,8 @@ body {
 
 /* Четвёртая шторка — пикер даты. Лежит выше меню действий (130): открыть
    её можно только из панели формы, которая под ними всеми. */
-#task-date-sheet {
-  z-index: 140;
-}
-
 /* Пятая шторка — колесо времени. Выше пикера даты (140), но ниже тоста (150):
    открывается поверх пикера, а тот остаётся под ней открытым. */
-#task-time-sheet {
-  z-index: 145;
-}
-
-.date-chips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  margin: 12px 0 16px;
-}
-
-.date-chip {
-  padding: 8px 14px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--surface-alt);
-  color: var(--text);
-  font: inherit;
-  font-size: 13px;
-  cursor: pointer;
-}
-
 .date-chip.is-active {
   border-color: var(--accent);
   background: var(--accent-soft);
@@ -1586,18 +1387,6 @@ body {
   gap: 2px 0;
 }
 
-.date-info-row {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  margin-top: 16px;
-  padding: 14px 4px;
-  border-top: 1px solid var(--border);
-  color: var(--text);
-  font-size: 15px;
-  cursor: pointer;
-}
-
 .date-info-row svg {
   color: var(--text-muted);
   flex: 0 0 auto;
@@ -1607,67 +1396,18 @@ body {
   flex: 1 1 auto;
 }
 
-#date-info-value {
-  color: var(--text-muted);
-}
-
 /* Панель колеса времени (§11n). Не .sheet-panel: та прижата к низу экрана
    и растёт вверх, а выбор времени должен всплывать по центру, как в Apple
    Reminders. Ширина — по содержимому, поэтому окошко обнимает два колеса,
    а max-width держит его узким на любой ширине экрана. */
-.time-sheet-panel {
-  position: fixed;
-  top: 50%;
-  left: 50%;
-  transform: translate(-50%, -50%);
-  width: max-content;
-  max-width: 280px;
-  padding: 16px;
-  background: var(--surface);
-  border-radius: 14px;
-  box-shadow: var(--shadow);
-}
-
-.time-wheels {
-  position: relative;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  gap: 6px;
-  margin-top: 8px;
-}
-
 /* Колесо — обычный вертикальный скролл со снапом: строка останавливается
    точно в середине. Паддинги равны половине окна колеса, поэтому первая и
    последняя строки тоже встают в центр. */
-.time-wheel {
-  width: 88px;
-  height: 180px;
-  padding: 72px 0;
-  overflow-y: scroll;
-  scroll-snap-type: y mandatory;
-  -webkit-overflow-scrolling: touch;
-  overscroll-behavior: contain;
-  scrollbar-width: none;
-  text-align: center;
-}
-
 .time-wheel::-webkit-scrollbar {
   display: none;
 }
 
 /* Высота строки кратна шагу снапа: выбранная считается делением прокрутки */
-.time-wheel-item {
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  height: 36px;
-  scroll-snap-align: center;
-  font-size: 17px;
-  color: var(--text-muted);
-  opacity: .5;
-}
-
 .time-wheel-item.is-near {
   font-size: 22px;
   opacity: .72;
@@ -1680,59 +1420,16 @@ body {
   opacity: 1;
 }
 
-.time-wheel-sep {
-  font-size: 30px;
-  font-weight: 600;
-  color: var(--text);
-}
-
 /* Затухания у краёв окна колеса: строки растворяются в фоне панели, а не
    обрезаются её краем. Кликов не ловят: это подсказка глазу, не элемент. */
-.time-wheel-fade {
-  position: absolute;
-  left: 0;
-  right: 0;
-  top: 0;
-  height: 72px;
-  background: linear-gradient(to bottom, var(--surface), transparent);
-  pointer-events: none;
-}
-
 .time-wheel-fade.is-bottom {
   top: auto;
   bottom: 0;
   background: linear-gradient(to top, var(--surface), transparent);
 }
 
-#task-date-clear {
-  display: block;
-  width: 100%;
-  min-height: 44px;
-  margin-top: 16px;
-  color: var(--danger);
-  border-color: var(--border);
-  background: transparent;
-}
-
 #task-date-clear:active {
   background: var(--surface-alt);
-}
-
-.priority-option {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  width: 100%;
-  min-height: 48px;
-  padding: 0 8px;
-  border: 0;
-  border-radius: 8px;
-  background: transparent;
-  color: var(--text);
-  font: inherit;
-  font-size: 15px;
-  text-align: left;
-  cursor: pointer;
 }
 
 /* Выбранный вариант — фоном, а не только оттенком флага */
@@ -2113,7 +1810,6 @@ body {
 #stats-qaza-view,
 #stats-habits-view,
 #stats-habit-view,
-#stats-tasks-view,
 #stats-fast-view,
 #stats-sleep-view {
   margin-top: 20px;
@@ -2208,7 +1904,6 @@ body {
 #stats-qaza-period,
 #stats-habits-period,
 #stats-habit-period,
-#stats-tasks-period,
 #stats-fast-period,
 #stats-sleep-period {
   display: flex;
@@ -3112,14 +2807,9 @@ body.view-stats #header-actions {
     padding-bottom: 8px;
   }
 
-  /* Вкладка «Задачи»: кнопка в шапке уступает место таб-бару */
-  #tasks-btn {
+  /* Вкладка «Расписание»: кнопка в шапке уступает место таб-бару */
+  #schedule-btn {
     display: none;
-  }
-
-  #tasks-view {
-    padding: 14px 14px 20px;
-    margin-top: 12px;
   }
 
   #tasks-view .qaza-head {
@@ -3131,14 +2821,6 @@ body.view-stats #header-actions {
   }
 
   /* Кнопка «＋» поднята над таб-баром с учётом безопасного отступа */
-  #task-add-btn {
-    bottom: calc(88px + env(safe-area-inset-bottom, 0px));
-  }
-
-  .cal-day {
-    font-size: 15px;
-  }
-
   /* Форма задачи на телефоне выезжает снизу во всю ширину.
      bottom поднят на высоту клавиатуры: переменную ведёт syncSheetToKeyboard */
   .sheet-panel {
@@ -3162,15 +2844,6 @@ body.view-stats #header-actions {
      только чуть отступает от края, чтобы не читаться как приклеенное */
   #task-actions-sheet .sheet-panel {
     bottom: max(12px, var(--keyboard-offset, 0px));
-  }
-
-  .sheet-grip {
-    display: block;
-    width: 36px;
-    height: 4px;
-    border-radius: 2px;
-    background: var(--border);
-    margin: 0 auto 12px;
   }
 
   /* В каза, молитвах, уразе и настройках половины недели не нужны.
@@ -3203,7 +2876,7 @@ body.view-stats #header-actions {
     </nav>
     <div id="header-actions">
       <button id="qaza-btn" class="btn btn-secondary">Каза-намазы</button>
-      <button id="tasks-btn" class="btn btn-secondary">Задачи</button>
+      <button id="schedule-btn" class="btn btn-secondary">Расписание</button>
       <button id="settings-btn" class="btn btn-secondary">Настройки</button>
     </div>
   </header>
@@ -3388,22 +3061,18 @@ body.view-stats #header-actions {
     </section>
   </section>
 
-  <!-- Вкладка «Задачи»: календарь месяца и список задач выбранного дня -->
-  <section id="tasks-view" hidden>
+  <section id="schedule-view" hidden>
     <div class="qaza-head">
-      <h2>Задачи</h2>
-      <button id="tasks-back" class="btn btn-secondary">← Назад</button>
+      <h2>Расписание</h2>
+      <button type="button" id="schedule-back" class="btn btn-secondary">← Назад</button>
     </div>
-    <div id="calendar-head">
-      <button type="button" id="calendar-prev" class="btn btn-secondary">‹</button>
-      <span id="calendar-label"></span>
-      <button type="button" id="calendar-next" class="btn btn-secondary">›</button>
+    <div id="schedule-switch" role="radiogroup" aria-label="Тип дня">
+      <button type="button" class="view-switch-btn is-active" data-schedule="weekday">Будний</button>
+      <button type="button" class="view-switch-btn" data-schedule="weekend">Выходной</button>
+      <button type="button" class="view-switch-btn" data-schedule="fasting">Ураза</button>
+      <button type="button" class="view-switch-btn" data-schedule="physical">Физработа</button>
     </div>
-    <div id="calendar-grid"></div>
-    <h3 class="qaza-subtitle" id="tasks-day-label"></h3>
-    <div id="tasks-list"></div>
-    <p id="tasks-empty" class="qaza-summary" hidden>Нет задач на этот день</p>
-    <button type="button" id="task-add-btn" aria-label="Новая задача">+</button>
+    <ul id="schedule-list"></ul>
   </section>
 
   <!-- Раздел «Настройки»: пока заглушка. Место для цвета фона, экспорта/импорта
@@ -3489,11 +3158,6 @@ body.view-stats #header-actions {
         </button>
       </li>
       <li>
-        <button type="button" id="stats-row-tasks" class="settings-row" data-stat="tasks">
-          <span>Задачи</span><span class="stats-row-value"></span>
-        </button>
-      </li>
-      <li>
         <button type="button" id="stats-row-sleep" class="settings-row" data-stat="sleep">
           <span>Сон</span><span class="stats-row-value"></span>
         </button>
@@ -3565,23 +3229,6 @@ body.view-stats #header-actions {
     <div id="stats-habit-grid"></div>
   </section>
 
-  <!-- Категория «Статистика → Задачи». Источник — список задач (§5): экран
-       читает его из хранилища, как хаб, а не из состояния таблицы -->
-  <section id="stats-tasks-view" hidden>
-    <div class="qaza-head">
-      <h2>Задачи</h2>
-      <button type="button" id="stats-tasks-back" class="btn btn-secondary">← Назад</button>
-    </div>
-    <div id="stats-tasks-period" role="radiogroup" aria-label="Период статистики">
-      <button type="button" class="view-switch-btn" data-period="week">Неделя</button>
-      <button type="button" class="view-switch-btn is-active" data-period="month">Месяц</button>
-      <button type="button" class="view-switch-btn" data-period="year">Год</button>
-      <button type="button" class="view-switch-btn" data-period="all">Всё время</button>
-    </div>
-    <div id="stats-tasks-summary"></div>
-    <div id="stats-tasks-chart" class="stats-chart"></div>
-  </section>
-
   <!-- Категория «Статистика → Ураза». #stats-fast-empty-note — одно пустое
        состояние на два случая: счётчика нет вовсе или истории слишком мало
        для графика. Текст пишет renderStatsFastView() -->
@@ -3651,6 +3298,22 @@ body.view-stats #header-actions {
         <input type="checkbox" id="sleep-follow-rec">
         <span>Встану по рекомендации, а не в своё время</span>
       </label>
+      <!-- Факт подъёма. Галочка отмечена по умолчанию: раздел заполняют
+           вечером, и «встал по плану» — обычный случай, а не редкий.
+           Снятая галочка открывает поле времени, без него запись не идёт -->
+      <label class="sleep-follow-rec">
+        <input type="checkbox" id="sleep-on-plan" checked>
+        <span>Встал по плану</span>
+      </label>
+      <label class="prayer-field" id="sleep-real-wake-field" hidden>
+        <span>Во сколько встал</span>
+        <input type="time" id="sleep-real-wake">
+      </label>
+      <p id="sleep-real-wake-note" class="form-error" role="alert"></p>
+      <label class="sleep-follow-rec">
+        <input type="checkbox" id="sleep-excluded">
+        <span>Исключить день из статистики</span>
+      </label>
     </div>
 
     <div id="sleep-result"></div>
@@ -3693,7 +3356,6 @@ body.view-stats #header-actions {
 
     <div class="stats-menu-sub" id="stats-hub-sub" hidden>
       <button type="button" class="stats-menu-item" data-stats-view="stats-qaza">Каза-намазы</button>
-      <button type="button" class="stats-menu-item" data-stats-view="stats-tasks">Задачи</button>
       <button type="button" class="stats-menu-item" data-stats-view="stats-sleep">Сон</button>
       <button type="button" class="stats-menu-item" data-stats-view="stats-fast">Ураза</button>
       <button type="button" class="stats-menu-item" data-stats-view="stats-habits">Привычки</button>
@@ -3715,7 +3377,7 @@ body.view-stats #header-actions {
     <button type="button" class="tab-item" data-view="qaza">
       <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"></path></svg>
       <span>Каза</span></button>
-    <button type="button" class="tab-item" data-view="tasks">
+    <button type="button" class="tab-item" data-view="schedule">
       <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <rect x="3" y="4" width="18" height="17" rx="3"></rect>
         <path d="M3 9h18"></path>
@@ -3723,7 +3385,7 @@ body.view-stats #header-actions {
         <path d="M16 2v4"></path>
         <text x="12" y="18" text-anchor="middle" font-size="7" font-weight="700" fill="currentColor" stroke="none">17</text>
       </svg>
-      <span>Задачи</span>
+      <span>Расписание</span>
     </button>
     <button type="button" class="tab-item" data-view="settings">
       <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
@@ -3763,57 +3425,6 @@ body.view-stats #header-actions {
   </div>
 </div>
 
-<!-- Форма новой задачи: на ПК окошко по центру, на телефоне — панель снизу -->
-<div id="task-sheet" class="sheet" hidden>
-  <div class="sheet-backdrop" data-task-sheet-close></div>
-  <div class="sheet-panel" role="dialog" aria-modal="true">
-    <div class="sheet-grip"></div>
-    <div class="sheet-head">
-      <h2 id="task-sheet-title">Новая задача</h2>
-      <button type="button" id="task-sheet-menu-btn" class="sheet-menu-btn" aria-label="Ещё">
-        <svg viewBox="0 0 24 24" width="24" height="24" fill="currentColor">
-          <circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/>
-        </svg>
-      </button>
-    </div>
-    <input type="text" id="task-sheet-text" class="sheet-input" placeholder="Что бы вы хотели сделать?" maxlength="120">
-    <div class="sheet-toolbar">
-      <button type="button" id="task-sheet-date" class="sheet-tool">
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <rect x="3" y="4" width="18" height="17" rx="3"></rect><path d="M3 9h18"></path><path d="M8 2v4"></path><path d="M16 2v4"></path>
-        </svg>
-        <span id="task-sheet-date-label">Сегодня</span>
-      </button>
-      <button type="button" id="task-sheet-priority" class="sheet-tool" aria-label="Приоритет" aria-haspopup="dialog">
-        <svg class="priority-flag" viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M4 21V4"></path><path d="M4 4h13l-2 4 2 4H4"></path>
-        </svg>
-      </button>
-      <button type="button" id="task-sheet-save-inline" class="sheet-tool sheet-save-inline" aria-label="Сохранить">
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M5 12.5l4.5 4.5L19 7.5"></path>
-        </svg>
-      </button>
-    </div>
-  </div>
-</div>
-
-<!-- Второе меню: ручной выбор приоритета. Открывается кнопкой формы -->
-<div id="priority-sheet" class="sheet" hidden>
-  <div class="sheet-backdrop" data-priority-sheet-close></div>
-  <div class="sheet-panel" role="dialog" aria-modal="true">
-    <button type="button" class="priority-option" data-priority="high">
-      <span class="priority-flag is-high">⚑</span>
-      <span>Высокий приоритет</span>
-    </button>
-    <button type="button" class="priority-option" data-priority="low">
-      <span class="priority-flag is-low">⚑</span>
-      <span>Низкий приоритет</span>
-    </button>
-    <button type="button" class="btn btn-secondary" data-priority-sheet-close>Отмена</button>
-  </div>
-</div>
-
 <!-- Попап уровня выполнения привычки. Открывается маленькой кнопкой рядом
      с полем отметки у Корана и Спорта (§1.3); на телефоне — панель снизу,
      на ПК — окошко по центру, как у остальных шторок -->
@@ -3826,81 +3437,6 @@ body.view-stats #header-actions {
     <button type="button" id="level-option-full" class="level-option" data-level="full">Полная версия</button>
     <button type="button" id="level-option-two-min" class="level-option" data-level="two-min">2 минуты</button>
     <button type="button" class="btn btn-secondary" data-level-sheet-close>Отмена</button>
-  </div>
-</div>
-
-<!-- Третье меню: действия формы задачи. Открывается кнопкой «⋯» -->
-<div id="task-actions-sheet" class="sheet" hidden>
-  <div class="sheet-backdrop" data-task-actions-close></div>
-  <div class="sheet-panel" role="dialog" aria-modal="true">
-    <button type="button" id="task-sheet-save" class="action-row">Сохранить</button>
-    <button type="button" id="task-sheet-delete" class="action-row is-danger" hidden>Удалить</button>
-    <button type="button" class="action-row" data-task-actions-close>Отмена</button>
-  </div>
-</div>
-
-<!-- Четвёртая шторка: пикер даты и времени. Открывается кнопкой даты в форме -->
-<div id="task-date-sheet" class="sheet" hidden>
-  <div class="sheet-backdrop" data-task-date-close></div>
-  <div class="sheet-panel" role="dialog" aria-modal="true">
-    <div class="sheet-head">
-      <button type="button" id="task-date-cancel" class="sheet-menu-btn" aria-label="Отмена">✕</button>
-      <h2>Дата</h2>
-      <button type="button" id="task-date-done" class="sheet-menu-btn sheet-save-inline" aria-label="Готово">
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M5 12.5l4.5 4.5L19 7.5"></path>
-        </svg>
-      </button>
-    </div>
-
-    <div class="date-chips">
-      <button type="button" class="date-chip" data-offset="0">Сегодня</button>
-      <button type="button" class="date-chip" data-offset="1">Завтра</button>
-      <button type="button" class="date-chip" data-offset="next-mon">След. понедельник</button>
-    </div>
-
-    <div id="date-cal-head">
-      <button type="button" id="date-cal-prev" class="btn btn-secondary">‹</button>
-      <span id="date-cal-label"></span>
-      <button type="button" id="date-cal-next" class="btn btn-secondary">›</button>
-    </div>
-    <div id="date-cal-grid"></div>
-
-    <div class="date-info-row" id="date-time-row">
-      <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <circle cx="12" cy="12" r="9"></circle>
-        <path d="M12 7v5l3 2"></path>
-      </svg>
-      <span class="date-info-label">Срок исполнения</span>
-      <span id="date-info-value">Сегодня</span>
-    </div>
-
-    <button type="button" id="task-date-clear" class="btn btn-secondary">Очистить</button>
-  </div>
-</div>
-
-<!-- Пятая шторка: колесо времени поверх пикера даты. Открывается строкой
-     «Срок исполнения»; пикер под ней остаётся открытым до «Готово». -->
-<div id="task-time-sheet" class="sheet" hidden>
-  <div class="sheet-backdrop" data-task-time-close></div>
-  <div class="time-sheet-panel" role="dialog" aria-modal="true">
-    <div class="sheet-head">
-      <button type="button" id="task-time-cancel" class="sheet-menu-btn" aria-label="Отмена">✕</button>
-      <h2>Время</h2>
-      <button type="button" id="task-time-done" class="sheet-menu-btn sheet-save-inline" aria-label="Готово">
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M5 12.5l4.5 4.5L19 7.5"></path>
-        </svg>
-      </button>
-    </div>
-
-    <div class="time-wheels">
-      <div class="time-wheel" id="time-wheel-hours" role="listbox" aria-label="Часы"></div>
-      <span class="time-wheel-sep">:</span>
-      <div class="time-wheel" id="time-wheel-minutes" role="listbox" aria-label="Минуты"></div>
-      <div class="time-wheel-fade"></div>
-      <div class="time-wheel-fade is-bottom"></div>
-    </div>
   </div>
 </div>
 
@@ -3919,6 +3455,98 @@ const STORAGE_KEYS = {
   records: 'youplanner.records',
   tasks: 'youplanner.tasks',
   migrations: 'youplanner.migrations',
+};
+
+// Базовое расписание. Пока зашито в код. Редактирование через Настройки —
+// следующим заходом. Хранение в SCHEDULE_KEY и синхронизация — тогда же.
+const SCHEDULE_KEY = 'youplanner.schedule';
+
+const SCHEDULE_TYPES = ['weekday', 'weekend', 'fasting', 'physical'];
+
+const SCHEDULE_LABELS = {
+  weekday: 'Будний',
+  weekend: 'Выходной',
+  fasting: 'Ураза',
+  physical: 'Физработа',
+};
+
+const DEFAULT_SCHEDULE = {
+  weekday: [
+    { time: '04:30', text: 'Подъём' },
+    { time: '04:45', text: 'Фаджр' },
+    { time: '05:00', text: 'Тасбих' },
+    { time: '05:05', text: 'Каза' },
+    { time: '05:15', text: 'Коран' },
+    { time: '05:45', text: 'Планер' },
+    { time: '06:00', text: 'Кодинг' },
+    { time: '08:00', text: 'Завтрак' },
+    { time: '09:00', text: 'Кодинг' },
+    { time: '12:30', text: 'Зухр' },
+    { time: '12:50', text: 'Обед' },
+    { time: '13:30', text: 'Домашние' },
+    { time: '14:15', text: 'Кодинг' },
+    { time: '15:00', text: 'Аср' },
+    { time: '15:20', text: 'Спорт' },
+    { time: '15:40', text: 'Кодинг' },
+    { time: '18:00', text: 'Магриб' },
+    { time: '18:20', text: 'Каза' },
+    { time: '18:30', text: 'Ужин' },
+    { time: '19:00', text: 'Иша' },
+    { time: '19:30', text: 'Книга' },
+    { time: '20:00', text: 'Дневник' },
+    { time: '21:00', text: 'Отбой' },
+  ],
+  weekend: [
+    { time: '04:30', text: 'Подъём' },
+    { time: '04:45', text: 'Фаджр' },
+    { time: '05:00', text: 'Тасбих' },
+    { time: '05:05', text: 'Каза' },
+    { time: '05:15', text: 'Коран' },
+    { time: '05:45', text: 'Планер' },
+    { time: '06:00', text: 'Кодинг' },
+    { time: '12:30', text: 'Зухр' },
+    { time: '12:50', text: 'Обед' },
+    { time: '13:30', text: 'Выезд на учёбу' },
+    { time: '17:15', text: 'Аср' },
+    { time: '17:35', text: 'Спорт' },
+    { time: '18:00', text: 'Магриб' },
+    { time: '18:20', text: 'Каза' },
+    { time: '18:30', text: 'Ужин' },
+    { time: '19:00', text: 'Иша' },
+    { time: '19:30', text: 'Домашние' },
+    { time: '20:15', text: 'Книга' },
+    { time: '20:30', text: 'Дневник' },
+    { time: '21:30', text: 'Отбой' },
+  ],
+  fasting: [
+    { time: '04:30', text: 'Подъём, сухур' },
+    { time: '04:45', text: 'Фаджр' },
+    { time: '05:00', text: 'Тасбих' },
+    { time: '05:05', text: 'Каза' },
+    { time: '05:15', text: 'Коран' },
+    { time: '05:45', text: 'Планер' },
+    { time: '06:00', text: 'Кодинг' },
+    { time: '12:30', text: 'Зухр' },
+    { time: '13:45', text: 'Кодинг' },
+    { time: '15:00', text: 'Аср' },
+    { time: '15:20', text: 'Кодинг' },
+    { time: '18:00', text: 'Магриб (ифтар)' },
+    { time: '18:20', text: 'Каза' },
+    { time: '18:30', text: 'Еда' },
+    { time: '19:00', text: 'Иша' },
+    { time: '19:30', text: 'Книга' },
+    { time: '20:00', text: 'Дневник' },
+    { time: '21:00', text: 'Отбой' },
+  ],
+  physical: [
+    { time: '04:30', text: 'Подъём (по возможности)' },
+    { time: '04:45', text: 'Фаджр' },
+    { time: '12:30', text: 'Зухр' },
+    { time: '15:00', text: 'Аср' },
+    { time: '18:00', text: 'Магриб' },
+    { time: '19:00', text: 'Иша' },
+    { time: '21:00', text: 'Отбой' },
+  ],
 };
 
 // 12 привычек по умолчанию (порядок и значения — из спеки, п.5)
@@ -3979,6 +3607,13 @@ function markMigration(name) {
   if (migrations[name] === true) return;
   migrations[name] = true;
   localStorage.setItem(STORAGE_KEYS.migrations, JSON.stringify(migrations));
+}
+
+function migrateDropTasks() {
+  if (migrationDone('drop-tasks')) return;
+  markMigration('drop-tasks');
+  localStorage.removeItem(STORAGE_KEYS.tasks);
+  syncToCloud();
 }
 
 // «Пресс» заведена в дефолтах позже остальных привычек, поэтому у устройства
@@ -5146,8 +4781,11 @@ function fastRemainingLabel(n) {
 // пара подставляется целью («встаю в своё время»).
 // Версия 3 добавила историю — массив записей по дням, растущий, как у уразы.
 // Отдельного ключа у неё нет: запись дня ищется проходом по полю date
+// Версия 4 добавила пару realWake/realSleepMin и флаг excluded: во сколько
+// человек встал на самом деле и не выбросить ли день из статистики.
+// Отсутствие пары — признак версии 1 или 3, и это возраст, а не порча
 const SLEEP_KEY = 'youplanner.sleep';
-const SLEEP_VERSION = 3;
+const SLEEP_VERSION = 4;
 // Больше суток от засыпания до подъёма быть не может: оба конца лежат
 // на одной ночи. Потолок нужен только для чтения чужой записи
 const SLEEP_MAX_MINUTES = 1440;
@@ -5298,7 +4936,11 @@ function sleepCycleLabel(count) {
 // fall — целое 0…120, actualWake — время суток, sleepMin — целое 0…1439,
 // и оно сходится с полями. Сходимость проверяется не для порядка: битая пара
 // роняет всю запись и при чтении ключа, и в истории ей не место — иначе
-// однажды день вернулся бы в раздел с чужой длительностью
+// однажды день вернулся бы в раздел с чужой длительностью.
+// Пара realWake/realSleepMin и флаг excluded — версия 4. Запись без них
+// годна: отсутствие пары значит «встал по плану». Половинчатая пара —
+// realWake без длительности или наоборот — отбрасывается: собрать из неё
+// нечего, а день с ней всё равно попал бы в статистику наполовину
 function validSleepHistory(history) {
   if (!Array.isArray(history)) return [];
 
@@ -5312,7 +4954,15 @@ function validSleepHistory(history) {
     if (sleepTimeMinutes(item.actualWake) === null) return false;
     if (!Number.isInteger(item.sleepMin) ||
         item.sleepMin < 0 || item.sleepMin >= SLEEP_MAX_MINUTES) return false;
-    return sleepDurationMinutes(item.bed, fall, item.actualWake) === item.sleepMin;
+    if (sleepDurationMinutes(item.bed, fall, item.actualWake) !== item.sleepMin) return false;
+    if (item.excluded !== undefined && typeof item.excluded !== 'boolean') return false;
+    if (item.realWake === null || item.realWake === undefined) {
+      return item.realSleepMin === null || item.realSleepMin === undefined;
+    }
+    if (sleepTimeMinutes(item.realWake) === null) return false;
+    if (!Number.isInteger(item.realSleepMin) ||
+        item.realSleepMin < 0 || item.realSleepMin >= SLEEP_MAX_MINUTES) return false;
+    return sleepDurationMinutes(item.bed, fall, item.realWake) === item.realSleepMin;
   });
 }
 
@@ -5365,6 +5015,28 @@ function loadSleep() {
       sleepMin = parsed.sleepMin;
     }
 
+    // Пары realWake/realSleepMin в записи нет вовсе — это версия 1 или 3:
+    // подставляется «встал по плану», факт равен плану. Пара есть, но
+    // половинчатая или битая — запись отбрасывается целиком, как и пара
+    // actualWake/sleepMin выше: длительность из неё сверяется с полями,
+    // и подстановка разошлась бы с тем, что человек ввёл
+    let realWake = null;
+    let realSleepMin = null;
+    if (parsed.realWake !== null && parsed.realWake !== undefined ||
+        parsed.realSleepMin !== null && parsed.realSleepMin !== undefined) {
+      if (sleepTimeMinutes(parsed.realWake) === null) return null;
+      if (!Number.isInteger(parsed.realSleepMin) ||
+          parsed.realSleepMin < 0 || parsed.realSleepMin >= SLEEP_MAX_MINUTES) return null;
+      if (sleepDurationMinutes(parsed.bed, fall, parsed.realWake) !== parsed.realSleepMin) return null;
+      realWake = parsed.realWake;
+      realSleepMin = parsed.realSleepMin;
+    }
+
+    // Признак исключения — только true. Прочее значение (строка, число)
+    // читается как false, но запись не роняет: спорный флаг — не повод
+    // терять день, а «исключить» — это ровно true, ничего больше
+    const excluded = parsed.excluded === true;
+
     // Истории может не быть вовсе — это запись версий 1–2, и её возраст,
     // а не порча: раздел читается как читался, а история заводится пустой
     // и наполнится при следующем сохранении формы. История есть, но
@@ -5377,6 +5049,9 @@ function loadSleep() {
       wake: parsed.wake,
       actualWake: actualWake,
       sleepMin: sleepMin,
+      realWake: realWake,
+      realSleepMin: realSleepMin,
+      excluded: excluded,
       history: validSleepHistory(parsed.history),
     };
   } catch (e) {
@@ -5402,6 +5077,26 @@ function saveSleep(sleep) {
       sleep.sleepMin < 0 || sleep.sleepMin >= SLEEP_MAX_MINUTES) return;
   if (sleepDurationMinutes(sleep.bed, fall, sleep.actualWake) !== sleep.sleepMin) return;
 
+  // Пара realWake/realSleepMin: фактический подъём. Правила те же, что у пары
+  // actualWake/sleepMin: смешанные состояния (одно задано, другое нет) —
+  // не писать. realWake задан — realSleepMin обязан быть целым 0…1439
+  // и сходиться с sleepDurationMinutes(bed, fall, realWake)
+  const realWake = sleep.realWake !== undefined ? sleep.realWake : null;
+  const realSleepMin = sleep.realSleepMin !== undefined ? sleep.realSleepMin : null;
+  if (realWake !== null && sleepTimeMinutes(realWake) === null) return;
+  if (realWake === null && realSleepMin !== null) return;
+  if (realWake !== null) {
+    if (realSleepMin === null) return;
+    if (!Number.isInteger(realSleepMin) ||
+        realSleepMin < 0 || realSleepMin >= SLEEP_MAX_MINUTES) return;
+    if (sleepDurationMinutes(fall, realWake) !== realSleepMin) return;
+  }
+
+  // Признак исключения — только true. Прочее значение (строка, число)
+  // читается как false, но запись не роняет: спорный флаг — не повод
+  // терять день, а «исключить» — это ровно true, ничего больше
+  const excluded = sleep.excluded === true;
+
   // История ведётся тем же сохранением, что и ядро: каждое сохранение формы
   // кладёт день в дневник. Прежняя история берётся из хранилища, а не из
   // аргумента: вызывающему нечего о ней знать, а передача её снаружи означала
@@ -5417,6 +5112,9 @@ function saveSleep(sleep) {
     wake: sleep.wake,
     actualWake: sleep.actualWake,
     sleepMin: sleep.sleepMin,
+    realWake: realWake,
+    realSleepMin: realSleepMin,
+    excluded: excluded,
   };
 
   localStorage.setItem(SLEEP_KEY, JSON.stringify({
@@ -5426,6 +5124,9 @@ function saveSleep(sleep) {
     wake: sleep.wake,
     actualWake: sleep.actualWake,
     sleepMin: sleep.sleepMin,
+    realWake: realWake,
+    realSleepMin: realSleepMin,
+    excluded: excluded,
     history: sleepHistoryEntry(previous ? previous.history : [], entry),
   }));
   scheduleSync();
@@ -5439,17 +5140,16 @@ const STATS_PERIOD_KEY = 'youplanner.stats.period';
 const STATS_PERIODS = ['week', 'month', 'year', 'all'];
 const STATS_PERIOD_DEFAULT = 'month';
 
-// Шесть категорий статистики: у каждой свой период
-const STATS_PERIOD_CATEGORIES = ['hub', 'qaza', 'habits', 'tasks', 'fast', 'sleep'];
+// Пять категорий статистики: у каждой свой период
+const STATS_PERIOD_CATEGORIES = ['hub', 'qaza', 'habits', 'fast', 'sleep'];
 
-// Блок периодов → категория. Блоков семь, категорий шесть: список привычек
+// Блок периодов → категория. Блоков шесть, категорий пять: список привычек
 // и карточка одной привычки делят период категории «habits»
 const STATS_PERIOD_BOXES = {
   'stats-period': 'hub',
   'stats-qaza-period': 'qaza',
   'stats-habits-period': 'habits',
   'stats-habit-period': 'habits',
-  'stats-tasks-period': 'tasks',
   'stats-fast-period': 'fast',
   'stats-sleep-period': 'sleep',
 };
@@ -5627,7 +5327,6 @@ function applyCloudData(data, ts) {
       habits: loadHabits(),
       records: loadRecords(),
       qaza: loadQaza(),
-      tasks: loadTasks(),
       prayer: loadPrayer() || {},
       fast: loadFast() || null,
       qazaLog: loadQazaLog() || null,
@@ -5645,18 +5344,13 @@ function applyCloudData(data, ts) {
         (hasData(data.qaza) || !hasData(local.qaza))) {
       localStorage.setItem(QAZA_STORAGE_KEY, JSON.stringify(data.qaza));
     }
-    // Задачи — один раздел целиком, без слияния по id: пустой список
-    // с сервера не затирает непустой локальный (уровень защиты 1).
-    if (Array.isArray(data.tasks) && (hasData(data.tasks) || !hasData(local.tasks))) {
-      localStorage.setItem(STORAGE_KEYS.tasks, JSON.stringify(data.tasks));
-    }
-    // Координаты — один раздел целиком, как задачи. Пустой объект с сервера
+    // Координаты — один раздел целиком. Пустой объект с сервера
     // не затирает заданные координаты: это след неполного снимка.
     if (data.prayer && typeof data.prayer === 'object' && !Array.isArray(data.prayer) &&
         (hasData(data.prayer) || !hasData(local.prayer))) {
       localStorage.setItem(PRAYER_KEY, JSON.stringify(data.prayer));
     }
-    // Счётчик уразы — один раздел целиком, как задачи и координаты. Ноль
+    // Счётчик уразы — один раздел целиком, как координаты. Ноль
     // здесь значимое значение: объект с remaining: 0 непуст по ключам,
     // поэтому hasData даёт true и счётчик с сервера применяется. Пустым
     // (null) с сервера приходит только «счётчика нет» — он не затирает
@@ -5679,7 +5373,7 @@ function applyCloudData(data, ts) {
         history: validFastHistory(data.fast.history),
       }));
     }
-    // Журнал выполнений каза — седьмой раздел, один целиком, как счётчик
+    // Журнал выполнений каза — отдельный раздел, один целиком, как счётчик
     // уразы. Пустой журнал (entries: []) ключами непуст, поэтому hasData даёт
     // true и он применяется, затирая локальный: «журнала нет» выражается
     // только null. Битый since раздел не пропускает — иначе журнал записался
@@ -5695,7 +5389,7 @@ function applyCloudData(data, ts) {
         entries: validQazaLogEntries(data.qazaLog.entries),
       }));
     }
-    // Запись о сне — восьмой раздел, один целиком, как счётчик уразы.
+    // Запись о сне — отдельный раздел, один целиком, как счётчик уразы.
     // Пустой объект с сервера не затирает заведённую запись: он приходит
     // следом неполного снимка, а не осознанным удалением (§5)
     if (data.sleep && typeof data.sleep === 'object' &&
@@ -5805,7 +5499,6 @@ function syncBody(ts, previous) {
       habits: habits,
       records: loadRecords(),
       qaza: loadQaza(),
-      tasks: loadTasks(),
       prayer: loadPrayer() || {},
       // Счётчика нет — наверх уходит null. Ноль счётчиком быть не перестаёт:
       // объект с remaining: 0 остаётся объектом и уезжает как есть.
@@ -5889,14 +5582,14 @@ function showSyncStatus(message) {
 // Версия формата резервной копии. Растёт, если меняется состав полей файла:
 // версия 2 добавила раздел tasks, версия 3 — раздел prayer, версия 4 —
 // время у привычки и уровень у записи (§8), версия 5 — раздел fast (§11x),
-// версия 6 — раздел qazaLog (§5), 7 — раздел sleep, 8 — история сна (§11ab).
-// Старые файлы читаются как раньше.
-const BACKUP_VERSION = 8;
+// версия 6 — раздел qazaLog (§5), 7 — раздел sleep, 8 — история сна (§11ab),
+// 10 — раздел tasks снят.
+// Старые файлы без tasks читаются как раньше; файлы с tasks отвергаются.
+const BACKUP_VERSION = 10;
 
 // Что попадает в файл. Метка синхронизации и режим главного экрана — состояние
 // устройства, а не данные, поэтому в копию не входят. Координат может не быть;
-// тогда раздел уходит пустым объектом — так же, как пустой список задач, и
-// читается он по общим правилам.
+// тогда раздел уходит пустым объектом и читается по общим правилам.
 function buildBackup() {
   const backup = {
     version: BACKUP_VERSION,
@@ -5904,7 +5597,6 @@ function buildBackup() {
     habits: loadHabits(),
     records: loadRecords(),
     qaza: loadQaza(),
-    tasks: loadTasks(),
     prayer: loadPrayer() || {},
   };
 
@@ -5962,7 +5654,8 @@ function parseBackup(text) {
   if (!data.records || typeof data.records !== 'object' || Array.isArray(data.records)) return null;
   if (data.qaza !== undefined &&
       (!data.qaza || typeof data.qaza !== 'object' || Array.isArray(data.qaza))) return null;
-  if (data.tasks !== undefined && !Array.isArray(data.tasks)) return null;
+  // Старый раздел задач отвергает файл целиком, до применения любых данных.
+  if (data.tasks !== undefined) return null;
   if (data.prayer !== undefined &&
       (!data.prayer || typeof data.prayer !== 'object' || Array.isArray(data.prayer))) return null;
   // Раздел fast необязателен, но если он есть — проверяется целиком:
@@ -6016,6 +5709,27 @@ function parseBackup(text) {
           data.sleep.sleepMin < 0 || data.sleep.sleepMin >= SLEEP_MAX_MINUTES) return null;
     }
 
+    // Пара realWake/realSleepMin и флаг excluded — версия 4. Файл без них
+    // разбирается как раньше: значения подставляются null, null, false. Файл
+    // с ними проверяется по тем же правилам, что loadSleep: realWake — null
+    // или время суток, realSleepMin — null или целое 0…1439, смешанные
+    // состояния — отказ разбора
+    if (data.sleep.realWake !== undefined || data.sleep.realSleepMin !== undefined) {
+      if (data.sleep.realWake === null && data.sleep.realSleepMin === null) {
+        // Оба null — «встал по плану», допустимо
+      } else if (data.sleep.realWake === null || data.sleep.realSleepMin === null) {
+        return null; // Половина пары — отказ
+      } else {
+        if (sleepTimeMinutes(data.sleep.realWake) === null) return null;
+        if (!Number.isInteger(data.sleep.realSleepMin) ||
+            data.sleep.realSleepMin < 0 ||
+            data.sleep.realSleepMin >= SLEEP_MAX_MINUTES) return null;
+        if (sleepDurationMinutes(data.sleep.fall, data.sleep.realWake) !==
+            data.sleep.realSleepMin) return null;
+      }
+    }
+    if (data.sleep.excluded !== undefined && typeof data.sleep.excluded !== 'boolean') return null;
+
     // История необязательна, как и у уразы: файл версии 7 её не знает, и он
     // разбирается как разбирался. История есть, но не массив — отказ целиком:
     // запись легла бы в ключ, а следующий loadSleep() отбросил бы историю,
@@ -6030,19 +5744,15 @@ function parseBackup(text) {
 
 // Замена локальных данных копией. Пишем в localStorage напрямую: saveHabits и
 // saveQaza поставили бы по отправке на каждый ключ, а нужен один PUT на замену.
-// Разделов qaza и tasks в файле может не быть — тогда очередь и список задач
-// остаются текущими. Список задач — один раздел целиком, без слияния по id.
+// Раздела qaza в файле может не быть — тогда очередь остаётся текущей.
 function applyBackup(data) {
   localStorage.setItem(STORAGE_KEYS.habits, JSON.stringify(data.habits));
   localStorage.setItem(STORAGE_KEYS.records, JSON.stringify(data.records));
   if (data.qaza) localStorage.setItem(QAZA_STORAGE_KEY, JSON.stringify(data.qaza));
-  if (Array.isArray(data.tasks)) {
-    localStorage.setItem(STORAGE_KEYS.tasks, JSON.stringify(data.tasks));
-  }
   if (data.prayer && typeof data.prayer === 'object' && !Array.isArray(data.prayer)) {
     localStorage.setItem(PRAYER_KEY, JSON.stringify(data.prayer));
   }
-  // Счётчик уразы заменяется целиком, как очередь и задачи. Раздела в файле
+  // Счётчик уразы заменяется целиком, как очередь. Раздела в файле
   // нет — текущий счётчик остаётся: импорт его не стирает.
   if (data.fast && typeof data.fast === 'object' && !Array.isArray(data.fast)) {
     localStorage.setItem(FAST_KEY, JSON.stringify(data.fast));
@@ -6242,6 +5952,10 @@ let mobileDayPage = -1;
 // Режим главного экрана на телефоне: 'day' — карточки за сегодня,
 // 'week' — привычная таблица недели. Выбор переживает перезапуск.
 let mainView = localStorage.getItem('youplanner.mainView') || 'day';
+
+// Тип дня в разделе „Расписание“. На этом этапе не сохраняется между запусками —
+// хранение добавится вместе с редактированием через Настройки.
+let scheduleType = 'weekday';
 
 /* --- Константы ----------------------------------------------------------- */
 
@@ -6544,6 +6258,7 @@ function init() {
       // взводит syncPending, а отправку заберёт init ниже
       settleHabitsAfterSync(result);
       cloudReady = true;
+      migrateDropTasks();
       // Накопленную правку забирает отправка, и приоритет локального на этом
       // исчерпан: оставленный флаг запирал бы применение серверных снимков
       // до конца сеанса.
@@ -6699,6 +6414,18 @@ function bindEvents() {
   const sleepFollow = document.getElementById('sleep-follow-rec');
   if (sleepFollow) sleepFollow.addEventListener('change', onSleepFieldChange);
 
+  // Галочка «встал по плану», поле фактического подъёма и галочка исключения
+  // из статистики — все пересчитывают итог тем же обработчиком
+  const sleepOnPlan = document.getElementById('sleep-on-plan');
+  if (sleepOnPlan) sleepOnPlan.addEventListener('change', onSleepFieldChange);
+  const sleepExcluded = document.getElementById('sleep-excluded');
+  if (sleepExcluded) sleepExcluded.addEventListener('change', onSleepFieldChange);
+  const sleepRealWake = document.getElementById('sleep-real-wake');
+  if (sleepRealWake) {
+    sleepRealWake.addEventListener('input', onSleepFieldChange);
+    sleepRealWake.addEventListener('change', onSleepFieldChange);
+  }
+
   // «Назад» из хаба ведёт туда, откуда в раздел вошли: на ПК это Настройки,
   // на телефоне — главная с гамбургером
   const statsBack = document.getElementById('stats-back');
@@ -6714,11 +6441,6 @@ function bindEvents() {
     statsRowQaza.addEventListener('click', function () { switchAppView('stats-qaza'); });
   }
 
-  const statsRowTasks = document.getElementById('stats-row-tasks');
-  if (statsRowTasks) {
-    statsRowTasks.addEventListener('click', function () { switchAppView('stats-tasks'); });
-  }
-
   const statsRowFast = document.getElementById('stats-row-fast');
   if (statsRowFast) {
     statsRowFast.addEventListener('click', function () { switchAppView('stats-fast'); });
@@ -6727,11 +6449,6 @@ function bindEvents() {
   const statsRowSleep = document.getElementById('stats-row-sleep');
   if (statsRowSleep) {
     statsRowSleep.addEventListener('click', function () { switchAppView('stats-sleep'); });
-  }
-
-  const statsTasksBack = document.getElementById('stats-tasks-back');
-  if (statsTasksBack) {
-    statsTasksBack.addEventListener('click', function () { switchAppView('stats'); });
   }
 
   const statsFastBack = document.getElementById('stats-fast-back');
@@ -6875,6 +6592,13 @@ function bindEvents() {
     tasksBack.addEventListener('click', function () { switchAppView('main'); });
   }
 
+  const scheduleBack = document.getElementById('schedule-back');
+  if (scheduleBack) {
+    scheduleBack.addEventListener('click', function () {
+      switchAppView('main');
+    });
+  }
+
   // Нижний таб-бар: тот же переключатель разделов, что и у кнопок шапки
   const tabItems = document.querySelectorAll('#tab-bar .tab-item');
   for (let i = 0; i < tabItems.length; i++) {
@@ -6935,10 +6659,24 @@ function bindEvents() {
     });
   }
 
-  // Вкладка «Задачи»: кнопка в шапке ПК и таб-бар (таб-бар — общим циклом выше)
-  const tasksButton = document.getElementById('tasks-btn');
-  if (tasksButton) {
-    tasksButton.addEventListener('click', function () { switchAppView('tasks'); });
+  // Вкладка «Расписание»: кнопка в шапке ПК и таб-бар (таб-бар — общим циклом выше)
+  const scheduleButton = document.getElementById('schedule-btn');
+  if (scheduleButton) {
+    scheduleButton.addEventListener('click', function () {
+      switchAppView('schedule');
+    });
+  }
+
+  const scheduleSwitch = document.getElementById('schedule-switch');
+  if (scheduleSwitch) {
+    scheduleSwitch.addEventListener('click', function (event) {
+      const btn = event.target.closest('.view-switch-btn');
+      if (!btn) return;
+      const value = btn.getAttribute('data-schedule');
+      if (SCHEDULE_TYPES.indexOf(value) === -1) return;
+      scheduleType = value;
+      renderScheduleView();
+    });
   }
 
   const calendarPrev = document.getElementById('calendar-prev');
@@ -7800,6 +7538,23 @@ function renderTasksView() {
   updateAddButton();
 }
 
+function renderScheduleView() {
+  markScheduleType();
+
+  const list = document.getElementById('schedule-list');
+  if (!list) return;
+
+  const items = DEFAULT_SCHEDULE[scheduleType] || [];
+  let html = '';
+  for (let i = 0; i < items.length; i++) {
+    html += '<li>' +
+      '<span class="schedule-time">' + escapeHtml(items[i].time) + '</span>' +
+      '<span class="schedule-text">' + escapeHtml(items[i].text) + '</span>' +
+      '</li>';
+  }
+  list.innerHTML = html;
+}
+
 /* --- Форма задачи: создание и правка -------------------------------------- */
 
 // id правимой задачи. null — форма открыта на новую задачу.
@@ -8565,8 +8320,7 @@ function isStatsMenuOpen() {
 // Экраны раздела «Статистика»: у них общий вход и общий возврат «Назад»
 function isStatsView(name) {
   return name === 'stats' || name === 'stats-qaza' || name === 'stats-habits' ||
-    name === 'stats-habit' || name === 'stats-tasks' || name === 'stats-fast' ||
-    name === 'stats-sleep';
+    name === 'stats-habit' || name === 'stats-fast' || name === 'stats-sleep';
 }
 
 // Куда вернёт «Назад» с экранов статистики. Входов два — строка в Настройках
@@ -8611,16 +8365,15 @@ function switchAppView(name) {
   document.getElementById('stats-qaza-view').hidden = name !== 'stats-qaza';
   document.getElementById('stats-habits-view').hidden = name !== 'stats-habits';
   document.getElementById('stats-habit-view').hidden = name !== 'stats-habit';
-  document.getElementById('stats-tasks-view').hidden = name !== 'stats-tasks';
   document.getElementById('stats-fast-view').hidden = name !== 'stats-fast';
   document.getElementById('stats-sleep-view').hidden = name !== 'stats-sleep';
   document.getElementById('sleep-view').hidden = name !== 'sleep';
-  document.getElementById('tasks-view').hidden = name !== 'tasks';
+  document.getElementById('schedule-view').hidden = name !== 'schedule';
   document.getElementById('mobile-day-tabs').hidden = name !== 'main' || !isMobileView();
   document.getElementById('tab-bar').hidden = !isMobileView();
   document.getElementById('week-nav').hidden = name !== 'main';
   document.getElementById('qaza-btn').hidden = name !== 'main';
-  document.getElementById('tasks-btn').hidden = name !== 'main';
+  document.getElementById('schedule-btn').hidden = name !== 'main';
   document.getElementById('settings-btn').hidden = name !== 'main';
   // Кнопка статистики открывает панель с экранами раздела: на других
   // экранах ей нечего делать
@@ -8635,8 +8388,7 @@ function switchAppView(name) {
   const tabView = name === 'edit-habits' || name === 'prayer-settings' ||
     name === 'sleep' || name === 'stats' || name === 'stats-qaza' ||
     name === 'stats-habits' || name === 'stats-habit' ||
-    name === 'stats-tasks' || name === 'stats-fast' ||
-    name === 'stats-sleep' ? 'settings'
+    name === 'stats-fast' || name === 'stats-sleep' ? 'settings'
     : name === 'prayer' || name === 'fast' ? 'qaza'
       : name;
   document.querySelectorAll('#tab-bar .tab-item').forEach(function (item) {
@@ -8654,8 +8406,7 @@ function switchAppView(name) {
   document.body.classList.toggle('view-settings', isSettings);
   document.body.classList.toggle('view-stats', name === 'stats' || name === 'stats-qaza' ||
     name === 'stats-habits' || name === 'stats-habit' ||
-    name === 'stats-tasks' || name === 'stats-fast' ||
-    name === 'stats-sleep');
+    name === 'stats-fast' || name === 'stats-sleep');
 
   if (name === 'qaza') {
     if (!qazaState) qazaState = loadQaza();
@@ -8695,10 +8446,6 @@ function switchAppView(name) {
     renderStatsHabitView();
   }
 
-  if (name === 'stats-tasks') {
-    renderStatsTasksView();
-  }
-
   if (name === 'stats-fast') {
     renderStatsFastView();
   }
@@ -8713,6 +8460,10 @@ function switchAppView(name) {
 
   if (name === 'tasks') {
     renderTasksView();
+  }
+
+  if (name === 'schedule') {
+    renderScheduleView();
   }
 
   if (name === 'prayer') {
@@ -8758,8 +8509,6 @@ function renderStatsCategory(category) {
   } else if (category === 'habits') {
     renderStatsHabitsView();
     renderStatsHabitView();
-  } else if (category === 'tasks') {
-    renderStatsTasksView();
   } else if (category === 'fast') {
     renderStatsFastView();
   } else if (category === 'sleep') {
@@ -8801,6 +8550,15 @@ function statsChartMarkup(values, label) {
     'role="img" aria-label="' + escapeHtml(label || 'Каза по дням') + '">' + bars + '</svg>';
 }
 
+function markScheduleType() {
+  const box = document.getElementById('schedule-switch');
+  if (!box) return;
+  box.querySelectorAll('.view-switch-btn').forEach(function (btn) {
+    btn.classList.toggle('is-active',
+      btn.getAttribute('data-schedule') === scheduleType);
+  });
+}
+
 // Подсветка выбранного периода. Период читается для категории этого блока:
 // у каждой свой. Разметка кнопок статична, поэтому пересобирать её не нужно —
 // как у переключателя «День / Неделя»
@@ -8818,26 +8576,21 @@ function setStatsValue(selector, value) {
   if (el) el.textContent = value;
 }
 
-// Хаб: пять строк. Цифры считаются по хранилищу, а не по appState:
+// Хаб: четыре строки. Цифры считаются по хранилищу, а не по appState:
 // раздел открывается из Настроек, где состояние таблицы могло устареть.
 function renderStatsView() {
   markStatsPeriod('stats-period');
 
   const today = new Date();
   const dates = statsPeriodDates(loadStatsPeriod('hub'), today);
-  const todayISO = toISODate(today);
 
   if (!qazaState) qazaState = loadQaza();
   setStatsValue('#stats-list [data-stat="qaza"] .stats-row-value',
     qazaTotalRemaining(qazaState));
 
-  const open = loadTasks().filter(function (task) {
-    return task.date === todayISO && !task.done;
-  });
-  setStatsValue('#stats-list [data-stat="tasks"] .stats-row-value', open.length);
-
   // Сон — средняя длительность записи за период хаба. Дни берутся уже
-  // собранные: период у строки тот же, что у остальных цифр
+  // собранные: период у строки тот же, что у остальных цифр. Записи
+  // excluded пропускаются целиком, значение дня — realSleepMin ?? sleepMin
   const sleep = loadSleep();
   let sleepValue = '—';
   if (sleep && sleep.history.length > 0) {
@@ -8848,8 +8601,9 @@ function renderStatsView() {
     let count = 0;
     for (let i = 0; i < sleep.history.length; i++) {
       const entry = sleep.history[i];
+      if (entry.excluded === true) continue;
       if (dayIndex[entry.date] === undefined) continue;
-      sum += entry.sleepMin;
+      sum += entry.realSleepMin ?? entry.sleepMin;
       count++;
     }
     if (count > 0) sleepValue = sleepFormatDuration(Math.round(sum / count));
@@ -8904,68 +8658,6 @@ function renderStatsQazaView() {
 
   const chart = document.getElementById('stats-qaza-chart');
   if (chart) chart.innerHTML = statsChartMarkup(values);
-}
-
-// Категория «Задачи». Список читается из хранилища, как в хабе: раздел
-// открывают из Настроек, где состояние таблицы могло устареть.
-// «За период» у создания и выполнения — разное поле: задача, созданная
-// в прошлом месяце, но выполненная сегодня, в графе «создано» не появится
-function renderStatsTasksView() {
-  markStatsPeriod('stats-tasks-period');
-
-  const summary = document.getElementById('stats-tasks-summary');
-  const chart = document.getElementById('stats-tasks-chart');
-  if (!summary || !chart) return;
-
-  const today = toISODate(new Date());
-  const dates = statsPeriodDates(loadStatsPeriod('tasks'), new Date());
-
-  // День периода → его место в графике: список задач перебирается один раз,
-  // а поиск по дате внутри цикла был бы квадратом на окне в 365 дней
-  const dayIndex = {};
-  const values = [];
-  for (let i = 0; i < dates.length; i++) {
-    dayIndex[dates[i]] = i;
-    values.push(0);
-  }
-
-  const tasks = loadTasks();
-  let created = 0;
-  let done = 0;
-  let overdue = 0;
-  let high = 0;
-  let normal = 0;
-
-  for (let i = 0; i < tasks.length; i++) {
-    const task = tasks[i];
-
-    // Создано — по дню создания, а не по сроку: срок у задачи может стоять
-    // и в будущем, и в прошлом
-    if (dayIndex[toISODate(new Date(task.createdAt))] !== undefined) {
-      created++;
-      if (task.priority === 'high') high++;
-      else normal++;
-      // Просрочена — невыполненная задача периода, срок которой уже прошёл
-      if (!task.done && task.date < today) overdue++;
-    }
-
-    if (task.done === true) {
-      const marked = dayIndex[task.date];
-      if (marked !== undefined) {
-        done++;
-        values[marked]++;
-      }
-    }
-  }
-
-  summary.innerHTML = statsSummaryMarkup([
-    ['created', 'Создано за период', String(created)],
-    ['done', 'Выполнено за период', String(done)],
-    ['overdue', 'Просрочено за период', String(overdue)],
-    ['priority', 'Приоритеты', high + ' высоких / ' + normal + ' обычных'],
-  ]);
-
-  chart.innerHTML = statsChartMarkup(values, 'Отметки задач по дням');
 }
 
 // Категория «Ураза». Источник — растущая история счётчика (§5): интерфейс
@@ -9078,14 +8770,17 @@ function renderStatsSleepView() {
 
   // Записи периода. Одна запись на день — держит sleepHistoryEntry, — но
   // сумма на день, а не присваивание: вторая запись о том же дне сложилась бы
-  // в значение дня, а не затёрла первую
+  // в значение дня, а не затёрла первую. Записи excluded пропускаются целиком:
+  // человек сказал «не считать этот день», и он не должен попасть ни в средние,
+  // ни в график, ни в счётчик
   const inPeriod = [];
   for (let i = 0; i < sleep.history.length; i++) {
     const entry = sleep.history[i];
+    if (entry.excluded === true) continue;
     const day = dayIndex[entry.date];
     if (day === undefined) continue;
     inPeriod.push(entry);
-    values[day] += entry.sleepMin;
+    values[day] += entry.realSleepMin ?? entry.sleepMin;
   }
 
   if (inPeriod.length === 0) {
@@ -9101,12 +8796,18 @@ function renderStatsSleepView() {
   summary.hidden = false;
 
   // Оба конца ночи — время суток, и history их уже проверила при чтении:
-  // каждое значение здесь число, а не null
+  // каждое значение здесь число, а не null. Средний подъём — по факту
+  // (realWake), если он задан, иначе по actualWake. Средняя длительность —
+  // по realSleepMin, если он задан, иначе по sleepMin
   const bedMinutes = inPeriod.map(function (e) { return sleepTimeMinutes(e.bed); });
-  const wakeMinutes = inPeriod.map(function (e) { return sleepTimeMinutes(e.actualWake); });
+  const wakeMinutes = inPeriod.map(function (e) {
+    return sleepTimeMinutes(e.realWake ?? e.actualWake);
+  });
 
   let durationSum = 0;
-  for (let i = 0; i < inPeriod.length; i++) durationSum += inPeriod[i].sleepMin;
+  for (let i = 0; i < inPeriod.length; i++) {
+    durationSum += inPeriod[i].realSleepMin ?? inPeriod[i].sleepMin;
+  }
   const averageDuration = Math.round(durationSum / inPeriod.length);
 
   const averageBed = sleepAverageMinutes(bedMinutes);
@@ -10047,6 +9748,35 @@ function sleepFollowRec() {
   return !!box && box.checked === true;
 }
 
+// Синхронизация поля фактического подъёма: видимость и подсказка. Вызывается
+// из renderSleepView и onSleepFieldChange. Галочка «встал по плану» отмечена —
+// поле скрыто, подсказка очищена. Галочка снята, поле пустое — подсказка
+// «Введите время, во сколько встали». Галочка снята, поле заполнено, но
+// время не разбирается — подсказка «Введите время в формате ЧЧ:ММ».
+// Иначе — подсказка очищена
+function syncRealWakeField() {
+  const onPlanBox = document.getElementById('sleep-on-plan');
+  const field = document.getElementById('sleep-real-wake-field');
+  const note = document.getElementById('sleep-real-wake-note');
+  const input = document.getElementById('sleep-real-wake');
+  if (!onPlanBox || !field || !note || !input) return;
+
+  if (onPlanBox.checked) {
+    field.hidden = true;
+    note.textContent = '';
+    return;
+  }
+
+  field.hidden = false;
+  if (!input.value) {
+    note.textContent = 'Введите время, во сколько встали';
+  } else if (sleepTimeMinutes(input.value) === null) {
+    note.textContent = 'Введите время в формате ЧЧ:ММ';
+  } else {
+    note.textContent = '';
+  }
+}
+
 // Решение по текущим полям: что уйдёт в историю и сколько это минут. Одно
 // место, где из трёх полей и галочки собирается ответ; им пользуются и
 // отрисовка, и запись, поэтому разойтись они не могут. Пустое или неверное
@@ -10064,6 +9794,34 @@ function sleepDecision() {
   const sleepMin = sleepDurationMinutes(bed, fall, actualWake);
   if (sleepMin === null) return null;
 
+  // Фактический подъём: галочка «встал по плану» снята — поле времени
+  // обязательно, иначе запись в хранилище не идёт
+  const onPlanBox = document.getElementById('sleep-on-plan');
+  const realWakeField = document.getElementById('sleep-real-wake');
+  const onPlan = !!onPlanBox && onPlanBox.checked;
+  let realWake = null;
+  let ready = true;
+  if (!onPlan) {
+    const realWakeValue = realWakeField ? realWakeField.value : '';
+    if (realWakeValue) {
+      const parsed = sleepTimeMinutes(realWakeValue);
+      if (parsed !== null) {
+        realWake = realWakeValue;
+      } else {
+        ready = false;
+      }
+    } else {
+      ready = false;
+    }
+  }
+
+  const realSleepMin = realWake !== null
+    ? sleepDurationMinutes(bed, fall, realWake)
+    : null;
+
+  const excludedBox = document.getElementById('sleep-excluded');
+  const excluded = !!excludedBox && excludedBox.checked === true;
+
   return {
     bed: bed,
     fall: fall,
@@ -10071,6 +9829,10 @@ function sleepDecision() {
     followRec: followRec,
     actualWake: actualWake,
     sleepMin: sleepMin,
+    realWake: realWake,
+    realSleepMin: realSleepMin,
+    excluded: excluded,
+    ready: ready,
   };
 }
 
@@ -10091,7 +9853,23 @@ function renderSleepView() {
     if (bed) bed.value = sleep.bed;
     if (fall) fall.value = String(sleep.fall);
     if (wake) wake.value = sleep.wake;
+  } else {
+    const onPlan = document.getElementById('sleep-on-plan');
+    if (onPlan) onPlan.checked = true;
+    const realWake = document.getElementById('sleep-real-wake');
+    if (realWake) realWake.value = '';
+    const excluded = document.getElementById('sleep-excluded');
+    if (excluded) excluded.checked = false;
   }
+  if (sleep) {
+    const onPlan = document.getElementById('sleep-on-plan');
+    if (onPlan) onPlan.checked = sleep.realWake === null;
+    const realWake = document.getElementById('sleep-real-wake');
+    if (realWake) realWake.value = sleep.realWake || '';
+    const excluded = document.getElementById('sleep-excluded');
+    if (excluded) excluded.checked = sleep.excluded === true;
+  }
+  syncRealWakeField();
   renderSleepResult();
 }
 
@@ -10123,10 +9901,19 @@ function sleepResultMarkup(decision, result) {
   const parts = [];
 
   parts.push('<p class="sleep-alarm">Будильник: ' + pick.time + '</p>');
-  parts.push('<p class="sleep-actual">В историю: ' + decision.actualWake +
-    (decision.followRec ? ' (по рекомендации)' : ' (по цели)') + '</p>');
+  let actualText;
+  if (decision.realWake) {
+    actualText = 'В историю: ' + decision.realWake + ' (по факту)';
+  } else if (decision.followRec) {
+    actualText = 'В историю: ' + decision.actualWake + ' (по рекомендации)';
+  } else if (decision.ready === true) {
+    actualText = 'В историю: ' + decision.actualWake + ' (по цели)';
+  } else {
+    actualText = 'В историю: —';
+  }
+  parts.push('<p class="sleep-actual">' + actualText + '</p>');
   parts.push('<p class="sleep-duration">Сон: ' +
-    sleepFormatDuration(decision.sleepMin) + '</p>');
+    sleepFormatDuration(decision.realSleepMin ?? decision.sleepMin) + '</p>');
 
   let detail = sleepCycleLabel(pick.cycles) + ', ' + sleepFormatDuration(pick.sleepMinutes);
   if (result.recommended.length === 2) {
@@ -10189,15 +9976,19 @@ function sleepBarMarkup(bed, fall, wake, cycles) {
 // отбросит сам. Слушаются оба события полей: колесо времени на телефоне
 // присылает только change
 function onSleepFieldChange() {
+  syncRealWakeField();
   renderSleepResult();
   const decision = sleepDecision();
-  if (!decision) return;
+  if (!decision || !decision.ready) return;
   saveSleep({
     bed: decision.bed,
     fall: decision.fall,
     wake: decision.wake,
     actualWake: decision.actualWake,
     sleepMin: decision.sleepMin,
+    realWake: decision.realWake,
+    realSleepMin: decision.realSleepMin,
+    excluded: decision.excluded,
   });
 }
 
