@@ -5542,6 +5542,9 @@ function parseBackup(text) {
   let data;
   try {
     data = JSON.parse(text);
+    if (data.version !== undefined &&
+        (typeof data.version !== 'number' ||
+         data.version > BACKUP_VERSION)) return null;
   } catch (e) {
     return null;
   }
