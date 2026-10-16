@@ -1170,7 +1170,7 @@ body {
   display: none;
 }
 
-/* --- Вкладка «Задачи» ---------------------------------------------------- */
+/* --- Вкладка «Расписание» ------------------------------------------------- */
 
 /* display у элемента перебил бы атрибут hidden */
 /* Кнопка в шапке ПК: на телефоне её заменяет таб-бар. Пара к display нужна
@@ -1249,27 +1249,8 @@ body {
   }
 }
 
-/* Полоса «‹ месяц ›» над сеткой календаря */
-/* Ширина ограничена: квадратные ячейки на всю ширину карточки ПК раздували
-   месяц до тысячи пикселей по высоте. На телефоне предел не мешает. */
-/* День — круглая кнопка; точка-маркер внутри неё */
-/* Прошедший день: задача на него не встанет, сохранение остановит тост.
-   Класс есть только у пикера, календарь вкладки прошлое не приглушает.
-   Правило стоит до .is-selected — выбранный день важнее приглушения. */
-.cal-day.is-selected .cal-marker {
-  background: var(--on-accent) !important;
-}
 
-/* Запас снизу — под висящую кнопку «＋»: у прокрученного до конца списка
-   последняя строка должна оставаться целой. Отступ одинаков на ПК и телефоне. */
-/* Круглая кнопка «＋» — над таб-баром, чтобы не перекрывать его */
-#task-add-btn:disabled {
-  background: var(--text-muted);
-  cursor: not-allowed;
-  box-shadow: none;
-}
-
-/* Нижняя форма новой задачи. На ПК — окошко по центру, на телефоне —
+/* Шторка (попап уровня). На ПК — окошко по центру, на телефоне —
    панель, прижатая к низу экрана (см. медиа-запрос). */
 .sheet {
   position: fixed;
@@ -1282,7 +1263,7 @@ body {
 }
 
 /* Фон только затемняется, без размытия: сквозь шторку должно читаться,
-   что за форма, — календарь и заголовок остаются различимыми. */
+   что под ней. */
 .sheet-backdrop {
   position: absolute;
   inset: 0;
@@ -1300,29 +1281,13 @@ body {
   background: var(--surface);
   border-radius: 16px;
   box-shadow: 0 8px 32px rgba(0, 0, 0, .18);
-  /* Панель не выше экрана: у пикера даты (§11n) контента больше, чем
-     влезает на низком экране, поэтому длинная панель прокручивается,
+  /* Панель не выше экрана: длинная панель прокручивается,
      а не уезжает верхом за край. */
   max-height: calc(100vh - 24px);
   overflow-y: auto;
 }
 
-.sheet-input:focus {
-  outline: none;
-}
-
-/* Галочка сохранения в панели формы. Отжимает себя вправо и красится
-   в акцент, пока есть что сохранять; пустое поле гасит её. */
-.sheet-save-inline svg {
-  display: block;
-}
-
-.sheet-save-inline:disabled {
-  color: var(--text-muted);
-  cursor: not-allowed;
-}
-
-/* Шапка формы: заголовок слева, меню действий справа */
+/* Шапка шторки: заголовок */
 .sheet-head {
   display: flex;
   align-items: center;
@@ -1338,124 +1303,9 @@ body {
   letter-spacing: -.01em;
 }
 
-/* Кнопка «⋯» — тап-цель 48px; иконка прижата к правому краю панели */
-/* Второе меню — ручной выбор приоритета поверх формы задачи. Слой выше
-   .sheet: иначе подложка меню осталась бы под панелью формы. */
-/* Третье меню — действия формы. Лежит выше меню приоритета: открыть его
-   можно только из шапки формы, а приоритет — тоже из формы. */
-.action-row:active {
-  background: var(--surface-alt);
-}
-
-.action-row.is-danger {
-  color: var(--danger);
-}
-
-.action-row + .action-row {
-  border-top: 1px solid var(--border);
-  border-radius: 0;
-}
-
-/* Четвёртая шторка — пикер даты. Лежит выше меню действий (130): открыть
-   её можно только из панели формы, которая под ними всеми. */
-/* Пятая шторка — колесо времени. Выше пикера даты (140), но ниже тоста (150):
-   открывается поверх пикера, а тот остаётся под ней открытым. */
-.date-chip.is-active {
-  border-color: var(--accent);
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-#date-cal-head {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  padding: 8px 0 12px;
-}
-
-#date-cal-label {
-  font-weight: 600;
-  font-size: 15px;
-  text-transform: capitalize;
-}
-
-/* Ячейки дня — те же .cal-dow/.cal-day, что в календаре вкладки (§9) */
-#date-cal-grid {
-  display: grid;
-  grid-template-columns: repeat(7, 1fr);
-  gap: 2px 0;
-}
-
-.date-info-row svg {
-  color: var(--text-muted);
-  flex: 0 0 auto;
-}
-
-.date-info-label {
-  flex: 1 1 auto;
-}
-
-/* Панель колеса времени (§11n). Не .sheet-panel: та прижата к низу экрана
-   и растёт вверх, а выбор времени должен всплывать по центру, как в Apple
-   Reminders. Ширина — по содержимому, поэтому окошко обнимает два колеса,
-   а max-width держит его узким на любой ширине экрана. */
-/* Колесо — обычный вертикальный скролл со снапом: строка останавливается
-   точно в середине. Паддинги равны половине окна колеса, поэтому первая и
-   последняя строки тоже встают в центр. */
-.time-wheel::-webkit-scrollbar {
-  display: none;
-}
-
-/* Высота строки кратна шагу снапа: выбранная считается делением прокрутки */
-.time-wheel-item.is-near {
-  font-size: 22px;
-  opacity: .72;
-}
-
-.time-wheel-item.is-active {
-  font-size: 30px;
-  font-weight: 600;
-  color: var(--text);
-  opacity: 1;
-}
-
-/* Затухания у краёв окна колеса: строки растворяются в фоне панели, а не
-   обрезаются её краем. Кликов не ловят: это подсказка глазу, не элемент. */
-.time-wheel-fade.is-bottom {
-  top: auto;
-  bottom: 0;
-  background: linear-gradient(to top, var(--surface), transparent);
-}
-
-#task-date-clear:active {
-  background: var(--surface-alt);
-}
-
-/* Выбранный вариант — фоном, а не только оттенком флага */
-.priority-option.is-active {
-  background: var(--accent-soft);
-}
-
-.priority-flag.is-high {
-  color: #dc2626;
-  font-size: 20px;
-}
-
-.priority-flag.is-low {
-  color: #16a34a;
-  font-size: 20px;
-}
-
-#priority-sheet .btn {
-  width: 100%;
-  min-height: 44px;
-  margin-top: 8px;
-}
 
 /* --- Попап уровня выполнения (§1.3) --------------------------------------
-   Одна шторка на обе привычки: пункты те же, что у меню действий формы
-   (§11l), — строки во всю ширину панели. */
+   Одна шторка на обе привычки со строками во всю ширину панели. */
 #level-sheet {
   z-index: 120;
 }
@@ -1757,7 +1607,7 @@ body {
 }
 
 /* --- Тост ---------------------------------------------------------------- */
-/* Плашка-подсказка поверх всех шторок, поэтому слой выше пикера (140).
+/* Плашка-подсказка поверх всех шторок.
    Фон — из --text, текст — из --surface: плашка контрастна палитре и новых
    цветов в неё не заводит (§9). Кликов тост не ловит: это подсказка, а не
    кнопка, — и потому не мешает нажимать то, что под ним. Отступ считается
@@ -2705,9 +2555,8 @@ body.view-stats #header-actions {
     display: block;
   }
 
-  /* Из каза и задач на телефоне выходим таб-баром — кнопка «Назад» дублирует его */
-  #qaza-back,
-  #tasks-back {
+  /* Из каза на телефоне выходим таб-баром — кнопка «Назад» дублирует его */
+  #qaza-back {
     display: none;
   }
 
@@ -2812,16 +2661,8 @@ body.view-stats #header-actions {
     display: none;
   }
 
-  #tasks-view .qaza-head {
-    display: block;
-  }
 
-  #tasks-view .qaza-head h2 {
-    font-size: 17px;
-  }
-
-  /* Кнопка «＋» поднята над таб-баром с учётом безопасного отступа */
-  /* Форма задачи на телефоне выезжает снизу во всю ширину.
+  /* Шторка на телефоне выезжает снизу во всю ширину.
      bottom поднят на высоту клавиатуры: переменную ведёт syncSheetToKeyboard */
   .sheet-panel {
     position: absolute;
@@ -2838,12 +2679,6 @@ body.view-stats #header-actions {
     /* Панель прижата к низу и растёт вверх: потолок высоты считается
        от поднятой клавиатуры, иначе верх панели уходит за экран */
     max-height: calc(100vh - var(--keyboard-offset, 0px) - 12px);
-  }
-
-  /* У меню действий нет поля ввода: под клавиатуру оно не подстраивается,
-     только чуть отступает от края, чтобы не читаться как приклеенное */
-  #task-actions-sheet .sheet-panel {
-    bottom: max(12px, var(--keyboard-offset, 0px));
   }
 
   /* В каза, молитвах, уразе и настройках половины недели не нужны.
@@ -3453,6 +3288,8 @@ body.view-stats #header-actions {
 const STORAGE_KEYS = {
   habits: 'youplanner.habits',
   records: 'youplanner.records',
+  // Ключ снятого раздела задач: нужен только миграции migrateDropTasks(),
+  // которая один раз удаляет старые данные задач с устройства.
   tasks: 'youplanner.tasks',
   migrations: 'youplanner.migrations',
 };
@@ -3674,67 +3511,6 @@ function loadRecords() {
 
 function saveRecords(records) {
   localStorage.setItem(STORAGE_KEYS.records, JSON.stringify(records));
-}
-
-/* ---------- Задачи ---------- */
-
-// Возвращает список задач. Битый JSON или не-массив → пустой список;
-// ключ при чтении не создаётся — как у записей.
-function loadTasks() {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEYS.tasks);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed;
-  } catch (e) {
-    return [];
-  }
-}
-
-// Задачи уходят наверх тем же отложенным PUT, что привычки и каза.
-function saveTasks(tasks) {
-  localStorage.setItem(STORAGE_KEYS.tasks, JSON.stringify(tasks));
-  scheduleSync();
-}
-
-// Дописывает задачу в конец списка. id — время плюс случайный хвост:
-// одного Date.now() мало, у двух задач подряд он совпадёт.
-// manualPriority — «приоритет выбран человеком»: false у новой задачи.
-function addTask(fields) {
-  const tasks = loadTasks();
-  const task = {
-    id: 't' + Date.now() + Math.random().toString(36).slice(2, 6),
-    text: fields.text,
-    date: fields.date,
-    time: fields.time,
-    priority: fields.priority,
-    manualPriority: fields.manualPriority === true,
-    done: fields.done,
-    createdAt: fields.createdAt,
-  };
-  tasks.push(task);
-  saveTasks(tasks);
-}
-
-// Частичное обновление задачи: поля patch накладываются поверх найденной.
-// Возвращает обновлённую задачу или null, если такой id нет.
-function updateTask(id, patch) {
-  const tasks = loadTasks();
-  const index = tasks.findIndex(function (t) { return t.id === id; });
-  if (index === -1) return null;
-  Object.assign(tasks[index], patch);
-  saveTasks(tasks);
-  return tasks[index];
-}
-
-// Удаление задачи по id. Задачи нет — ничего не делаем.
-function deleteTask(id) {
-  const tasks = loadTasks();
-  const index = tasks.findIndex(function (t) { return t.id === id; });
-  if (index === -1) return;
-  tasks.splice(index, 1);
-  saveTasks(tasks);
 }
 
 /* ---------- Доступ к отдельным записям ---------- */
@@ -4386,7 +4162,7 @@ function qazaLogDoneByDay(log) {
 /* ---------- Молитвы: координаты, мазхаб и расчёт времён ------------------ */
 
 // Координаты и мазхаб живут одним ключом и ходят на сервер одним разделом,
-// как каза и задачи. Ключа нет — координаты не заданы: это и есть первый
+// как каза. Ключа нет — координаты не заданы: это и есть первый
 // запуск, по нему показывается приветственный экран.
 const PRAYER_KEY = 'youplanner.prayer';
 
@@ -4604,7 +4380,7 @@ function loadPrayer() {
   }
 }
 
-// Раздел уходит наверх тем же отложенным PUT, что привычки, каза и задачи
+// Раздел уходит наверх тем же отложенным PUT, что привычки и каза
 function savePrayer(prayer) {
   const lat = Number(prayer && prayer.lat);
   const lng = Number(prayer && prayer.lng);
@@ -5089,7 +4865,7 @@ function saveSleep(sleep) {
     if (realSleepMin === null) return;
     if (!Number.isInteger(realSleepMin) ||
         realSleepMin < 0 || realSleepMin >= SLEEP_MAX_MINUTES) return;
-    if (sleepDurationMinutes(fall, realWake) !== realSleepMin) return;
+    if (sleepDurationMinutes(sleep.bed, fall, realWake) !== realSleepMin) return;
   }
 
   // Признак исключения — только true. Прочее значение (строка, число)
@@ -5255,9 +5031,14 @@ function habitsAveragePercent(habits, dates) {
 /* ---------- Синхронизация с Firebase (REST, без SDK) --------------------- */
 
 const FIREBASE_URL = 'https://youplanner-5c2f5-default-rtdb.firebaseio.com/youplanner-a7x9k2';
+// Бэкапы живут ОТДЕЛЬНЫМ корнем, а не ребёнком синхронизируемого узла:
+// PUT на FIREBASE_URL заменяет узел целиком вместе со всеми детьми,
+// поэтому вложенный /backups стирался бы каждой же синхронизацией
+// сразу после записи. Соседний корень основной PUT не трогает.
+const FIREBASE_BACKUPS_URL = 'https://youplanner-5c2f5-default-rtdb.firebaseio.com/youplanner-a7x9k2-backups';
 const SYNC_TS_KEY = 'youplanner.sync.ts';
 
-// Сколько версий узла держим в /backups.json
+// Сколько версий держим в узле бэкапов (FIREBASE_BACKUPS_URL)
 const BACKUP_LIMIT = 10;
 
 // Отправка после правки откладывается: серия тапов по клеткам даёт один PUT
@@ -5408,7 +5189,6 @@ function applyCloudData(data, ts) {
 
   renderMainView();
   renderQazaView();
-  renderTasksView();
   renderPrayerView();
   renderFastView();
 }
@@ -5417,7 +5197,7 @@ function applyCloudData(data, ts) {
 // сверки: снимок должен быть новее и не спорить с правкой, которой сервер
 // ещё не видел. Второе условие закрывает гонку первых секунд: правка, сделанная
 // во время незавершённой сверки, уходит наверх (init после сверки зовёт
-// syncToCloud), а пришедший снимок её уже не трогает — иначе задача пропала бы,
+// syncToCloud), а пришедший снимок её уже не трогает — иначе правка пропала бы,
 // не дойдя до сервера. Другое устройство получит её при следующей сверке.
 function cloudSnapshotWins(serverTs) {
   return serverTs > syncTs() && !syncPending;
@@ -5451,7 +5231,6 @@ function syncFromCloud() {
           appState.habits = loadHabits();
           renderMainView();
           renderQazaView();
-          renderTasksView();
           renderPrayerView();
         }
         return { reachable: true, serverEmpty: false };
@@ -5516,9 +5295,11 @@ function syncBody(ts, previous) {
   }
 }
 
-// Кладёт наверх копию того, что сейчас лежит на сервере: запись затирает
-// чужой снимок, и без копии его не вернуть. Свежая версия сверху, всего не
-// больше BACKUP_LIMIT — самая старая уходит. Пустой узел копировать нечего.
+// Кладёт в отдельный узел бэкапов копию того, что сейчас лежит на сервере:
+// запись затирает чужой снимок, и без копии его не вернуть. Свежая версия
+// сверху, всего не больше BACKUP_LIMIT — самая старая уходит. Пустой узел
+// копировать нечего. Узел бэкапов — соседний корень (FIREBASE_BACKUPS_URL),
+// а не ребёнок данных: иначе PUT основного узла стирал бы копии (см. выше).
 // Возвращает предыдущий узел: не вышло записать копию — отправку это
 // не отменяет, и узел всё равно нужен вызывающему.
 function backupCloudSnapshot() {
@@ -5530,15 +5311,21 @@ function backupCloudSnapshot() {
     .then(function (previous) {
       if (!previous || typeof previous !== 'object') return null;
 
-      return fetch(FIREBASE_URL + '/backups.json')
+      // Снимки старой схемы могли тащить вложенный backups от прежнего
+      // расположения: в новую историю его не кладём, иначе копии
+      // вкладывались бы друг в друга и раздували узел.
+      const snapshot = Object.assign({}, previous);
+      delete snapshot.backups;
+
+      return fetch(FIREBASE_BACKUPS_URL + '.json')
         .then(function (response) {
           if (!response.ok) throw new Error('нет ответа');
           return response.json();
         })
         .then(function (list) {
           const items = Array.isArray(list) ? list : [];
-          items.unshift(previous);
-          return fetch(FIREBASE_URL + '/backups.json', {
+          items.unshift(snapshot);
+          return fetch(FIREBASE_BACKUPS_URL + '.json', {
             method: 'PUT',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify(items.slice(0, BACKUP_LIMIT)),
@@ -5777,7 +5564,6 @@ function applyBackup(data) {
   scheduleSync();
   renderMainView();
   renderQazaView();
-  renderTasksView();
   renderPrayerView();
   renderFastView();
 }
@@ -6241,7 +6027,7 @@ function init() {
   // Только после этого разрешаем отправку: loadQaza() выше уже зовёт
   // saveQaza() → scheduleSync(), и если ответ сервера придёт позже задержки,
   // отправка уходила бы вперёд ответа и затирала чужой снимок (в том числе
-  // задачи — пустой локальный список ложился на сервер вместо серверного).
+  // привычек — пустой локальный список ложился на сервер вместо серверного).
   //
   // Сверка разрешает отправку при любом исходе, включая недоступный сервер:
   // приложение работает офлайн, и ждать сети, чтобы разрешить запись, значило
@@ -6587,10 +6373,6 @@ function bindEvents() {
     qazaBack.addEventListener('click', function () { switchAppView('main'); });
   }
 
-  const tasksBack = document.getElementById('tasks-back');
-  if (tasksBack) {
-    tasksBack.addEventListener('click', function () { switchAppView('main'); });
-  }
 
   const scheduleBack = document.getElementById('schedule-back');
   if (scheduleBack) {
@@ -6679,108 +6461,7 @@ function bindEvents() {
     });
   }
 
-  const calendarPrev = document.getElementById('calendar-prev');
-  if (calendarPrev) calendarPrev.addEventListener('click', function () { changeCalendarMonth(-1); });
 
-  const calendarNext = document.getElementById('calendar-next');
-  if (calendarNext) calendarNext.addEventListener('click', function () { changeCalendarMonth(1); });
-
-  // Ячейки перерисовываются при каждом рендере, поэтому слушаем сетку целиком
-  const calendarGrid = document.getElementById('calendar-grid');
-  if (calendarGrid) calendarGrid.addEventListener('click', onCalendarClick);
-
-  // Обёртка, а не сама функция: иначе объект события попал бы в id
-  const taskAddButton = document.getElementById('task-add-btn');
-  if (taskAddButton) taskAddButton.addEventListener('click', function () { openTaskSheet(); });
-
-  // Действия живут в меню «⋯»: пункт меню сначала закрывает шторку, потом делает
-  const taskMenuButton = document.getElementById('task-sheet-menu-btn');
-  if (taskMenuButton) taskMenuButton.addEventListener('click', openTaskActionsSheet);
-
-  const taskSaveButton = document.getElementById('task-sheet-save');
-  if (taskSaveButton) {
-    taskSaveButton.addEventListener('click', function () {
-      closeTaskActionsSheet();
-      saveTaskFromSheet();
-    });
-  }
-
-  const taskDeleteButton = document.getElementById('task-sheet-delete');
-  if (taskDeleteButton) {
-    taskDeleteButton.addEventListener('click', function () {
-      closeTaskActionsSheet();
-      onTaskDelete();
-    });
-  }
-
-  const taskActionsClosers = document.querySelectorAll('[data-task-actions-close]');
-  for (let i = 0; i < taskActionsClosers.length; i++) {
-    taskActionsClosers[i].addEventListener('click', closeTaskActionsSheet);
-  }
-
-  const taskPriorityButton = document.getElementById('task-sheet-priority');
-  if (taskPriorityButton) taskPriorityButton.addEventListener('click', openPrioritySheet);
-
-  // Галочка в панели формы — второй путь сохранения, короче меню «⋯»
-  const taskSaveInline = document.getElementById('task-sheet-save-inline');
-  if (taskSaveInline) {
-    // Форму закрывает сам saveTaskFromSheet: если закрыть её здесь, он
-    // увидит editingTaskId === null и создаст дубликат вместо правки
-    taskSaveInline.addEventListener('click', saveTaskFromSheet);
-  }
-
-  // Пикер даты: кнопка в панели формы, чипы, календарь, время, «Очистить».
-  // Ячейки и чипы перерисовываются, поэтому слушаем контейнеры.
-  const taskDateButton = document.getElementById('task-sheet-date');
-  if (taskDateButton) taskDateButton.addEventListener('click', openTaskDateSheet);
-
-  const dateChips = document.querySelectorAll('#task-date-sheet .date-chip');
-  for (let i = 0; i < dateChips.length; i++) {
-    dateChips[i].addEventListener('click', onDateChipClick);
-  }
-
-  const dateGrid = document.getElementById('date-cal-grid');
-  if (dateGrid) dateGrid.addEventListener('click', onDateGridClick);
-
-  const datePrev = document.getElementById('date-cal-prev');
-  if (datePrev) datePrev.addEventListener('click', function () { changePickerMonth(-1); });
-
-  const dateNext = document.getElementById('date-cal-next');
-  if (dateNext) dateNext.addEventListener('click', function () { changePickerMonth(1); });
-
-  // Строка «Срок исполнения» открывает колесо времени поверх пикера
-  const dateTimeRow = document.getElementById('date-time-row');
-  if (dateTimeRow) dateTimeRow.addEventListener('click', openTaskTimeSheet);
-
-  const timeWheels = document.querySelectorAll('#task-time-sheet .time-wheel');
-  for (let i = 0; i < timeWheels.length; i++) {
-    timeWheels[i].addEventListener('scroll', onTimeWheelScroll, { passive: true });
-  }
-
-  const timeDone = document.getElementById('task-time-done');
-  if (timeDone) timeDone.addEventListener('click', commitTaskTimeSheet);
-
-  const timeCancel = document.getElementById('task-time-cancel');
-  if (timeCancel) timeCancel.addEventListener('click', closeTaskTimeSheet);
-
-  const timeClosers = document.querySelectorAll('[data-task-time-close]');
-  for (let i = 0; i < timeClosers.length; i++) {
-    timeClosers[i].addEventListener('click', closeTaskTimeSheet);
-  }
-
-  const dateClear = document.getElementById('task-date-clear');
-  if (dateClear) dateClear.addEventListener('click', onTaskDateClear);
-
-  const dateDone = document.getElementById('task-date-done');
-  if (dateDone) dateDone.addEventListener('click', closeTaskDateSheet);
-
-  const dateCancel = document.getElementById('task-date-cancel');
-  if (dateCancel) dateCancel.addEventListener('click', closeTaskDateSheet);
-
-  const dateClosers = document.querySelectorAll('[data-task-date-close]');
-  for (let i = 0; i < dateClosers.length; i++) {
-    dateClosers[i].addEventListener('click', closeTaskDateSheet);
-  }
 
   // Клавиатура меняет visualViewport, а не resize окна
   if (window.visualViewport) {
@@ -6788,23 +6469,7 @@ function bindEvents() {
     window.visualViewport.addEventListener('scroll', syncSheetToKeyboard);
   }
 
-  // Строки списка перерисовываются целиком — слушаем контейнер
-  const tasksList = document.getElementById('tasks-list');
-  if (tasksList) {
-    tasksList.addEventListener('change', onTaskCheckChange);
-    tasksList.addEventListener('click', onTasksListClick);
-  }
 
-  const priorityOptions = document.querySelectorAll('#priority-sheet .priority-option');
-  for (let i = 0; i < priorityOptions.length; i++) {
-    priorityOptions[i].addEventListener('click', onPriorityPick);
-  }
-
-  // Подложка и «Отмена» второго меню
-  const priorityClosers = document.querySelectorAll('[data-priority-sheet-close]');
-  for (let i = 0; i < priorityClosers.length; i++) {
-    priorityClosers[i].addEventListener('click', closePrioritySheet);
-  }
 
   const levelOptions = document.querySelectorAll('#level-sheet .level-option');
   for (let i = 0; i < levelOptions.length; i++) {
@@ -6817,25 +6482,6 @@ function bindEvents() {
     levelClosers[i].addEventListener('click', closeLevelSheet);
   }
 
-  const taskSheetText = document.getElementById('task-sheet-text');
-  if (taskSheetText) {
-    taskSheetText.addEventListener('keydown', function (event) {
-      if (event.key !== 'Enter') return;
-      // Галочка «Сохранить» в панели гаснет, когда сохранять нечего: правка
-      // без изменений, пустой текст. Enter уважает её состояние, иначе на
-      // каждый Enter уходил бы лишний PUT с неизменёнными данными.
-      const saveInline = document.getElementById('task-sheet-save-inline');
-      if (saveInline && saveInline.disabled) return;
-      saveTaskFromSheet();
-    });
-    taskSheetText.addEventListener('input', updateTaskSaveInline);
-  }
-
-  // Подложка и «Отмена» помечены атрибутом data-task-sheet-close
-  const taskSheetClosers = document.querySelectorAll('[data-task-sheet-close]');
-  for (let i = 0; i < taskSheetClosers.length; i++) {
-    taskSheetClosers[i].addEventListener('click', closeTaskSheet);
-  }
 
   // Кнопка закрытия и подложка помечены атрибутом data-modal-close
   const closers = document.querySelectorAll('[data-modal-close]');
@@ -6848,7 +6494,7 @@ function bindEvents() {
   // Уход со вкладки — повод не потерять неотправленную правку: если она есть
   // (syncTimer стоит), debounce снимаем и отправляем сразу — приложение могут
   // закрыть раньше, чем истекут его 1.5с. Без правки не делаем ничего: иначе
-  // каждое переключение вкладки клало бы в /backups.json одинаковый снимок и
+  // каждое переключение вкладки клало бы в узел бэкапов одинаковый снимок и
   // вытесняло настоящую историю. Возврат — повод проверить, нет ли свежих.
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'hidden') {
@@ -6877,7 +6523,7 @@ function bindEvents() {
     const modal = document.getElementById('habit-modal');
     if (modal && !modal.hidden) closeModal();
 
-    // Попап уровня открывается из таблицы, а не из формы задачи, но снимается
+    // Попап уровня открывается из таблицы, но снимается
     // тем же правилом: Escape гасит верхнюю шторку за раз
     const levelSheet = document.getElementById('level-sheet');
     if (levelSheet && !levelSheet.hidden) {
@@ -6885,31 +6531,6 @@ function bindEvents() {
       return;
     }
 
-    const timeSheet = document.getElementById('task-time-sheet');
-    if (timeSheet && !timeSheet.hidden) {
-      closeTaskTimeSheet();
-      return;
-    }
-
-    const dateSheet = document.getElementById('task-date-sheet');
-    if (dateSheet && !dateSheet.hidden) {
-      closeTaskDateSheet();
-      return;
-    }
-
-    const actionsSheet = document.getElementById('task-actions-sheet');
-    if (actionsSheet && !actionsSheet.hidden) {
-      closeTaskActionsSheet();
-      return;
-    }
-
-    const prioritySheet = document.getElementById('priority-sheet');
-    if (prioritySheet && !prioritySheet.hidden) {
-      closePrioritySheet();
-      return;
-    }
-
-    closeTaskSheet();
   });
 
   const form = document.getElementById('habit-form');
@@ -7404,139 +7025,6 @@ function showToast(message) {
   }, 3500);
 }
 
-/* --- Вкладка «Задачи» ---------------------------------------------------- */
-
-// День, выбранный в календаре. При открытии вкладки — сегодняшний.
-let selectedTaskDate = toISODate(new Date());
-
-// Отображаемый месяц календаря. Первым показываем текущий.
-let calendarYear = new Date().getFullYear();
-let calendarMonth = new Date().getMonth();
-
-// Подписи столбцов календаря
-const CAL_DOW = ['Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб', 'Вс'];
-
-// Больше десяти несделанных задач на день брать не даём
-const TASK_DAY_LIMIT = 10;
-
-// Маркер дня в календаре: красный — есть несделанное важное, зелёный — есть
-// несделанное обычное, синий — всё сделанное. null — задач на день нет.
-function getDayMarker(date) {
-  const tasks = loadTasks().filter(function (t) { return t.date === date; });
-  if (!tasks.length) return null;
-  if (tasks.some(function (t) { return !t.done && t.priority === 'high'; })) return 'red';
-  if (tasks.some(function (t) { return !t.done && t.priority === 'low'; })) return 'green';
-  if (tasks.every(function (t) { return t.done; })) return 'blue';
-  return null;
-}
-
-// Сетка месяца: 7 подписей дней недели и 42 ячейки — с понедельника недели,
-// в которую попал первый день. Ячейки соседних месяцев помечены is-outside.
-function renderCalendar() {
-  const grid = document.getElementById('calendar-grid');
-  if (!grid) return;
-
-  const label = document.getElementById('calendar-label');
-  if (label) label.textContent = MONTHS_NOMINATIVE[calendarMonth] + ' ' + calendarYear;
-
-  const today = toISODate(new Date());
-  const start = getWeekStart(new Date(calendarYear, calendarMonth, 1));
-
-  let html = '';
-  for (let i = 0; i < CAL_DOW.length; i++) {
-    html += '<div class="cal-dow">' + CAL_DOW[i] + '</div>';
-  }
-
-  for (let i = 0; i < 42; i++) {
-    const date = addDays(start, i);
-    const iso = toISODate(date);
-
-    const classes = ['cal-day'];
-    if (date.getMonth() !== calendarMonth) classes.push('is-outside');
-    if (iso === today) classes.push('is-today');
-    if (iso === selectedTaskDate) classes.push('is-selected');
-
-    const marker = getDayMarker(iso);
-    html += '<button type="button" class="' + classes.join(' ') + '" data-date="' + iso + '">' +
-      '<span>' + date.getDate() + '</span>' +
-      (marker ? '<span class="cal-marker is-' + marker + '"></span>' : '') +
-      '</button>';
-  }
-
-  grid.innerHTML = html;
-}
-
-// Порядок внутри группы: со временем по возрастанию, затем без времени
-// по порядку создания
-function compareTasks(a, b) {
-  if (a.time && b.time) {
-    // Второй ключ — createdAt: он заявлен в §10 и §2b, но не работал.
-    // Раньше порядок держался только на стабильности Array.prototype.sort,
-    // то есть на порядке вставки (§11aa, A1).
-    if (a.time === b.time) return (a.createdAt || 0) - (b.createdAt || 0);
-    return a.time < b.time ? -1 : 1;
-  }
-  if (a.time) return -1;
-  if (b.time) return 1;
-  return (a.createdAt || 0) - (b.createdAt || 0);
-}
-
-function taskRowHtml(task) {
-  return '<div class="task-row' + (task.done ? ' is-done' : '') + '" data-task-id="' + escapeHtml(task.id) + '">' +
-    '<input type="checkbox" class="task-check"' + (task.done ? ' checked' : '') + '>' +
-    '<span class="task-text">' + escapeHtml(task.text) + '</span>' +
-    (task.time ? '<span class="task-time">' + escapeHtml(task.time) + '</span>' : '') +
-    '<span class="task-flag is-' + task.priority + '">⚑</span>' +
-    '</div>';
-}
-
-// Подпись выбранного дня: у сегодняшнего год не показываем — он лишний
-function formatTaskDay(iso) {
-  const date = parseISODate(iso);
-  const text = date.getDate() + ' ' + MONTHS_GENITIVE[date.getMonth()];
-  if (iso === toISODate(new Date())) return 'Сегодня, ' + text;
-  return text + ' ' + date.getFullYear();
-}
-
-// Задачи выбранного дня: сначала несделанные важные, затем обычные — в каждой
-// группе со временем по возрастанию, потом без времени по порядку создания.
-// Выполненные уходят в конец списка.
-function renderTasks() {
-  const list = document.getElementById('tasks-list');
-  if (!list) return;
-
-  const tasks = loadTasks().filter(function (t) { return t.date === selectedTaskDate; });
-  const active = tasks.filter(function (t) { return !t.done; });
-  const done = tasks.filter(function (t) { return t.done; });
-  const high = active.filter(function (t) { return t.priority === 'high'; }).sort(compareTasks);
-  const low = active.filter(function (t) { return t.priority === 'low'; }).sort(compareTasks);
-  const ordered = high.concat(low, done);
-
-  list.innerHTML = ordered.map(taskRowHtml).join('');
-
-  const label = document.getElementById('tasks-day-label');
-  if (label) label.textContent = formatTaskDay(selectedTaskDate);
-
-  const empty = document.getElementById('tasks-empty');
-  if (empty) empty.hidden = ordered.length > 0;
-}
-
-// Кнопка «＋» гаснет, когда на день уже набралось десять несделанных задач
-// или сам день прошёл: в прошлое задача не встанет, и открывать форму незачем
-function updateAddButton() {
-  const button = document.getElementById('task-add-btn');
-  if (!button) return;
-  const pending = loadTasks().filter(function (t) {
-    return t.date === selectedTaskDate && !t.done;
-  }).length;
-  button.disabled = pending >= TASK_DAY_LIMIT || selectedTaskDate < toISODate(new Date());
-}
-
-function renderTasksView() {
-  renderCalendar();
-  renderTasks();
-  updateAddButton();
-}
 
 function renderScheduleView() {
   markScheduleType();
@@ -7555,335 +7043,6 @@ function renderScheduleView() {
   list.innerHTML = html;
 }
 
-/* --- Форма задачи: создание и правка -------------------------------------- */
-
-// id правимой задачи. null — форма открыта на новую задачу.
-let editingTaskId = null;
-
-// Текст, время, дата и пара (приоритет, ручной выбор) на момент открытия формы.
-// По нему галочка сохранения решает, менять ли что-то: иначе «ввёл и стёр»
-// выглядело бы как изменение. Снимок есть и у новой задачи; галочку там решает
-// непустое поле — ветка editingTaskId === null в updateTaskSaveInline.
-let originalFormState = null;
-
-// Приоритет, выбранный в форме, и признак «человек выбрал его в это
-// открытие формы». Второй флаг нужен, чтобы правка текста не сбрасывала
-// ручной выбор, сделанный раньше: см. manualPriority в saveTaskFromSheet.
-let formPriority = 'low';
-let formPriorityManual = false;
-
-// Дата и время формы. Дата обязательна: null здесь не бывает — при открытии
-// форма получает либо день задачи, либо день, выбранный в календаре вкладки.
-let formDate = null;
-let formTime = null;
-
-// Месяц, показанный в пикере. Отдельно от календаря вкладки: листание
-// пикера не должно уводить список дня.
-let pickerYear = 0;
-let pickerMonth = 0;
-
-// Ближайший понедельник строго после этой даты. Сегодня понедельник —
-// значит следующий, через семь дней.
-function nextMonday(from) {
-  const day = from.getDay();               // 0 — воскресенье, 1 — понедельник
-  const delta = ((8 - day) % 7) || 7;
-  return addDays(from, delta);
-}
-
-// Дата, за которой закреплён чип быстрого выбора
-function dateChipValue(offset) {
-  const today = new Date();
-  if (offset === '0') return toISODate(today);
-  if (offset === '1') return toISODate(addDays(today, 1));
-  return toISODate(nextMonday(today));
-}
-
-// Подпись даты в панели формы: «Сегодня» / «Завтра» / «дд.мм»
-function taskDateLabel(iso) {
-  const today = toISODate(new Date());
-  if (iso === today) return 'Сегодня';
-  if (iso === toISODate(addDays(new Date(), 1))) return 'Завтра';
-  const date = parseISODate(iso);
-  return pad2(date.getDate()) + '.' + pad2(date.getMonth() + 1);
-}
-
-// Подпись срока в пикере: у сегодня и завтра слова, у остальных полная дата
-function taskDateInfoLabel(iso) {
-  const today = toISODate(new Date());
-  if (iso === today) return 'Сегодня';
-  if (iso === toISODate(addDays(new Date(), 1))) return 'Завтра';
-  const date = parseISODate(iso);
-  return pad2(date.getDate()) + '.' + pad2(date.getMonth() + 1) + '.' + date.getFullYear();
-}
-
-// Кнопка даты в панели формы показывает текущий formDate
-function updateTaskDateLabel() {
-  const label = document.getElementById('task-sheet-date-label');
-  if (label && formDate) label.textContent = taskDateLabel(formDate);
-}
-
-// id = null — новая задача, строка — правка существующей
-function openTaskSheet(id) {
-  const sheet = document.getElementById('task-sheet');
-  if (!sheet) return;
-
-  // Прошедший день форму не открывает. Кнопка «＋» на нём погашена, но это
-  // единственная преграда: программный вызов открыл бы форму с прошлой датой,
-  // а сохранить её всё равно не даст проверка в saveTaskFromSheet. Правку
-  // существующей задачи проверка не трогает — у неё своя ветка с подменой даты.
-  if (id == null && selectedTaskDate < toISODate(new Date())) return;
-
-  editingTaskId = id == null ? null : id;
-  formPriorityManual = false;
-
-  const task = editingTaskId === null ? null
-    : loadTasks().find(function (t) { return t.id === editingTaskId; });
-
-  // Дата старой задачи, лежавшей в прошлом, подменяется на сегодняшнюю: в
-  // прошлое задача не встанет, а молча оставлять её там нельзя — о подмене
-  // сообщает тост. День вкладки не подменяется: прошедший день просто не
-  // пускает в форму, кнопка «＋» на нём погашена.
-  const today = toISODate(new Date());
-  const wasPast = !!task && task.date < today;
-  formDate = wasPast ? today : (task ? task.date : selectedTaskDate);
-  formTime = task && task.time ? task.time : null;
-
-  const text = document.getElementById('task-sheet-text');
-  const title = document.getElementById('task-sheet-title');
-  const dateButton = document.getElementById('task-sheet-date');
-
-  if (text) text.value = task ? task.text : '';
-
-  // Приоритет формы: у правки — приоритет задачи, у новой — низкий. Ручного
-  // выбора ещё нет: его ставит только выбор в меню
-  formPriority = task ? task.priority : 'low';
-  updatePriorityIcon();
-
-  // Снимок берём с формы, а не с задачи: сравнение идёт с тем, что видно.
-  // Кроме текста, времени и даты в снимок входит пара (приоритет, ручной
-  // выбор): смена одного приоритета — такая же правка, как и остальные
-  originalFormState = {
-    text: (text ? text.value : '').trim(),
-    time: formTime || '',
-    date: formDate,
-    priority: formPriority,
-    manualPriority: formPriorityManual,
-  };
-
-  // Кнопка даты не гаснет никогда: дата у задачи есть всегда
-  if (dateButton) dateButton.disabled = false;
-  updateTaskDateLabel();
-
-  if (title) title.textContent = task ? 'Редактировать' : 'Новая задача';
-
-  sheet.hidden = false;
-  syncSheetToKeyboard();
-  updateTaskSaveInline();
-
-  // Тост после раскрытия панели: подсказка про подменённую дату должна читаться
-  // поверх открытой формы, а не остаться за подложкой
-  if (wasPast) {
-    showToast('Упс... ваша задача была в прошлом. Дата изменена на сегодня');
-  }
-
-  // Safari iOS отдаёт фокус только из стека обработчика клика, поэтому
-  // фокусируем синхронно; в setTimeout остаётся лишь доводка скролла
-  if (text) text.focus();
-  setTimeout(function () {
-    if (text) text.scrollIntoView({ block: 'center' });
-  }, 100);
-}
-
-function closeTaskSheet() {
-  const sheet = document.getElementById('task-sheet');
-  if (sheet) sheet.hidden = true;
-  editingTaskId = null;
-  formDate = null;
-  formTime = null;
-  document.documentElement.style.setProperty('--keyboard-offset', '0px');
-}
-
-// Галочка в панели формы. На новой задаче её зажигает непустой текст,
-// на правке — отличие от снимка: сохранять нечего, пока ничего не изменил.
-// Сравниваются текст, время, дата и пара (приоритет, ручной выбор).
-function updateTaskSaveInline() {
-  const button = document.getElementById('task-sheet-save-inline');
-  const text = document.getElementById('task-sheet-text');
-  if (!button || !text) return;
-
-  const value = text.value.trim();
-  let enabled;
-  if (editingTaskId === null) {
-    enabled = value.length > 0;
-  } else {
-    enabled = !!originalFormState &&
-      (value !== originalFormState.text ||
-        (formTime || '') !== originalFormState.time ||
-        formDate !== originalFormState.date ||
-        formPriority !== originalFormState.priority ||
-        formPriorityManual !== originalFormState.manualPriority);
-  }
-
-  button.disabled = !enabled;
-}
-
-// Приоритет выводится из времени, если человек его не выбирал. Выбор в меню
-// сильнее всего; правка без захода в меню и без смены времени сохраняет
-// прежнее решение, а смена времени пересчитывает приоритет заново.
-function saveTaskFromSheet() {
-  const button = document.getElementById('task-sheet-save');
-  const text = document.getElementById('task-sheet-text');
-  if (!button || !text) return;
-
-  if (button.disabled) return;
-  const value = text.value.trim();
-  if (!value) return;
-
-  // Прошедшую дату не сохраняем ни при создании, ни при правке: человек мог
-  // выбрать её в пикере руками. Тост говорит почему, задача и форма остаются
-  // как были — выбранное в форме не теряется.
-  if (formDate < toISODate(new Date())) {
-    showToast('Упс... дата уже прошла, выберите будущую дату');
-    return;
-  }
-
-  const time = formTime;
-  const tasks = loadTasks();
-
-  // Лимит десяти невыполненных проверяется на целевой день и без учёта самой
-  // задачи: перенос не должен упираться в собственный счётчик.
-  const pendingOnTarget = tasks.filter(function (t) {
-    return t.date === formDate && !t.done && t.id !== editingTaskId;
-  }).length;
-
-  if (editingTaskId === null) {
-    if (pendingOnTarget >= TASK_DAY_LIMIT) {
-      alert('На этот день уже ' + TASK_DAY_LIMIT + ' невыполненных задач');
-      return;
-    }
-
-    button.disabled = true;
-    addTask({
-      text: value,
-      date: formDate,
-      time: time,
-      priority: time ? 'high' : 'low',
-      manualPriority: false,
-      done: false,
-      createdAt: Date.now(),
-    });
-  } else {
-    const current = tasks.find(function (t) { return t.id === editingTaskId; });
-    if (!current) {
-      closeTaskSheet();
-      return;
-    }
-
-    // Дата пишется всегда, но поводов её сменить два, и правила у них разные.
-    // Человек выбрал другой день сам — это перенос. А дату, лежавшую в прошлом,
-    // форма подменила на сегодняшнюю ещё при открытии, о чём сказал тост: это
-    // выправление, и спрашивать про него второй раз не о чем.
-    const patch = { text: value, time: time, date: formDate };
-    const wasDate = originalFormState.date;
-
-    // Перенос на другой день. Выполненную задачу он возвращает в работу —
-    // но только с согласия человека: иначе случайный тап снимет отметку.
-    if (formDate !== wasDate) {
-      if (current.done &&
-        !window.confirm('Задача выполнена. Снять отметку и перенести её на другой день?')) {
-        return;
-      }
-      if (current.done) patch.done = false;
-    }
-
-    // Лимит десяти стережёт целевой день в любом случае — и при переносе, и при
-    // выправлении прошлого: забить сегодня задачами нельзя ни так, ни так.
-    if (formDate !== current.date && pendingOnTarget >= TASK_DAY_LIMIT) {
-      alert('На этот день уже ' + TASK_DAY_LIMIT + ' невыполненных задач');
-      return;
-    }
-
-    const manual = formPriorityManual || !!current.manualPriority;
-    if (formPriorityManual) {
-      patch.priority = formPriority;
-    } else if (manual && time === (current.time || null)) {
-      patch.priority = current.priority;
-    } else {
-      patch.priority = time ? 'high' : 'low';
-    }
-    patch.manualPriority = manual;
-
-    button.disabled = true;
-    updateTask(editingTaskId, patch);
-  }
-
-  closeTaskSheet();
-  button.disabled = false;
-  updateTaskSaveInline();
-  renderTasksView();
-}
-
-// Клик по тексту строки открывает форму правки. Чекбокс живёт на change
-// и сюда не попадает: он не внутри .task-text.
-function onTasksListClick(event) {
-  const text = event.target.closest('.task-text');
-  if (!text) return;
-  const row = text.closest('.task-row');
-  if (!row) return;
-  openTaskSheet(row.getAttribute('data-task-id'));
-}
-
-// Отметка «выполнено». Снятие возвращает задачу в работу, поэтому упирается
-// в тот же лимит, что и кнопка «＋».
-function onTaskCheckChange(event) {
-  const checkbox = event.target.closest('.task-check');
-  if (!checkbox) return;
-  const row = checkbox.closest('.task-row');
-  if (!row) return;
-
-  if (!checkbox.checked) {
-    const active = loadTasks().filter(function (t) {
-      return t.date === selectedTaskDate && !t.done;
-    }).length;
-    if (active >= TASK_DAY_LIMIT) {
-      alert('Достигнут лимит на день: ' + TASK_DAY_LIMIT + ' невыполненных задач');
-      renderTasksView();
-      return;
-    }
-  }
-
-  updateTask(row.getAttribute('data-task-id'), { done: checkbox.checked });
-  renderTasksView();
-}
-
-function onTaskDelete() {
-  if (editingTaskId === null) return;
-  if (!window.confirm('Удалить задачу?')) return;
-
-  deleteTask(editingTaskId);
-  closeTaskSheet();
-  renderTasksView();
-}
-
-/* --- Меню действий формы -------------------------------------------------- */
-
-// «Удалить» показываем только у существующей задачи: у новой удалять нечего
-function openTaskActionsSheet() {
-  const sheet = document.getElementById('task-actions-sheet');
-  if (!sheet) return;
-
-  const remove = document.getElementById('task-sheet-delete');
-  if (remove) remove.hidden = editingTaskId === null;
-
-  sheet.hidden = false;
-  syncSheetToKeyboard();
-}
-
-function closeTaskActionsSheet() {
-  const sheet = document.getElementById('task-actions-sheet');
-  if (sheet) sheet.hidden = true;
-  document.documentElement.style.setProperty('--keyboard-offset', '0px');
-}
 
 /* --- Попап уровня выполнения (§1.3) --------------------------------------- */
 
@@ -7974,298 +7133,6 @@ function syncLevelCells(habitId, date) {
   if (isMainDayView()) renderDayCards();
 }
 
-/* --- Меню приоритета ------------------------------------------------------ */
-
-function openPrioritySheet() {
-  const sheet = document.getElementById('priority-sheet');
-  if (!sheet) return;
-  markPriorityOptions();
-  sheet.hidden = false;
-  syncSheetToKeyboard();
-}
-
-function closePrioritySheet() {
-  const sheet = document.getElementById('priority-sheet');
-  if (sheet) sheet.hidden = true;
-  document.documentElement.style.setProperty('--keyboard-offset', '0px');
-}
-
-// Подсветка варианта, совпадающего с текущим выбором формы
-function markPriorityOptions() {
-  const sheet = document.getElementById('priority-sheet');
-  if (!sheet) return;
-  const options = sheet.querySelectorAll('.priority-option');
-  for (let i = 0; i < options.length; i++) {
-    options[i].classList.toggle('is-active',
-      options[i].getAttribute('data-priority') === formPriority);
-  }
-}
-
-// Флаг в кнопке формы красится в цвет выбранного приоритета
-function updatePriorityIcon() {
-  const flag = document.querySelector('#task-sheet-priority .priority-flag');
-  if (!flag) return;
-  flag.classList.toggle('is-high', formPriority === 'high');
-  flag.classList.toggle('is-low', formPriority === 'low');
-}
-
-function onPriorityPick(event) {
-  const option = event.target.closest('.priority-option');
-  if (!option) return;
-  formPriority = option.getAttribute('data-priority');
-  // Возврат к приоритету, который был в форме при открытии, — не выбор:
-  // пара (приоритет, ручной выбор) снова совпадает со снимком, и галочка
-  // сохранения гаснет. Иначе «потыкал и вернул» выглядело бы правкой.
-  formPriorityManual = formPriority !== originalFormState.priority ||
-    !!originalFormState.manualPriority;
-  updatePriorityIcon();
-  closePrioritySheet();
-  updateTaskSaveInline();
-}
-
-/* --- Пикер даты и времени -------------------------------------------------- */
-
-// Пикер показывает месяц выбранной даты, а не месяц календаря вкладки:
-// при правке задача может лежать в другом месяце.
-function openTaskDateSheet() {
-  const sheet = document.getElementById('task-date-sheet');
-  if (!sheet) return;
-
-  const button = document.getElementById('task-sheet-date');
-  if (button && button.disabled) return;
-
-  const anchor = parseISODate(formDate);
-  pickerYear = anchor.getFullYear();
-  pickerMonth = anchor.getMonth();
-
-  renderDatePicker();
-  sheet.hidden = false;
-  syncSheetToKeyboard();
-}
-
-// formDate и formTime применены ещё до закрытия: чип, день и время меняют их
-// сразу, поэтому «Отмена» здесь просто закрывает пикер, а не откатывает выбор.
-function closeTaskDateSheet() {
-  const sheet = document.getElementById('task-date-sheet');
-  if (sheet) sheet.hidden = true;
-  // Колесо времени живёт поверх пикера: закрыв пикер, гасим и его, иначе
-  // шторка осталась бы висеть над закрытой формой
-  const timeSheet = document.getElementById('task-time-sheet');
-  if (timeSheet) timeSheet.hidden = true;
-  document.documentElement.style.setProperty('--keyboard-offset', '0px');
-  updateTaskDateLabel();
-  updateTaskSaveInline();
-}
-
-// Ячейки — тот же формат, что у renderCalendar(): .cal-dow, .cal-day
-// с классами is-outside / is-past / is-today / is-selected и точкой статуса.
-function renderDatePicker() {
-  const grid = document.getElementById('date-cal-grid');
-  if (!grid) return;
-
-  const label = document.getElementById('date-cal-label');
-  if (label) label.textContent = MONTHS_NOMINATIVE[pickerMonth] + ' ' + pickerYear;
-
-  const today = toISODate(new Date());
-  const start = getWeekStart(new Date(pickerYear, pickerMonth, 1));
-
-  let html = '';
-  for (let i = 0; i < CAL_DOW.length; i++) {
-    html += '<div class="cal-dow">' + CAL_DOW[i] + '</div>';
-  }
-
-  for (let i = 0; i < 42; i++) {
-    const date = addDays(start, i);
-    const iso = toISODate(date);
-
-    const classes = ['cal-day'];
-    if (date.getMonth() !== pickerMonth) classes.push('is-outside');
-    if (iso < today) classes.push('is-past');
-    if (iso === today) classes.push('is-today');
-    if (iso === formDate) classes.push('is-selected');
-
-    const marker = getDayMarker(iso);
-    html += '<button type="button" class="' + classes.join(' ') + '" data-date="' + iso + '">' +
-      '<span>' + date.getDate() + '</span>' +
-      (marker ? '<span class="cal-marker is-' + marker + '"></span>' : '') +
-      '</button>';
-  }
-
-  grid.innerHTML = html;
-
-  const chips = document.querySelectorAll('#task-date-sheet .date-chip');
-  for (let i = 0; i < chips.length; i++) {
-    chips[i].classList.toggle('is-active',
-      dateChipValue(chips[i].getAttribute('data-offset')) === formDate);
-  }
-
-  const value = document.getElementById('date-info-value');
-  if (value) {
-    value.textContent = taskDateInfoLabel(formDate) + (formTime ? ', ' + formTime : '');
-  }
-}
-
-// Чипы всегда дают сегодня или позже, поэтому проверять их на прошлое нечего
-function onDateChipClick(event) {
-  const chip = event.target.closest('.date-chip');
-  if (!chip) return;
-  formDate = dateChipValue(chip.getAttribute('data-offset'));
-  closeTaskDateSheet();
-}
-
-// Прошедший день выбирается как любой другой: подсказкой служит приглушение
-// .is-past, а сохранить такую дату не даст проверка в saveTaskFromSheet.
-function onDateGridClick(event) {
-  const cell = event.target.closest('.cal-day');
-  if (!cell) return;
-  formDate = cell.getAttribute('data-date');
-  closeTaskDateSheet();
-}
-
-/* --- Колесо времени (§11р) ----------------------------------------------- */
-
-// Часы идут по одному, минуты — кругами по пять, как в системном пикере:
-// двенадцать значений вместо шестидесяти.
-const TIME_MINUTE_STEP = 5;
-
-// Высота строки колеса. Кратна шагу снапа, поэтому выбранная строка считается
-// делением прокрутки; то же число стоит в CSS у .time-wheel-item.
-const TIME_WHEEL_ROW = 36;
-
-// Значения колеса в порядке следования сверху вниз
-function timeWheelValues(kind) {
-  const values = [];
-  if (kind === 'hours') {
-    for (let i = 0; i < 24; i++) values.push(pad2(i));
-  } else {
-    for (let i = 0; i < 60; i += TIME_MINUTE_STEP) values.push(pad2(i));
-  }
-  return values;
-}
-
-// Строки колеса собираются на каждое открытие, а выбранная ставится в середину
-// прокруткой: снап доводит её до точного положения сам.
-function renderTimeWheel(kind, value) {
-  const wheel = document.getElementById(kind === 'hours' ? 'time-wheel-hours' : 'time-wheel-minutes');
-  if (!wheel) return;
-
-  const values = timeWheelValues(kind);
-  let html = '';
-  for (let i = 0; i < values.length; i++) {
-    html += '<div class="time-wheel-item" role="option" data-value="' + values[i] + '">' +
-      values[i] + '</div>';
-  }
-  wheel.innerHTML = html;
-
-  let index = values.indexOf(value);
-  if (index < 0) {
-    // У старой задачи минуты могли идти не по кругу колеса — берём ближайший
-    const step = kind === 'hours' ? 1 : TIME_MINUTE_STEP;
-    index = Math.round((parseInt(value, 10) || 0) / step);
-    index = Math.min(Math.max(index, 0), values.length - 1);
-  }
-
-  wheel.scrollTop = index * TIME_WHEEL_ROW;
-  updateTimeWheelActive(wheel);
-}
-
-// Значение колеса — строка, стоящая в середине окна
-function timeWheelValue(wheel) {
-  const item = wheel.querySelectorAll('.time-wheel-item')[Math.round(wheel.scrollTop / TIME_WHEEL_ROW)];
-  return item ? item.getAttribute('data-value') : '00';
-}
-
-// Подсветка середины: центральная строка крупная и тёмная, соседние — ближе
-function updateTimeWheelActive(wheel) {
-  if (!wheel) return;
-  const items = wheel.querySelectorAll('.time-wheel-item');
-  const active = Math.round(wheel.scrollTop / TIME_WHEEL_ROW);
-  for (let i = 0; i < items.length; i++) {
-    items[i].classList.toggle('is-active', i === active);
-    items[i].classList.toggle('is-near', i === active - 1 || i === active + 1);
-    items[i].setAttribute('aria-selected', i === active ? 'true' : 'false');
-  }
-}
-
-// Прокрутка сыплется десятками событий — пересчёт один на кадр
-let timeWheelFrame = 0;
-
-function onTimeWheelScroll() {
-  if (timeWheelFrame) return;
-  timeWheelFrame = requestAnimationFrame(function () {
-    timeWheelFrame = 0;
-    updateTimeWheelActive(document.getElementById('time-wheel-hours'));
-    updateTimeWheelActive(document.getElementById('time-wheel-minutes'));
-  });
-}
-
-// Пустое время показывает оба колеса на «00»: колесо не бывает без значения
-function openTaskTimeSheet() {
-  const sheet = document.getElementById('task-time-sheet');
-  if (!sheet) return;
-  const parts = (formTime || '').split(':');
-  renderTimeWheel('hours', parts[0] || '00');
-  renderTimeWheel('minutes', parts[1] || '00');
-  sheet.hidden = false;
-  syncSheetToKeyboard();
-}
-
-// «Готово» пишет время, «Отмена» и подложка — нет; и то и другое гасит только
-// колесо: пикер даты под ним остаётся открытым, туда и возвращается человек
-function commitTaskTimeSheet() {
-  const hours = document.getElementById('time-wheel-hours');
-  const minutes = document.getElementById('time-wheel-minutes');
-  if (!hours || !minutes) return;
-  formTime = timeWheelValue(hours) + ':' + timeWheelValue(minutes);
-  closeTaskTimeSheet();
-}
-
-function closeTaskTimeSheet() {
-  const sheet = document.getElementById('task-time-sheet');
-  if (sheet) sheet.hidden = true;
-  renderDatePicker();
-  updateTaskSaveInline();
-}
-
-// «Очистить» возвращает дефолт, а не пусто: дата у задачи обязательна.
-// При создании дефолт — сегодня, при правке — исходный день задачи, а если
-// он уже прошёл, то снова сегодня: прошлое остаётся недоступным и здесь.
-function onTaskDateClear() {
-  const today = toISODate(new Date());
-  if (editingTaskId === null) {
-    formDate = today;
-  } else {
-    const task = loadTasks().find(function (t) { return t.id === editingTaskId; });
-    if (task) formDate = task.date < today ? today : task.date;
-  }
-  formTime = null;
-  renderDatePicker();
-}
-
-// formDate при листании не сбрасывается: выбранным остаётся тот же день
-function changePickerMonth(delta) {
-  const month = new Date(pickerYear, pickerMonth + delta, 1);
-  pickerYear = month.getFullYear();
-  pickerMonth = month.getMonth();
-  renderDatePicker();
-}
-
-// Перелистывание месяца. Выбранным днём становится первое число нового
-// месяца: так список всегда показывает то, что видно на экране.
-function changeCalendarMonth(delta) {
-  const month = new Date(calendarYear, calendarMonth + delta, 1);
-  calendarYear = month.getFullYear();
-  calendarMonth = month.getMonth();
-  selectedTaskDate = toISODate(month);
-  renderTasksView();
-}
-
-function onCalendarClick(event) {
-  const cell = event.target.closest('.cal-day');
-  if (!cell) return;
-  selectedTaskDate = cell.getAttribute('data-date');
-  renderTasksView();
-}
 
 /* --- Вкладка «Каза-намазы» ----------------------------------------------- */
 
@@ -8378,8 +7245,6 @@ function switchAppView(name) {
   // Кнопка статистики открывает панель с экранами раздела: на других
   // экранах ей нечего делать
   document.getElementById('stats-menu-btn').hidden = name !== 'main';
-  // Кнопка «＋» принадлежит вкладке задач: вне неё она бы висела поверх
-  document.getElementById('task-add-btn').hidden = name !== 'tasks';
 
   // Вложенные экраны подсвечивают вкладку, из которой открыты: «Привычки»,
   // настройки молитв, статистика и «Цикл сна» — «Настройки», «Молитвы»
@@ -8458,9 +7323,6 @@ function switchAppView(name) {
     renderSleepView();
   }
 
-  if (name === 'tasks') {
-    renderTasksView();
-  }
 
   if (name === 'schedule') {
     renderScheduleView();
