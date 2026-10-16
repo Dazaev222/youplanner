@@ -5095,6 +5095,117 @@ function hasData(value) {
   return Array.isArray(value) ? value.length > 0 : Object.keys(value).length > 0;
 }
 
+// --- Проверки разделов снимка с сервера -----------------------------------
+//
+// Один снимок приходит из Firebase целиком, и каждый раздел в нём проверяется
+// содержимым, а не только типом «объект/массив»: раздел, не прошедший проверку,
+// не применяется, а локальный остаётся как есть. Проверки повторяют те, что уже
+// работают при чтении ключей и в parseBackup: молитвы — как loadPrayer, сон —
+// как loadSleep, истории чистятся теми же valid* при записи раздела.
+
+// Привычки: массив, каждый элемент — объект со строковыми id и name
+// и типом из набора привычек (тот же, что у HABIT_TYPES формы)
+function validCloudHabits(habits) {
+  if (!Array.isArray(habits)) return false;
+  const types = ['boolean', 'number', 'choice'];
+  for (let i = 0; i < habits.length; i++) {
+    const habit = habits[i];
+    if (!habit || typeof habit !== 'object' || Array.isArray(habit)) return false;
+    if (typeof habit.id !== 'string' || habit.id === '') return false;
+    if (typeof habit.name !== 'string') return false;
+    if (types.indexOf(habit.type) === -1) return false;
+  }
+  return true;
+}
+
+// Записи: объект, ключи — даты 'YYYY-MM-DD' (тот же формат, что validQazaLogDate),
+// значения — объекты записей за день
+function validCloudRecords(records) {
+  if (!records || typeof records !== 'object' || Array.isArray(records)) return false;
+  const dates = Object.keys(records);
+  for (let i = 0; i < dates.length; i++) {
+    if (!validQazaLogDate(dates[i])) return false;
+    const day = records[dates[i]];
+    if (!day || typeof day !== 'object' || Array.isArray(day)) return false;
+  }
+  return true;
+}
+
+// Очередь каза: текущая версия схемы, курсор — целое в пределах очереди,
+// остаток — ровно пять ключей NAMAZ_ORDER с целыми неотрицательными
+// значениями, история — массив (записи при чтении отфильтрует copyQaza)
+function validCloudQaza(qaza) {
+  if (!qaza || typeof qaza !== 'object' || Array.isArray(qaza)) return false;
+  if (qaza.version !== QAZA_VERSION) return false;
+  if (!Number.isInteger(qaza.cursor) ||
+      qaza.cursor < 0 || qaza.cursor >= NAMAZ_ORDER.length) return false;
+  const remaining = qaza.remaining;
+  if (!remaining || typeof remaining !== 'object' || Array.isArray(remaining)) return false;
+  if (Object.keys(remaining).length !== NAMAZ_ORDER.length) return false;
+  for (let i = 0; i < NAMAZ_ORDER.length; i++) {
+    const value = remaining[NAMAZ_ORDER[i]];
+    if (!Number.isInteger(value) || value < 0) return false;
+  }
+  return Array.isArray(qaza.history);
+}
+
+// Молитвы: координаты числами в тех же пределах, что у loadPrayer,
+// мазхаб и метод — из своих списков
+function validCloudPrayer(prayer) {
+  if (!prayer || typeof prayer !== 'object' || Array.isArray(prayer)) return false;
+  if (!Number.isFinite(prayer.lat) || prayer.lat < -89.8 || prayer.lat > 89.8) return false;
+  if (!Number.isFinite(prayer.lng) || prayer.lng < -180 || prayer.lng > 180) return false;
+  if (PRAYER_MADHHABS.indexOf(prayer.madhhab) === -1) return false;
+  return PRAYER_METHODS.indexOf(prayer.method) !== -1;
+}
+
+// Счётчик уразы: остаток — целое неотрицательное, история — массив
+// (записи при записи раздела почистит validFastHistory)
+function validCloudFast(fast) {
+  if (!fast || typeof fast !== 'object' || Array.isArray(fast)) return false;
+  if (!Number.isInteger(fast.remaining) || fast.remaining < 0) return false;
+  return Array.isArray(fast.history);
+}
+
+// Журнал выполнений каза: since — дата 'YYYY-MM-DD', entries — массив
+// (записи при записи раздела почистит validQazaLogEntries)
+function validCloudQazaLog(log) {
+  if (!log || typeof log !== 'object' || Array.isArray(log)) return false;
+  if (!validQazaLogDate(log.since)) return false;
+  return Array.isArray(log.entries);
+}
+
+// Запись о сне: те же проверки, что в loadSleep. bed и wake — время суток,
+// fall — целое 0…120 по sleepFallMinutes. Пара actualWake/sleepMin либо
+// отсутствует целиком, либо сходится: время — 'HH:MM', длительность — целое
+// 0…1439 и равна расчётной от bed и fall. Пара realWake/realSleepMin —
+// по тому же правилу. excluded, если задан, — только булев. История —
+// массив (записи при записи раздела почистит validSleepHistory)
+function validCloudSleep(sleep) {
+  if (!sleep || typeof sleep !== 'object' || Array.isArray(sleep)) return false;
+  if (sleepTimeMinutes(sleep.bed) === null) return false;
+  if (sleepTimeMinutes(sleep.wake) === null) return false;
+  const fall = sleepFallMinutes(sleep.fall);
+  if (fall === null) return false;
+  if (sleep.actualWake !== undefined || sleep.sleepMin !== undefined) {
+    if (sleepTimeMinutes(sleep.actualWake) === null) return false;
+    if (!Number.isInteger(sleep.sleepMin) ||
+        sleep.sleepMin < 0 || sleep.sleepMin >= SLEEP_MAX_MINUTES) return false;
+    if (sleepDurationMinutes(sleep.bed, fall, sleep.actualWake) !== sleep.sleepMin) return false;
+  }
+  const hasRealWake = sleep.realWake !== null && sleep.realWake !== undefined;
+  const hasRealSleepMin = sleep.realSleepMin !== null && sleep.realSleepMin !== undefined;
+  if (hasRealWake !== hasRealSleepMin) return false;
+  if (hasRealWake) {
+    if (sleepTimeMinutes(sleep.realWake) === null) return false;
+    if (!Number.isInteger(sleep.realSleepMin) ||
+        sleep.realSleepMin < 0 || sleep.realSleepMin >= SLEEP_MAX_MINUTES) return false;
+    if (sleepDurationMinutes(sleep.bed, fall, sleep.realWake) !== sleep.realSleepMin) return false;
+  }
+  if (sleep.excluded !== undefined && typeof sleep.excluded !== 'boolean') return false;
+  return Array.isArray(sleep.history);
+}
+
 // Применяет данные с сервера. Пишем прямо в localStorage: saveHabits/saveQaza
 // поставили бы отправку и вернули бы на сервер только что полученное.
 // Пустой раздел на сервере не затирает непустой локальный: это след неполного
@@ -5114,20 +5225,20 @@ function applyCloudData(data, ts) {
       sleep: loadSleep() || null,
     };
 
-    if (Array.isArray(data.habits) && (hasData(data.habits) || !hasData(local.habits))) {
+    if (validCloudHabits(data.habits) && (hasData(data.habits) || !hasData(local.habits))) {
       localStorage.setItem(STORAGE_KEYS.habits, JSON.stringify(data.habits));
     }
-    if (data.records && typeof data.records === 'object' &&
+    if (validCloudRecords(data.records) &&
         (hasData(data.records) || !hasData(local.records))) {
       localStorage.setItem(STORAGE_KEYS.records, JSON.stringify(data.records));
     }
-    if (data.qaza && typeof data.qaza === 'object' &&
+    if (validCloudQaza(data.qaza) &&
         (hasData(data.qaza) || !hasData(local.qaza))) {
       localStorage.setItem(QAZA_STORAGE_KEY, JSON.stringify(data.qaza));
     }
     // Координаты — один раздел целиком. Пустой объект с сервера
     // не затирает заданные координаты: это след неполного снимка.
-    if (data.prayer && typeof data.prayer === 'object' && !Array.isArray(data.prayer) &&
+    if (validCloudPrayer(data.prayer) &&
         (hasData(data.prayer) || !hasData(local.prayer))) {
       localStorage.setItem(PRAYER_KEY, JSON.stringify(data.prayer));
     }
@@ -5138,15 +5249,14 @@ function applyCloudData(data, ts) {
     // заведённый счётчик на этом устройстве.
     // История из снимка чистится, но раздел из-за неё не отклоняется:
     // битая запись — не повод терять счётчик (§5, validFastHistory)
-    // Остаток обязан быть конечным неотрицательным числом: снимок вида
+    // Остаток обязан быть целым неотрицательным числом: снимок вида
     // { remaining: "15" } или { junk: 1 } ключами непуст и раньше проходил
     // проверку целиком. Дальше в счётчик писалась строка или undefined,
     // undefined исчезал при JSON.stringify, следующий loadFast() возвращал
     // null — и экран уразы показывал форму первого запуска, теряя остаток
     // и историю. Раздел, не прошедший проверку, не применяется вовсе:
     // локальный счётчик остаётся нетронутым (уровень защиты 1, §11aa, В2)
-    if (data.fast && typeof data.fast === 'object' && !Array.isArray(data.fast) &&
-        Number.isFinite(data.fast.remaining) && data.fast.remaining >= 0 &&
+    if (validCloudFast(data.fast) &&
         (hasData(data.fast) || !hasData(local.fast))) {
       localStorage.setItem(FAST_KEY, JSON.stringify({
         version: FAST_VERSION,
@@ -5161,8 +5271,7 @@ function applyCloudData(data, ts) {
     // бы и при следующем чтении пропал бы вовсе (§5, loadQazaLog).
     // Записи из снимка чистятся, но раздел из-за них не отклоняется:
     // битая запись — не повод терять историю (§5, validQazaLogEntries)
-    if (data.qazaLog && typeof data.qazaLog === 'object' && !Array.isArray(data.qazaLog) &&
-        validQazaLogDate(data.qazaLog.since) &&
+    if (validCloudQazaLog(data.qazaLog) &&
         (hasData(data.qazaLog) || !hasData(local.qazaLog))) {
       localStorage.setItem(QAZA_LOG_KEY, JSON.stringify({
         version: QAZA_LOG_VERSION,
@@ -5173,10 +5282,11 @@ function applyCloudData(data, ts) {
     // Запись о сне — отдельный раздел, один целиком, как счётчик уразы.
     // Пустой объект с сервера не затирает заведённую запись: он приходит
     // следом неполного снимка, а не осознанным удалением (§5)
-    if (data.sleep && typeof data.sleep === 'object' &&
-        !Array.isArray(data.sleep) &&
+    if (validCloudSleep(data.sleep) &&
         (hasData(data.sleep) || !hasData(local.sleep))) {
-      localStorage.setItem(SLEEP_KEY, JSON.stringify(data.sleep));
+      localStorage.setItem(SLEEP_KEY, JSON.stringify(Object.assign({}, data.sleep, {
+        history: validSleepHistory(data.sleep.history),
+      })));
     }
     localStorage.setItem(SYNC_TS_KEY, String(ts));
 
