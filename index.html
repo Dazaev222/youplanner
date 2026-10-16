@@ -3491,9 +3491,23 @@ function loadHabits() {
   }
 }
 
+// Безопасная запись в localStorage: при переполнении квоты setItem бросает
+// QuotaExceededError — ловим его, показываем тост и возвращаем false,
+// чтобы вызывающий код знал, что данные не сохранены.
+function safeSetItem(key, value) {
+  try {
+    localStorage.setItem(key, value);
+    return true;
+  } catch (e) {
+    showToast('Не удалось сохранить: хранилище переполнено');
+    return false;
+  }
+}
+
 function saveHabits(habits) {
-  localStorage.setItem(STORAGE_KEYS.habits, JSON.stringify(habits));
+  if (!safeSetItem(STORAGE_KEYS.habits, JSON.stringify(habits))) return false;
   scheduleSync();
+  return true;
 }
 
 // Возвращает объект записей. Битый JSON или не-объект → пустой объект.
@@ -3510,7 +3524,7 @@ function loadRecords() {
 }
 
 function saveRecords(records) {
-  localStorage.setItem(STORAGE_KEYS.records, JSON.stringify(records));
+  return safeSetItem(STORAGE_KEYS.records, JSON.stringify(records));
 }
 
 /* ---------- Доступ к отдельным записям ---------- */
@@ -4041,8 +4055,9 @@ function loadQaza() {
 }
 
 function saveQaza(qaza) {
-  localStorage.setItem(QAZA_STORAGE_KEY, JSON.stringify(qaza));
+  if (!safeSetItem(QAZA_STORAGE_KEY, JSON.stringify(qaza))) return false;
   scheduleSync();
+  return true;
 }
 
 /* ---------- Каза-намазы: растущий журнал выполнений ---------------------- */
@@ -4103,12 +4118,13 @@ function loadQazaLog() {
 function saveQazaLog(log) {
   if (!log || !validQazaLogDate(log.since)) return;
 
-  localStorage.setItem(QAZA_LOG_KEY, JSON.stringify({
+  if (!safeSetItem(QAZA_LOG_KEY, JSON.stringify({
     version: QAZA_LOG_VERSION,
     since: log.since,
     entries: Array.isArray(log.entries) ? log.entries : [],
-  }));
+  }))) return false;
   scheduleSync();
+  return true;
 }
 
 // Одно событие в журнал. Журнала нет — он заводится с since по дате первой
@@ -4387,13 +4403,14 @@ function savePrayer(prayer) {
   if (!isFinite(lat) || !isFinite(lng)) return;
   if (lat < -89.8 || lat > 89.8 || lng < -180 || lng > 180) return;
 
-  localStorage.setItem(PRAYER_KEY, JSON.stringify({
+  if (!safeSetItem(PRAYER_KEY, JSON.stringify({
     lat: lat,
     lng: lng,
     madhhab: PRAYER_SHADOW[prayer.madhhab] ? prayer.madhhab : 'shafi',
     method: PRAYER_METHODS.indexOf(prayer.method) >= 0 ? prayer.method : PRAYER_METHOD_DEFAULT,
-  }));
+  }))) return false;
   scheduleSync();
+  return true;
 }
 
 /* ---------- Ураза: счётчик каза-постов ----------------------------------- */
@@ -4467,12 +4484,13 @@ function loadFast() {
 function saveFast(fast) {
   if (!fast || !Number.isFinite(fast.remaining)) return;
 
-  localStorage.setItem(FAST_KEY, JSON.stringify({
+  if (!safeSetItem(FAST_KEY, JSON.stringify({
     version: FAST_VERSION,
     remaining: Math.max(0, Math.floor(fast.remaining)),
     history: Array.isArray(fast.history) ? fast.history : [],
-  }));
+  }))) return false;
   scheduleSync();
+  return true;
 }
 
 // Общий помощник: одно событие в историю. Это растущий массив, а не стек:
@@ -4893,7 +4911,7 @@ function saveSleep(sleep) {
     excluded: excluded,
   };
 
-  localStorage.setItem(SLEEP_KEY, JSON.stringify({
+  if (!safeSetItem(SLEEP_KEY, JSON.stringify({
     version: SLEEP_VERSION,
     bed: sleep.bed,
     fall: fall,
@@ -4904,8 +4922,9 @@ function saveSleep(sleep) {
     realSleepMin: realSleepMin,
     excluded: excluded,
     history: sleepHistoryEntry(previous ? previous.history : [], entry),
-  }));
+  }))) return false;
   scheduleSync();
+  return true;
 }
 
 /* ---------- Раздел «Статистика» ------------------------------------------ */
@@ -4971,7 +4990,7 @@ function saveStatsPeriod(category, period) {
   if (STATS_PERIODS.indexOf(period) === -1) return;
   const periods = readStatsPeriods();
   periods[category] = period;
-  localStorage.setItem(STATS_PERIOD_KEY, JSON.stringify(periods));
+  return safeSetItem(STATS_PERIOD_KEY, JSON.stringify(periods));
 }
 
 // Дни периода по сегодня включительно. Даты собираются существующими
