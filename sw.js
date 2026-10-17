@@ -1,5 +1,5 @@
-const CACHE = 'youplanner-v1';
-const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png'];
+const CACHE = 'youplanner-v2';
+const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon.svg'];
 
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(ASSETS); }));
@@ -18,12 +18,17 @@ self.addEventListener('activate', function (e) {
 
 self.addEventListener('fetch', function (e) {
   const url = e.request.url;
+  // Синхронизация с Firebase не кэшируется и не задерживается на caches.match
+  if (url.indexOf('firebaseio.com') !== -1 || url.indexOf('firebase.google.com') !== -1) return;
   // HTML — network-first: свежая версия с GitHub важнее кэша
   if (url.endsWith('.html') || url.endsWith('/')) {
     e.respondWith(
       fetch(e.request).then(function (resp) {
-        const copy = resp.clone();
-        caches.open(CACHE).then(function (c) { c.put(e.request, copy); });
+        // При 404/500 в кэш мусор не кладём: офлайн покажется прежняя рабочая версия
+        if (resp && resp.ok) {
+          const copy = resp.clone();
+          caches.open(CACHE).then(function (c) { c.put(e.request, copy); });
+        }
         return resp;
       }).catch(function () { return caches.match(e.request); })
     );
