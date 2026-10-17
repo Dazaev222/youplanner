@@ -8,6 +8,8 @@
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Планер">
   <meta name="theme-color" content="#f4f4f7">
+  <link rel="icon" type="image/svg+xml" href="icon.svg">
+  <link rel="icon" type="image/png" sizes="180x180" href="icon-180.png">
   <link rel="apple-touch-icon" href="icon-180.png">
   <link rel="manifest" href="manifest.json">
   <title>YouPlanner — трекер привычек</title>
@@ -3294,6 +3296,13 @@ const STORAGE_KEYS = {
   migrations: 'youplanner.migrations',
 };
 
+// Кэш записей: null — «ещё не загружено», {} — валидное «записей нет».
+let recordsCache = null;
+
+function invalidateRecordsCache() {
+  recordsCache = null;
+}
+
 // Базовое расписание. Пока зашито в код. Редактирование через Настройки —
 // следующим заходом. Хранение в SCHEDULE_KEY и синхронизация — тогда же.
 const SCHEDULE_KEY = 'youplanner.schedule';
@@ -3511,20 +3520,38 @@ function saveHabits(habits) {
 }
 
 // Возвращает объект записей. Битый JSON или не-объект → пустой объект.
+// Возвращает общий кэш-объект. Мутирующие пути (setRecord, removeHabit)
+// опираются на то, что это тот же объект, что потом уходит в saveRecords.
+// Наружу этот объект не передавай и не мутируй без отката.
 function loadRecords() {
+  if (recordsCache !== null) return recordsCache;
+
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.records);
-    if (!raw) return {};
+    if (!raw) {
+      recordsCache = {};
+      return recordsCache;
+    }
     const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
-    return parsed;
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      recordsCache = {};
+      return recordsCache;
+    }
+    recordsCache = parsed;
+    return recordsCache;
   } catch (e) {
-    return {};
+    recordsCache = {};
+    return recordsCache;
   }
 }
 
+// write-through: после успешной записи кэш — тот же объект,
+// что лёг на диск. При провале вызывающий (setRecord/removeHabit) откатит
+// его in-place; кэш трогать нельзя, иначе откат разойдётся с кэшем.
 function saveRecords(records) {
-  return safeSetItem(STORAGE_KEYS.records, JSON.stringify(records));
+  const ok = safeSetItem(STORAGE_KEYS.records, JSON.stringify(records));
+  if (ok) recordsCache = records;
+  return ok;
 }
 
 /* ---------- Доступ к отдельным записям ---------- */
@@ -3541,11 +3568,12 @@ function getRecord(date, habitId) {
 // Значения 0 и false значимы и сохраняются.
 function setRecord(date, habitId, value) {
   const records = loadRecords();
+  const snapshot = JSON.parse(JSON.stringify(records));
   const isDelete = value === undefined || value === null || value === '';
 
   if (isDelete) {
     const day = records[date];
-    if (!day || !Object.prototype.hasOwnProperty.call(day, habitId)) return;
+    if (!day || !Object.prototype.hasOwnProperty.call(day, habitId)) return true;
     delete day[habitId];
     // Если день опустел — удаляем и ключ даты
     if (Object.keys(day).length === 0) delete records[date];
@@ -3554,8 +3582,15 @@ function setRecord(date, habitId, value) {
     records[date][habitId] = value;
   }
 
-  saveRecords(records);
+  if (!saveRecords(records)) {
+    // Запись не удалась: возвращаем локальный объект к снимку. В хранилище
+    // при этом остались прежние данные — safeSetItem не записал новые.
+    Object.keys(records).forEach(function (key) { delete records[key]; });
+    Object.assign(records, snapshot);
+    return false;
+  }
   scheduleSync();
+  return true;
 }
 
 /* ---------- Уровни выполнения: Коран и Спорт ---------------------------- */
@@ -3712,12 +3747,13 @@ function defaultLevel(habit, value) {
 // с уровнями: у остальных значение остаётся скаляром, как было, — иначе
 // чужая схема разошлась бы с уже сохранёнными записями.
 function writeHabitEntry(habit, date, value, level) {
-  if (!habit) return;
+  if (!habit) return false;
   if (value === undefined || !isLevelHabit(habit.id)) {
-    setRecord(date, habit.id, value);
-    return;
+    if (!setRecord(date, habit.id, value)) return false;
+    return true;
   }
-  setRecord(date, habit.id, { value: value, level: level });
+  if (!setRecord(date, habit.id, { value: value, level: level })) return false;
+  return true;
 }
 
 // Есть ли хотя бы одна запись у привычки
@@ -3746,7 +3782,7 @@ function addHabit(habit) {
     time: null,
   };
   habits.push(newHabit);
-  saveHabits(habits);
+  if (!saveHabits(habits)) return null;
   return newHabit;
 }
 
@@ -3757,18 +3793,26 @@ function updateHabit(id, patch) {
     if (habits[i].id !== id) continue;
     const merged = Object.assign({}, habits[i], patch, { id: habits[i].id });
     habits[i] = merged;
-    saveHabits(habits);
+    if (!saveHabits(habits)) return null;
     return merged;
   }
   return null;
 }
 
-// Удаляет привычку и вычищает все её значения из записей
+// Удаляет привычку и вычищает все её значения из записей.
+// true — только если сохранены и привычки, и записи; при провале записи
+// привычек на диске пробуем вернуть список как был (best-effort).
 function removeHabit(id) {
-  const habits = loadHabits().filter(function (h) { return h.id !== id; });
-  saveHabits(habits);
+  const habitsSnapshot = JSON.parse(JSON.stringify(loadHabits()));
+  const habits = habitsSnapshot.filter(function (h) { return h.id !== id; });
+  // Глубокая копия снимка: filter выше даёт новый массив, но объекты привычек
+  // в нём общие со снимком, а восстановление нужно независимое.
+  const habitsRestore = JSON.parse(JSON.stringify(habitsSnapshot));
+
+  if (!saveHabits(habits)) return false;
 
   const records = loadRecords();
+  const recordsSnapshot = JSON.parse(JSON.stringify(records));
   const dates = Object.keys(records);
   let changed = false;
   for (let i = 0; i < dates.length; i++) {
@@ -3778,8 +3822,18 @@ function removeHabit(id) {
     changed = true;
     if (Object.keys(day).length === 0) delete records[dates[i]];
   }
-  if (changed) saveRecords(records);
+  if (changed && !saveRecords(records)) {
+    // Локальный объект записей возвращаем к снимку до мутаций.
+    Object.keys(records).forEach(function (key) { delete records[key]; });
+    Object.assign(records, recordsSnapshot);
+    // Записи на диск не легли (там прежние, с удаляемой привычкой), а список
+    // привычек уже записан без неё — возвращаем его к снимку. Если и это
+    // не удалось, всё равно возвращаем false (best-effort).
+    saveHabits(habitsRestore);
+    return false;
+  }
   scheduleSync();
+  return true;
 }
 
 /* ---------- Расчёт прогресса ---------- */
@@ -4130,14 +4184,15 @@ function saveQazaLog(log) {
 // Одно событие в журнал. Журнала нет — он заводится с since по дате первой
 // записи: за дни до неё статистика читает h6, за неё и позже — журнал (§5).
 function appendQazaLog(namaz, date, source) {
-  if (NAMAZ_ORDER.indexOf(namaz) === -1) return;
-  if (source !== QAZA_SOURCE_DONE && source !== QAZA_SOURCE_MANUAL) return;
-  if (!validQazaLogDate(date)) return;
+  if (NAMAZ_ORDER.indexOf(namaz) === -1) return false;
+  if (source !== QAZA_SOURCE_DONE && source !== QAZA_SOURCE_MANUAL) return false;
+  if (!validQazaLogDate(date)) return false;
 
   const log = loadQazaLog() ||
     { version: QAZA_LOG_VERSION, since: date, entries: [] };
   log.entries.push({ date: date, namaz: namaz, source: source });
-  saveQazaLog(log);
+  if (!saveQazaLog(log)) return false;
+  return true;
 }
 
 // Снятие последней подходящей записи. Отмена в очереди (§6.4) снимает
@@ -4147,16 +4202,18 @@ function appendQazaLog(namaz, date, source) {
 // ничего не делается.
 function dropLastQazaLog(namaz, date, source) {
   const log = loadQazaLog();
-  if (!log) return;
+  // Журнала или подходящей записи нет — снимать нечего, это не ошибка записи.
+  if (!log) return true;
 
   for (let i = log.entries.length - 1; i >= 0; i--) {
     const entry = log.entries[i];
     if (entry.date === date && entry.namaz === namaz && entry.source === source) {
       log.entries.splice(i, 1);
-      saveQazaLog(log);
-      return;
+      if (!saveQazaLog(log)) return false;
+      return true;
     }
   }
+  return true;
 }
 
 // Выполнения каза по дням из журнала: одна запись — один выполненный намаз.
@@ -4505,33 +4562,48 @@ function appendFastHistory(fast, count, source) {
 // Проверка на остаток обязательна и здесь: погашенная кнопка — подсказка,
 // а не защита, и обработчик не должен полагаться только на неё.
 function markFastDone(fast) {
-  if (!fast || !Number.isFinite(fast.remaining) || fast.remaining <= 0) return fast;
+  if (!fast || !Number.isFinite(fast.remaining) || fast.remaining <= 0) return false;
 
+  const snapshot = JSON.parse(JSON.stringify(fast));
   fast.remaining -= 1;
   appendFastHistory(fast, 1, FAST_SOURCE_DONE);
-  saveFast(fast);
-  return fast;
+  if (!saveFast(fast)) {
+    Object.keys(fast).forEach(function (key) { delete fast[key]; });
+    Object.assign(fast, snapshot);
+    return false;
+  }
+  return true;
 }
 
 // «Добавить уразу»: остаток растёт на введённое число
 function addFast(fast, count) {
-  if (!fast || !Number.isFinite(count) || count <= 0) return fast;
+  if (!fast || !Number.isFinite(count) || count <= 0) return false;
 
+  const snapshot = JSON.parse(JSON.stringify(fast));
   fast.remaining += count;
   appendFastHistory(fast, count, FAST_SOURCE_ADD);
-  saveFast(fast);
-  return fast;
+  if (!saveFast(fast)) {
+    Object.keys(fast).forEach(function (key) { delete fast[key]; });
+    Object.assign(fast, snapshot);
+    return false;
+  }
+  return true;
 }
 
 // «Изменить счётчик»: перезапись остатка, а не прибавка. Ошибки ввода
 // исправляются только здесь — отдельной отмены у раздела нет.
 function setFast(fast, count) {
-  if (!fast || !Number.isFinite(count) || count < 0) return fast;
+  if (!fast || !Number.isFinite(count) || count < 0) return false;
 
+  const snapshot = JSON.parse(JSON.stringify(fast));
   fast.remaining = count;
   appendFastHistory(fast, count, FAST_SOURCE_SET);
-  saveFast(fast);
-  return fast;
+  if (!saveFast(fast)) {
+    Object.keys(fast).forEach(function (key) { delete fast[key]; });
+    Object.assign(fast, snapshot);
+    return false;
+  }
+  return true;
 }
 
 // Разбор введённого числа. Принимается только целое: пустое, дробное,
@@ -5250,6 +5322,7 @@ function applyCloudData(data, ts) {
     if (validCloudRecords(data.records) &&
         (hasData(data.records) || !hasData(local.records))) {
       localStorage.setItem(STORAGE_KEYS.records, JSON.stringify(data.records));
+      invalidateRecordsCache();
     }
     if (validCloudQaza(data.qaza) &&
         (hasData(data.qaza) || !hasData(local.qaza))) {
@@ -5667,6 +5740,7 @@ function parseBackup(text) {
 function applyBackup(data) {
   localStorage.setItem(STORAGE_KEYS.habits, JSON.stringify(data.habits));
   localStorage.setItem(STORAGE_KEYS.records, JSON.stringify(data.records));
+  invalidateRecordsCache();
   if (data.qaza) localStorage.setItem(QAZA_STORAGE_KEY, JSON.stringify(data.qaza));
   if (data.prayer && typeof data.prayer === 'object' && !Array.isArray(data.prayer)) {
     localStorage.setItem(PRAYER_KEY, JSON.stringify(data.prayer));
@@ -5773,26 +5847,73 @@ function kazaDayFor(now) {
 
 function markQazaDone(qaza, today) {
   const key = NAMAZ_ORDER[qaza.cursor];
-  if (!key || qaza.remaining[key] <= 0) return qaza;
+  if (!key || qaza.remaining[key] <= 0) return false;
+
+  const snapshot = JSON.parse(JSON.stringify(qaza));
+  const previousRecord = getRecord(today, QAZA_HABIT_ID);
+  let logAppended = false;
+  let recordWritten = false;
+
+  function rollback() {
+    Object.keys(qaza).forEach(function (field) { delete qaza[field]; });
+    Object.assign(qaza, snapshot);
+    // Уже успевшие записаться изменения откатываются в обратном порядке.
+    if (recordWritten) setRecord(today, QAZA_HABIT_ID, previousRecord);
+    if (logAppended) dropLastQazaLog(key, today, QAZA_SOURCE_DONE);
+  }
 
   qaza.remaining[key] -= 1;
   qaza.history.push({ namaz: key, date: today, source: QAZA_SOURCE_DONE });
-  appendQazaLog(key, today, QAZA_SOURCE_DONE);
-  setRecord(today, QAZA_HABIT_ID, qazaDoneCount(qaza, today));
+
+  if (!appendQazaLog(key, today, QAZA_SOURCE_DONE)) {
+    rollback();
+    return false;
+  }
+  logAppended = true;
+
+  if (!setRecord(today, QAZA_HABIT_ID, qazaDoneCount(qaza, today))) {
+    rollback();
+    return false;
+  }
+  recordWritten = true;
+
   qaza.cursor = nextQazaIndex(qaza, qaza.cursor);
-  saveQaza(qaza);
-  return qaza;
+  if (!saveQaza(qaza)) {
+    rollback();
+    return false;
+  }
+  return true;
 }
 
 // Ручное добавление пропущенного намаза: «вспомнил, что не сделал».
 // Остаток растёт, а счётчик дня и курсор очереди остаются на месте —
 // очередь продолжается с того намаза, на котором стояла.
 function addMissedQaza(qaza, key, today) {
-  if (NAMAZ_ORDER.indexOf(key) === -1) return qaza;
+  if (NAMAZ_ORDER.indexOf(key) === -1) return false;
+
+  const snapshot = JSON.parse(JSON.stringify(qaza));
+  const previousRecord = getRecord(today, QAZA_HABIT_ID);
+  let logAppended = false;
+  // Ручное добавление счётчик дня не записывает, поэтому флаг всегда false:
+  // он нужен откату, чтобы не трогать запись, которой операция не касалась.
+  let recordWritten = false;
+
+  function rollback() {
+    Object.keys(qaza).forEach(function (field) { delete qaza[field]; });
+    Object.assign(qaza, snapshot);
+    // Уже успевшие записаться изменения откатываются в обратном порядке.
+    if (recordWritten) setRecord(today, QAZA_HABIT_ID, previousRecord);
+    if (logAppended) dropLastQazaLog(key, today, QAZA_SOURCE_MANUAL);
+  }
 
   qaza.remaining[key] += 1;
   qaza.history.push({ namaz: key, date: today, source: QAZA_SOURCE_MANUAL });
-  appendQazaLog(key, today, QAZA_SOURCE_MANUAL);
+
+  if (!appendQazaLog(key, today, QAZA_SOURCE_MANUAL)) {
+    rollback();
+    return false;
+  }
+  logAppended = true;
 
   // Если очередь была исчерпана, курсор стоял на нулевом остатке.
   // Возвращаем инвариант «курсор указывает на намаз с остатком > 0».
@@ -5800,8 +5921,11 @@ function addMissedQaza(qaza, key, today) {
     qaza.cursor = nextQazaIndex(qaza, qaza.cursor);
   }
 
-  saveQaza(qaza);
-  return qaza;
+  if (!saveQaza(qaza)) {
+    rollback();
+    return false;
+  }
+  return true;
 }
 
 // Отмена последней записи за сегодня. Отменять вчерашнее нельзя,
@@ -5812,13 +5936,37 @@ function addMissedQaza(qaza, key, today) {
 // того же события, и без снятия отменённое выполнение осталось бы в статистике
 // дня навсегда (§5).
 function undoQazaDone(qaza, today) {
-  if (qaza.history.length === 0) return qaza;
+  if (qaza.history.length === 0) return false;
 
   const last = qaza.history[qaza.history.length - 1];
-  if (last.date !== today) return qaza;
+  if (last.date !== today) return false;
+
+  const snapshot = JSON.parse(JSON.stringify(qaza));
+  const previousRecord = getRecord(today, QAZA_HABIT_ID);
+  const logBefore = loadQazaLog();
+  const logHadEntry = !!logBefore && logBefore.entries.some(function (entry) {
+    return entry.date === last.date && entry.namaz === last.namaz &&
+      entry.source === last.source;
+  });
+  let logDropped = false;
+  let recordWritten = false;
+
+  function rollback() {
+    Object.keys(qaza).forEach(function (field) { delete qaza[field]; });
+    Object.assign(qaza, snapshot);
+    // Уже успевшие записаться изменения откатываются в обратном порядке.
+    if (recordWritten) setRecord(today, QAZA_HABIT_ID, previousRecord);
+    if (logDropped) appendQazaLog(last.namaz, last.date, last.source);
+  }
 
   qaza.history.pop();
-  dropLastQazaLog(last.namaz, last.date, last.source);
+  if (!dropLastQazaLog(last.namaz, last.date, last.source)) {
+    rollback();
+    return false;
+  }
+  // dropLastQazaLog возвращает true и когда снимать было нечего: откатывать
+  // потом нужно только реально снятую запись.
+  logDropped = logHadEntry;
 
   if (last.source === QAZA_SOURCE_MANUAL) {
     // Ручное добавление остаток увеличивало — откат его уменьшает.
@@ -5831,7 +5979,11 @@ function undoQazaDone(qaza, today) {
     if (qaza.cursor < 0) qaza.cursor = 0;
 
     // Ноль записывается как значимое значение, а не как удаление записи
-    setRecord(today, QAZA_HABIT_ID, qazaDoneCount(qaza, today));
+    if (!setRecord(today, QAZA_HABIT_ID, qazaDoneCount(qaza, today))) {
+      rollback();
+      return false;
+    }
+    recordWritten = true;
   }
 
   // Курсор не должен указывать на намаз с нулевым остатком
@@ -5839,8 +5991,11 @@ function undoQazaDone(qaza, today) {
     qaza.cursor = nextQazaIndex(qaza, qaza.cursor);
   }
 
-  saveQaza(qaza);
-  return qaza;
+  if (!saveQaza(qaza)) {
+    rollback();
+    return false;
+  }
+  return true;
 }
 
 /* ==========================================================================
@@ -6132,6 +6287,12 @@ function settleHabitsAfterSync(result) {
 }
 
 function init() {
+  // Межвкладочная страховка: событие storage приходит только из других
+  // вкладок, поэтому с write-through в текущей оно не конфликтует.
+  window.addEventListener('storage', function (event) {
+    if (event.key === STORAGE_KEYS.records) invalidateRecordsCache();
+  });
+
   appState.habits = loadHabits();
   appState.records = loadRecords();
   appState.weekStart = getWeekStart(new Date());
@@ -6418,7 +6579,7 @@ function bindEvents() {
     box.addEventListener('click', function (event) {
       const btn = event.target.closest('.view-switch-btn');
       if (!btn) return;
-      saveStatsPeriod(category, btn.getAttribute('data-period'));
+      if (!saveStatsPeriod(category, btn.getAttribute('data-period'))) return;
       renderStatsCategory(category);
     });
   });
@@ -6992,7 +7153,12 @@ function onTableChange(event) {
       syncBooleanCell(cell, current);
       return;
     }
-    onCellChange(habit, date, value);
+    if (!onCellChange(habit, date, value)) {
+      // Запись не удалась: возвращаем галочку и «✗» к прежнему значению,
+      // а не к новому. Тост уже показал safeSetItem.
+      syncBooleanCell(cell, current);
+      return;
+    }
     syncBooleanCell(cell, value);
     return;
   }
@@ -7001,7 +7167,10 @@ function onTableChange(event) {
   if (target.classList.contains('cell-select')) {
     const value = target.value === '' ? undefined : target.value;
     if (current === value) return;
-    onCellChange(habit, date, value, kept === undefined ? defaultLevel(habit, value) : kept);
+    if (!onCellChange(habit, date, value, kept === undefined ? defaultLevel(habit, value) : kept)) {
+      target.value = current === undefined ? '' : current;
+      return;
+    }
     syncLevelCell(cell, habitId, date);
     return;
   }
@@ -7016,7 +7185,10 @@ function onTableChange(event) {
       value = (isFinite(parsed) && parsed >= 0) ? parsed : undefined;
     }
     if (current === value) return;
-    onCellChange(habit, date, value, kept === undefined ? defaultLevel(habit, value) : kept);
+    if (!onCellChange(habit, date, value, kept === undefined ? defaultLevel(habit, value) : kept)) {
+      target.value = current === undefined ? '' : current;
+      return;
+    }
     syncLevelCell(cell, habitId, date);
   }
 }
@@ -7070,7 +7242,7 @@ function onTableClick(event) {
   const current = getRecord(date, habitId);
   const value = current === false ? undefined : false;
 
-  onCellChange(habit, date, value);
+  if (!onCellChange(habit, date, value)) return;
   syncBooleanCell(cell, value);
 }
 
@@ -7089,19 +7261,20 @@ function syncBooleanCell(cell, value) {
 // День отметки может уехать во вчерашний (§4): тогда без перерисовки не
 // обойтись — отметка встанет в чужую колонку и останется незамеченной.
 function onCellChange(habit, date, value, level) {
-  if (!habit) return;
+  if (!habit) return false;
 
   const markDate = habitMarkDate(habit, date, new Date());
-  writeHabitEntry(habit, markDate, value, level);
+  if (!writeHabitEntry(habit, markDate, value, level)) return false;
   appState.records = loadRecords();
 
   if (markDate !== date) {
     renderTable();
     renderDayCards();
-    return;
+    return true;
   }
 
   updateRowCircle(habit.id);
+  return true;
 }
 
 // Перерисовка круга одной строки (полная перерисовка таблицы не нужна)
@@ -7244,7 +7417,7 @@ function onLevelPick(event) {
   if (written === undefined && level === LEVEL_TWO_MIN) written = 0;
   if (written === undefined) return;
 
-  writeHabitEntry(habit, date, written, level);
+  if (!writeHabitEntry(habit, date, written, level)) return;
   appState.records = loadRecords();
 
   closeLevelSheet();
@@ -8274,25 +8447,31 @@ function requestPrayerLocation(noteId, onDone) {
   }, { timeout: 10000, maximumAge: 600000 });
 }
 
-// Сохраняет координаты, не трогая выбранные мазхаб и метод расчёта
+// Сохраняет координаты, не трогая выбранные мазхаб и метод расчёта.
+// Возвращает boolean результата записи: перерисовка — забота вызывающих.
 function applyPrayerCoords(lat, lng) {
   const saved = loadPrayer();
-  savePrayer({
+  // savePrayer при невалидных координатах возвращает undefined — приводим
+  // результат к строгому boolean, как у успешной/неуспешной записи.
+  return savePrayer({
     lat: lat,
     lng: lng,
     madhhab: saved ? saved.madhhab : 'shafi',
     method: saved ? saved.method : PRAYER_METHOD_DEFAULT,
-  });
-  afterPrayerChange();
+  }) === true;
 }
 
 function onPrayerGeo() {
-  requestPrayerLocation('prayer-welcome-note', applyPrayerCoords);
+  requestPrayerLocation('prayer-welcome-note', function (lat, lng) {
+    if (!applyPrayerCoords(lat, lng)) return;
+    afterPrayerChange();
+  });
 }
 
 function onPrayerRefresh() {
   requestPrayerLocation(null, function (lat, lng) {
-    applyPrayerCoords(lat, lng);
+    if (!applyPrayerCoords(lat, lng)) return;
+    afterPrayerChange();
     showToast('Координаты обновлены');
   });
 }
@@ -8314,7 +8493,8 @@ function onPrayerManualSave() {
   }
 
   if (note) note.textContent = '';
-  applyPrayerCoords(lat, lng);
+  if (!applyPrayerCoords(lat, lng)) return;
+  afterPrayerChange();
 }
 
 function onPrayerMadhhabChange(event) {
@@ -8323,7 +8503,7 @@ function onPrayerMadhhabChange(event) {
 
   const saved = loadPrayer();
   if (!saved) return;
-  savePrayer({ lat: saved.lat, lng: saved.lng, madhhab: value, method: saved.method });
+  if (!savePrayer({ lat: saved.lat, lng: saved.lng, madhhab: value, method: saved.method })) return;
 
   // Настройки не пересобираются целиком — только подсветка: экран молитв
   // мог быть открыт, и он перерисовывается под новый мазхаб
@@ -8337,7 +8517,7 @@ function onPrayerMethodChange(event) {
 
   const saved = loadPrayer();
   if (!saved) return;
-  savePrayer({ lat: saved.lat, lng: saved.lng, madhhab: saved.madhhab, method: value });
+  if (!savePrayer({ lat: saved.lat, lng: saved.lng, madhhab: saved.madhhab, method: value })) return;
 
   markPrayerMethod(value);
   renderPrayerView();
@@ -8414,7 +8594,7 @@ function onQazaAddSubmit() {
   if (qazaAddPick === null) return;
 
   // Ручное добавление тоже идёт в день каза: ночью до Фаджра это вчера (§5)
-  addMissedQaza(qazaState, NAMAZ_ORDER[qazaAddPick], kazaDayFor(new Date()));
+  if (!addMissedQaza(qazaState, NAMAZ_ORDER[qazaAddPick], kazaDayFor(new Date()))) return;
 
   // После добавления выбор сбрасывается: повторное нажатие не должно
   // записать тот же намаз второй раз
@@ -8459,7 +8639,7 @@ function onQazaStartChange(event) {
     qazaState.cursor = nextQazaIndex(qazaState, index);
   }
 
-  saveQaza(qazaState);
+  if (!saveQaza(qazaState)) return;
   renderQazaView();
   restoreQazaRadioFocus('qaza-start', 'qaza-start-radio');
 }
@@ -8568,7 +8748,7 @@ function onQazaDone(event) {
   if (!target.closest('#qaza-done')) return;
 
   const day = kazaDayFor(new Date());
-  markQazaDone(qazaState, day);
+  if (!markQazaDone(qazaState, day)) return;
   afterQazaChange();
 
   if (day !== toISODate(new Date())) showToast('Каза зачтена во вчерашний день');
@@ -8577,7 +8757,7 @@ function onQazaDone(event) {
 // Отмена работает с тем днём, к которому отнесена верхняя запись (§7):
 // запись, зачтённая вчера, снимается там же, где и легла.
 function onQazaUndo() {
-  undoQazaDone(qazaState, kazaDayFor(new Date()));
+  if (!undoQazaDone(qazaState, kazaDayFor(new Date()))) return;
   afterQazaChange();
 }
 
@@ -8686,7 +8866,7 @@ function onFastDone() {
   const fast = loadFast();
   if (!fast || fast.remaining <= 0) return;
 
-  markFastDone(fast);
+  if (!markFastDone(fast)) return;
   renderFastView();
 }
 
@@ -8717,10 +8897,10 @@ function onFastInitSave() {
   if (field) field.value = '';
 
   if (mode === 'add') {
-    addFast(fast, value);
+    if (!addFast(fast, value)) return;
   } else {
     // Первого ключа ещё нет — заводим его здесь же
-    setFast(fast || { version: FAST_VERSION, remaining: 0, history: [] }, value);
+    if (!setFast(fast || { version: FAST_VERSION, remaining: 0, history: [] }, value)) return;
   }
 
   fastInitMode = null;
@@ -8974,7 +9154,7 @@ function onSleepFieldChange() {
   renderSleepResult();
   const decision = sleepDecision();
   if (!decision || !decision.ready) return;
-  saveSleep({
+  if (!saveSleep({
     bed: decision.bed,
     fall: decision.fall,
     wake: decision.wake,
@@ -8983,7 +9163,7 @@ function onSleepFieldChange() {
     realWake: decision.realWake,
     realSleepMin: decision.realSleepMin,
     excluded: decision.excluded,
-  });
+  })) return;
 }
 
 /* --- Модальное окно ------------------------------------------------------ */
@@ -9062,7 +9242,7 @@ function onHabitListClick(event) {
 
   if (target.closest('.habit-delete')) {
     if (!window.confirm('Удалить привычку «' + habit.name + '» и все её записи?')) return;
-    removeHabit(habitId);
+    if (!removeHabit(habitId)) return;
     appState.habits = loadHabits();
     appState.records = loadRecords();
     setFormError('');
@@ -9084,7 +9264,7 @@ function onHabitListClick(event) {
     // Тип меняем только у привычки без записей
     if (!hasRecords(habitId)) patch.type = data.type;
 
-    updateHabit(habitId, patch);
+    if (!updateHabit(habitId, patch)) return;
     appState.habits = loadHabits();
     appState.records = loadRecords();
     setFormError('');
@@ -9191,7 +9371,7 @@ function onHabitsEditClick(event) {
 
   if (target.closest('.edit-delete')) {
     if (!window.confirm('Удалить привычку «' + habit.name + '» и все её записи?')) return;
-    removeHabit(habitId);
+    if (!removeHabit(habitId)) return;
     appState.habits = loadHabits();
     appState.records = loadRecords();
     renderHabitsEditList();
@@ -9212,7 +9392,7 @@ function onHabitsEditClick(event) {
     // Тип меняем только у привычки без записей
     if (!hasRecords(habitId)) patch.type = data.type;
 
-    updateHabit(habitId, patch);
+    if (!updateHabit(habitId, patch)) return;
     appState.habits = loadHabits();
     appState.records = loadRecords();
     renderHabitsEditList();
@@ -9309,12 +9489,13 @@ function onFormSubmit(event) {
     return;
   }
 
-  addHabit({
+  const created = addHabit({
     name: data.name.trim(),
     type: data.type,
     unit: data.type === 'number' ? data.unit : '',
     goal: data.goal,
   });
+  if (!created) return;
 
   appState.habits = loadHabits();
   appState.records = loadRecords();

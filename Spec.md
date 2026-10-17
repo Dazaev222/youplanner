@@ -24,6 +24,11 @@
 
 ## Заходы
 
+- 2026-10-17 — блок save-check закрыт: все `save*` и составные операции
+  сохранения возвращают boolean, обработчики проверяют результат и не
+  перерисовывают UI при провале записи (§10, «Контракт сохранения»).
+  Коммит 22f5dca восстановлен по существу: исходный локальный коммит был
+  потерян, реализация воссоздана заново поверх актуального main.
 - 2026-10-14 — раздел «Задачи» снят, добавлено «Расписание» (§11ac):
   четыре типа дня, пока только показ; редактирование — следующий заход.
 - 2026-10-07 — растущий журнал выполнений каза (youplanner.qaza.log).
@@ -1815,6 +1820,52 @@ function getQazaPlan(qaza)
 
 ### Слой данных
 
+#### Контракт сохранения (save-check, 2026-10-17)
+
+- **Boolean-контракт `save*`.** `saveHabits`, `saveRecords`, `saveQaza`,
+  `saveQazaLog`, `savePrayer`, `saveFast`, `saveSleep` и `saveStatsPeriod`
+  возвращают boolean результата записи (`safeSetItem` при ошибке сам
+  показывает тост «Не удалось сохранить: хранилище переполнено»).
+  `appendQazaLog` и `dropLastQazaLog` тоже возвращают boolean; у
+  `dropLastQazaLog` отсутствие журнала или подходящей записи — успешный
+  no-op (`true`), а не ошибка. `setRecord` и `writeHabitEntry` возвращают
+  boolean; `setRecord` до мутации делает снимок records, при `false`
+  откатывает его и ставит `scheduleSync()` только при успехе. Проверка
+  у вызывающих — всегда `if (!save…(…)) …`: ранняя валидация отдельных
+  `save*` может вернуть `undefined`, и оно трактуется как провал.
+- **Обязательный паттерн обработчиков.** Каждый UI-обработчик, чьё
+  действие пишется в хранилище, проверяет результат и при `false`
+  прерывается до перерисовки, закрытия попапа/формы и подтверждающих
+  тостов: таблица привычек и карточки дня, попап уровня, каза
+  («Выполнено», «Отменить», «Добавить», стартовый намаз), ураза, молитвы,
+  сон и сегменты периодов статистики. Свой тост об ошибке сохранения
+  обработчики не добавляют — его уже показал `safeSetItem`.
+- **Составные операции: снимок и откат.** `markQazaDone`, `undoQazaDone`
+  и `addMissedQaza` до любых мутаций делают глубокий снимок qaza
+  (`JSON.parse(JSON.stringify(qaza))`) и запоминают прежнюю запись дня
+  h6; при `false` от любого из своих сохранений (журнал каза, запись дня,
+  `saveQaza`) восстанавливают qaza из снимка, откатывают уже успевшую
+  записаться запись дня и запись журнала (в `undoQazaDone` — только если
+  запись в журнале реально была, `logHadEntry`). `markFastDone`,
+  `addFast` и `setFast` делают снимок fast и при `false` от `saveFast`
+  восстанавливают объект in-place. `removeHabit` при провале `saveRecords`
+  возвращает список привычек на диске к снимку через `saveHabits`
+  (best-effort).
+- **Изменение контрактов (breaking).** `markQazaDone`, `undoQazaDone`,
+  `addMissedQaza`, `markFastDone`, `addFast` и `setFast` возвращают
+  boolean, а не объект состояния, как раньше. Вызывающих, которым нужен
+  сам объект, не предусмотрено: новые вызывающие обязаны проверять
+  boolean и при `false` не перерисовывать UI.
+- **CRUD привычек.** `addHabit` и `updateHabit` возвращают созданный /
+  изменённый объект при успехе и `null` при провале `saveHabits`.
+  `removeHabit` возвращает boolean: `true` только если сохранены и
+  привычки, и записи; `scheduleSync()` — только при полном успехе.
+- **Молитвы.** `applyPrayerCoords` возвращает boolean от `savePrayer`
+  и не перерисовывает ничего сама: `afterPrayerChange()` вызывают
+  обработчики (`onPrayerGeo`, `onPrayerRefresh`, `onPrayerManualSave`)
+  только при успехе. В частности, `onPrayerRefresh` при провале не
+  показывает тост «Координаты обновлены».
+
 ```js
 const QAZA_STORAGE_KEY = 'youplanner.qaza';
 const QAZA_VERSION = 3;             // текущая версия схемы состояния
@@ -1824,14 +1875,14 @@ const QAZA_SOURCE_MANUAL = 'manual';// ручное добавление про�
 const DEFAULT_QAZA = { /* см. §5 */ };
 
 loadQaza()                  // → Qaza; при отсутствии или битом JSON пишет и возвращает начальные данные
-saveQaza(qaza)              // → void
+saveQaza(qaza)              // → boolean (false — запись не удалась)
 nextQazaIndex(qaza, from)   // → number, следующий по кругу индекс с остатком > 0
 getQazaPlan(qaza)           // → number[], до 3 индексов
 qazaTotalRemaining(qaza)    // → number, сумма остатков
 qazaDoneCount(qaza, date)   // → number, записи дня с source !== 'manual'
-markQazaDone(qaza, today)   // → Qaza, мутирует: остаток--, history.push(done), appendQazaLog(done), запись h6, сдвиг курсора
-addMissedQaza(qaza, key, today)  // → Qaza, ручное добавление: остаток++, history.push(manual), appendQazaLog(manual), h6 и курсор не трогает
-undoQazaDone(qaza, today)   // → Qaza, снимает верхнюю запись; ветка зависит от её source; снимает и запись журнала (dropLastQazaLog) — отступление от исходного плана (§6.4); no-op, если сегодня нечего отменять
+markQazaDone(qaza, today)   // → boolean (было: Qaza); мутирует: остаток--, history.push(done), appendQazaLog(done), запись h6, сдвиг курсора; при false — полный откат (§10, контракт сохранения)
+addMissedQaza(qaza, key, today)  // → boolean (было: Qaza), ручное добавление: остаток++, history.push(manual), appendQazaLog(manual), h6 и курсор не трогает; при false — откат
+undoQazaDone(qaza, today)   // → boolean (было: Qaza), снимает верхнюю запись; ветка зависит от её source; снимает и запись журнала (dropLastQazaLog) — отступление от исходного плана (§6.4); при false — откат; false и если сегодня нечего отменять
 
 // Растущий журнал выполнений каза (§5)
 const QAZA_LOG_KEY = 'youplanner.qaza.log';
@@ -1841,10 +1892,10 @@ loadQazaLog()               // → { version, since, entries } | null; нет к
                             //   since не дата или entries не массив — null;
                             //   entries с битыми элементами — очищенный массив.
                             //   Не пишет: пустое хранилище значит «журнала нет»
-saveQazaLog(log)            // → void, пишет ключ и ставит отложенную отправку
-appendQazaLog(namaz, date, source)   // → void; одно событие в журнал; журнала
+saveQazaLog(log)            // → boolean, пишет ключ и ставит отложенную отправку
+appendQazaLog(namaz, date, source)   // → boolean; одно событие в журнал; журнала
                             //   нет — заводит его с since = date
-dropLastQazaLog(namaz, date, source) // → void; снимает последнюю подходящую
+dropLastQazaLog(namaz, date, source) // → boolean; снимает последнюю подходящую
                             //   запись журнала; вызывается отменой (§6.4)
 qazaLogDoneByDay(log)       // → { 'YYYY-MM-DD': N } по записям source === 'done';
                             //   ручные добавления не считаются. Чистая: экран
@@ -1917,7 +1968,7 @@ const PRAYER_HORIZON_ANGLE = 0.833;   // восход и закат: рефра�
 const PRAYER_DHUHR_FIXED = 12 * 60 + 30;
 
 loadPrayer()                // → { lat, lng, madhhab, method } | null; битый ключ — null
-savePrayer(prayer)          // → void, пишет ключ и ставит отложенную отправку
+savePrayer(prayer)          // → boolean, пишет ключ и ставит отложенную отправку
 prayerTimes(iso, lat, lng, madhhab, method)  // → { fajr, sunrise, dhuhr, asr, maghrib, isha }
                             //   в минутах от полуночи UTC+3, чистый астрономический расчёт;
                             //   method необязателен: без него и вне списка — ДУМ ЧР (§11q);
@@ -1943,14 +1994,14 @@ loadFast()                  // → { version, remaining, history } | null; null 
                             //   раздел из-за них не отклонён (§5, §11x, §11y).
                             //   Ничего не пишет: null и есть признак первого
                             //   запуска
-saveFast(fast)              // → void, пишет ключ (remaining приводится к целому ≥ 0)
+saveFast(fast)              // → boolean, пишет ключ (remaining приводится к целому ≥ 0)
                             //   и ставит отложенную отправку
 appendFastHistory(fast, count, source)  // → void, history.push({ date: сегодня,
                             //   count, source }); растущий массив, не стек (§5)
-markFastDone(fast)          // → Fast, остаток-- при remaining > 0, запись source 'done'
+markFastDone(fast)          // → boolean (было: Fast), остаток-- при remaining > 0, запись source 'done'
                             //   с count 1; при нуле — no-op
-addFast(fast, count)        // → Fast, остаток += count, запись source 'add'
-setFast(fast, count)        // → Fast, остаток перезаписывается, запись source 'set'
+addFast(fast, count)        // → boolean (было: Fast), остаток += count, запись source 'add'
+setFast(fast, count)        // → boolean (было: Fast), остаток перезаписывается, запись source 'set'
 parseFastInput(text, mode)  // → number | null; только целое: пустое, дробное,
                             //   отрицательное, нечисловое и > FAST_MAX_INPUT — null;
                             //   mode 'counter' — ≥ 0, mode 'add' — > 0
@@ -1979,7 +2030,7 @@ loadStatsPeriod(category)   // → 'week' | 'month' | 'year' | 'all'
                             //   'sleep'. Нет ключа, нет поля или
                             //   значение вне списка — 'month'
 saveStatsPeriod(category, period)
-                            // → void; пишет одно поле, остальные не трогает;
+                            // → boolean; пишет одно поле, остальные не трогает;
                             //   значение вне списка не пишется
 readStatsPeriods()          // → объект периодов из ключа
                             //   youplanner.stats.period. Ключа нет —
@@ -2095,7 +2146,7 @@ loadSleep()                 // → { version, bed, fall, wake, actualWake,
                             //   отсутствие поля — запись версий 1–2, и она
                             //   читается с пустой историей. Ничего не пишет:
                             //   null и есть первый запуск
-saveSleep(sleep)            // → void; неполный или битый набор ядра
+saveSleep(sleep)            // → boolean; неполный или битый набор ядра
                             //   не пишется вовсе, полный — пишется
                             //   и ставит отложенную отправку. Прежняя история
                             //   берётся из хранилища тем же loadSleep(),
@@ -2121,7 +2172,7 @@ const PRESS_HABIT_ID = 'h12';
 defaultHabit(id)                // → копия привычки из DEFAULT_HABITS по id, null если нет
 loadHabits()                    // → массив привычек; нет ключа, пустая строка, битый
                                 //   JSON, не массив — []; ничего не пишет
-saveHabits(habits)              // → void, пишет ключ и ставит отложенную отправку
+saveHabits(habits)              // → boolean, пишет ключ и ставит отложенную отправку
 loadMigrations()                // → объект пройденных миграций; битый ключ — {}
 migrationDone(name)             // → boolean
 markMigration(name)             // → void, отмечает правку пройденной
@@ -2408,7 +2459,7 @@ habitTimeMinutes(time)          // → минуты от полуночи | null
 habitLevelByTime(habit, now)    // → 'on-time' | 'late' | null
 habitMarkDate(habit, date, now) // → день отметки; правило полуночи (§11r)
 defaultLevel(habit, value)      // → уровень обычного выполнения
-writeHabitEntry(habit, date, value, level)
+writeHabitEntry(habit, date, value, level)  // → boolean (результат setRecord)
 kazaDayBoundary(now)            // → минуты от полуночи UTC+3: Фаджр либо 05:00
 kazaDayFor(now)                 // → 'YYYY-MM-DD', день каза
 
