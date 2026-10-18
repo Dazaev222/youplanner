@@ -3293,6 +3293,7 @@ const STORAGE_KEYS = {
   // Ключ снятого раздела задач: нужен только миграции migrateDropTasks(),
   // которая один раз удаляет старые данные задач с устройства.
   tasks: 'youplanner.tasks',
+  schedule: 'youplanner.schedule',
   migrations: 'youplanner.migrations',
 };
 
@@ -3303,8 +3304,9 @@ function invalidateRecordsCache() {
   recordsCache = null;
 }
 
-// Базовое расписание. Пока зашито в код. Редактирование через Настройки —
-// следующим заходом. Хранение в SCHEDULE_KEY и синхронизация — тогда же.
+// Базовое расписание. Хранится по ключу youplanner.schedule: ключа нет в
+// хранилище штатно — человек ещё не редактировал расписание, и loadSchedule()
+// подставляет DEFAULT_SCHEDULE. Редактирование через Настройки — Этап 6.
 const SCHEDULE_KEY = 'youplanner.schedule';
 
 const SCHEDULE_TYPES = ['weekday', 'weekend', 'fasting', 'physical'];
@@ -3515,6 +3517,33 @@ function safeSetItem(key, value) {
 
 function saveHabits(habits) {
   if (!safeSetItem(STORAGE_KEYS.habits, JSON.stringify(habits))) return false;
+  scheduleSync();
+  return true;
+}
+
+// Возвращает расписание как оно лежит в хранилище. Ключа нет, пустая строка,
+// битый JSON, не-объект или неполные четыре типа дня — всё читается как
+// расписание по умолчанию: DEFAULT_SCHEDULE остаётся отсылкой, пока человек
+// не отредактирует его через Настройки. Копия, а не ссылка: правки
+// из редактора не должны мутировать сам константный список.
+function loadSchedule() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.schedule);
+    if (!raw) return JSON.parse(JSON.stringify(DEFAULT_SCHEDULE));
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return JSON.parse(JSON.stringify(DEFAULT_SCHEDULE));
+    if (!Array.isArray(parsed.weekday) || !Array.isArray(parsed.weekend) ||
+        !Array.isArray(parsed.fasting) || !Array.isArray(parsed.physical)) return JSON.parse(JSON.stringify(DEFAULT_SCHEDULE));
+    return parsed;
+  } catch (e) {
+    return JSON.parse(JSON.stringify(DEFAULT_SCHEDULE));
+  }
+}
+
+// Запись расписания. Как saveHabits: safeSetItem с тостом на переполнение,
+// при успехе — отложенная отправка и boolean для вызывающего кода.
+function saveSchedule(schedule) {
+  if (!safeSetItem(STORAGE_KEYS.schedule, JSON.stringify(schedule))) return false;
   scheduleSync();
   return true;
 }
@@ -5300,6 +5329,18 @@ function validCloudSleep(sleep) {
   return Array.isArray(sleep.history);
 }
 
+// Расписание с сервера — один раздел, минимум: объект без массива, у которого
+// все четыре типа дня — массивы. Пункты не глубже проверяются: битый пункт
+// не должен терять раздел целиком, подправить его может loadSchedule, а
+// повторно сохранённая копия пройдёт через saveSchedule. Раздел без ключа
+// schedule (снимок старой версии) отвергается этим же правилом.
+function validCloudSchedule(data) {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
+  if (!Array.isArray(data.weekday) || !Array.isArray(data.weekend) ||
+      !Array.isArray(data.fasting) || !Array.isArray(data.physical)) return false;
+  return true;
+}
+
 // Применяет данные с сервера. Пишем прямо в localStorage: saveHabits/saveQaza
 // поставили бы отправку и вернули бы на сервер только что полученное.
 // Пустой раздел на сервере не затирает непустой локальный: это след неполного
@@ -5317,6 +5358,7 @@ function applyCloudData(data, ts) {
       fast: loadFast() || null,
       qazaLog: loadQazaLog() || null,
       sleep: loadSleep() || null,
+      schedule: loadSchedule(),
     };
 
     if (validCloudHabits(data.habits) && (hasData(data.habits) || !hasData(local.habits))) {
@@ -5382,6 +5424,16 @@ function applyCloudData(data, ts) {
       localStorage.setItem(SLEEP_KEY, JSON.stringify(Object.assign({}, data.sleep, {
         history: validSleepHistory(data.sleep.history),
       })));
+    }
+    // Расписание заменяется целиком, как запись о сне. Дефолтов здесь нет:
+    // loadSchedule подставляет их сама, поэтому раздел с сервера, прошедший
+    // проверку, применяется всегда — пустым он быть не может. Открытый экран
+    // расписания перерисовывается так же, как остальные после применённого
+    // снимка (§11v)
+    if (validCloudSchedule(data.schedule)) {
+      localStorage.setItem(STORAGE_KEYS.schedule, JSON.stringify(data.schedule));
+      const sw = document.getElementById('schedule-view');
+      if (sw && !sw.hidden) renderScheduleView();
     }
     localStorage.setItem(SYNC_TS_KEY, String(ts));
 
@@ -5493,6 +5545,7 @@ function syncBody(ts, previous) {
       // Записи о сне нет — наверх уходит null. Пустого объекта здесь быть
       // не может: loadSleep() возвращает либо полную запись, либо null.
       sleep: loadSleep() || null,
+      schedule: loadSchedule(),
       updatedAt: ts,
     });
   } finally {
@@ -5575,9 +5628,11 @@ function showSyncStatus(message) {
 // версия 2 добавила раздел tasks, версия 3 — раздел prayer, версия 4 —
 // время у привычки и уровень у записи (§8), версия 5 — раздел fast (§11x),
 // версия 6 — раздел qazaLog (§5), 7 — раздел sleep, 8 — история сна (§11ab),
-// 10 — раздел tasks снят.
-// Старые файлы без tasks читаются как раньше; файлы с tasks отвергаются.
-const BACKUP_VERSION = 10;
+// 10 — раздел tasks снят, 11 — раздел schedule (§11ac).
+// Разбор принимает файлы ровно этой версии: расписание ходит разделом целиком,
+// и старые копии (до 11) расписание за собой не тянут — их отвергаем, чтобы
+// не соединять два поколения формата.
+const BACKUP_VERSION = 11;
 
 // Что попадает в файл. Метка синхронизации и режим главного экрана — состояние
 // устройства, а не данные, поэтому в копию не входят. Координат может не быть;
@@ -5590,6 +5645,7 @@ function buildBackup() {
     records: loadRecords(),
     qaza: loadQaza(),
     prayer: loadPrayer() || {},
+    schedule: loadSchedule(),
   };
 
   // Счётчика уразы может не быть вовсе: отсутствие ключа — это первый запуск,
@@ -5637,9 +5693,12 @@ function parseBackup(text) {
   let data;
   try {
     data = JSON.parse(text);
+    // Копии прошлых версий (например, v10-файлы) отвергаются так же, как
+    // битые: раздел schedule у них может отсутствовать целиком, и соединять
+    // поколения формата нельзя — файл обязан быть ровно BACKUP_VERSION
     if (data.version !== undefined &&
         (typeof data.version !== 'number' ||
-         data.version > BACKUP_VERSION)) return null;
+         data.version !== BACKUP_VERSION)) return null;
   } catch (e) {
     return null;
   }
@@ -5764,6 +5823,12 @@ function applyBackup(data) {
   if (data.sleep && typeof data.sleep === 'object' &&
       !Array.isArray(data.sleep)) {
     localStorage.setItem(SLEEP_KEY, JSON.stringify(data.sleep));
+  }
+  // Расписание заменяется целиком, как запись о сне. validCloudSchedule —
+  // та же проверка, что для снимка с сервера; раздела в файле нет —
+  // текущее расписание остаётся: импорт его не стирает.
+  if (data.schedule && validCloudSchedule(data.schedule)) {
+    localStorage.setItem(STORAGE_KEYS.schedule, JSON.stringify(data.schedule));
   }
 
   appState.habits = loadHabits();
@@ -7348,7 +7413,8 @@ function renderScheduleView() {
   const list = document.getElementById('schedule-list');
   if (!list) return;
 
-  const items = DEFAULT_SCHEDULE[scheduleType] || [];
+  const scheduleData = loadSchedule();
+  const items = scheduleData[scheduleType] || [];
   let html = '';
   for (let i = 0; i < items.length; i++) {
     html += '<li>' +
