@@ -6285,6 +6285,14 @@ function settleHabitsAfterSync(result) {
     markMigration('press');
   }
 
+  // Офлайн-первый запуск: сервер недоступен, локально привычек нет.
+  // Сеем дефолты, чтобы таблица не была пустой.
+  if (!reachable && !hasData(loadHabits())) {
+    const offlineDefaults = DEFAULT_HABITS.map(function (h) { return defaultHabit(h.id); });
+    saveNormalized(function () { saveHabits(offlineDefaults); });
+    markMigration('press');
+  }
+
   // Миграция ждёт конца сверки: до неё список ещё может приехать с сервера
   migratePressHabit();
 }
