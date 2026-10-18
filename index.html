@@ -3568,7 +3568,8 @@ function getRecord(date, habitId) {
 // Значения 0 и false значимы и сохраняются.
 function setRecord(date, habitId, value) {
   const records = loadRecords();
-  const snapshot = JSON.parse(JSON.stringify(records));
+  const dayExisted = Object.prototype.hasOwnProperty.call(records, date);
+  const daySnapshot = dayExisted ? JSON.parse(JSON.stringify(records[date])) : null;
   const isDelete = value === undefined || value === null || value === '';
 
   if (isDelete) {
@@ -3583,10 +3584,12 @@ function setRecord(date, habitId, value) {
   }
 
   if (!saveRecords(records)) {
-    // Запись не удалась: возвращаем локальный объект к снимку. В хранилище
-    // при этом остались прежние данные — safeSetItem не записал новые.
-    Object.keys(records).forEach(function (key) { delete records[key]; });
-    Object.assign(records, snapshot);
+    // Запись не удалась: откатываем только изменённый день.
+    if (dayExisted) {
+      records[date] = daySnapshot;
+    } else {
+      delete records[date];
+    }
     return false;
   }
   scheduleSync();
@@ -5169,7 +5172,7 @@ let normalizing = false;
 function saveNormalized(write) {
   normalizing = true;
   try {
-    write();
+    return write();
   } finally {
     normalizing = false;
   }
@@ -6290,7 +6293,7 @@ function init() {
   // Межвкладочная страховка: событие storage приходит только из других
   // вкладок, поэтому с write-through в текущей оно не конфликтует.
   window.addEventListener('storage', function (event) {
-    if (event.key === STORAGE_KEYS.records) invalidateRecordsCache();
+    if (event.key === null || event.key === STORAGE_KEYS.records) invalidateRecordsCache();
   });
 
   appState.habits = loadHabits();
@@ -8893,15 +8896,15 @@ function onFastInitSave() {
     return;
   }
 
-  if (note) note.textContent = '';
-  if (field) field.value = '';
-
   if (mode === 'add') {
     if (!addFast(fast, value)) return;
   } else {
     // Первого ключа ещё нет — заводим его здесь же
     if (!setFast(fast || { version: FAST_VERSION, remaining: 0, history: [] }, value)) return;
   }
+
+  if (note) note.textContent = '';
+  if (field) field.value = '';
 
   fastInitMode = null;
   renderFastView();
@@ -9151,9 +9154,9 @@ function sleepBarMarkup(bed, fall, wake, cycles) {
 // присылает только change
 function onSleepFieldChange() {
   syncRealWakeField();
-  renderSleepResult();
   const decision = sleepDecision();
   if (!decision || !decision.ready) return;
+
   if (!saveSleep({
     bed: decision.bed,
     fall: decision.fall,
@@ -9163,7 +9166,13 @@ function onSleepFieldChange() {
     realWake: decision.realWake,
     realSleepMin: decision.realSleepMin,
     excluded: decision.excluded,
-  })) return;
+  })) {
+    renderSleepView();
+    syncRealWakeField();
+    return;
+  }
+
+  renderSleepResult();
 }
 
 /* --- Модальное окно ------------------------------------------------------ */

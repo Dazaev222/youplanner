@@ -67,6 +67,16 @@
 
 ## Заходы
 
+- 2026-10-18 — закрыты P2/P3-хвосты после save-check:
+  1. `saveNormalized` возвращает результат `write()` (boolean).
+  2. `onFastInitSave`: поле ввода и подсказка очищаются ПОСЛЕ успешного
+     `addFast`/`setFast`. При провале ввод не теряется.
+  3. `onSleepFieldChange`: `renderSleepResult()` вызывается после `saveSleep`.
+     При провале `renderSleepView()` восстанавливает поля из `loadSleep()`.
+  4. `setRecord`: полный снимок `records` заменён на delta-снимок дня.
+  5. `storage` listener: `event.key === null` инвалидирует кэш.
+  6. Spec.md §10: уточнено поведение `markFastDone` при `remaining <= 0`.
+
 - 2026-10-17 — блок save-check закрыт: проверка возврата `false` от
   сохранений восстановлена по всему приложению. Коммит 22f5dca
   восстановлен по существу: исходный локальный коммит был потерян,

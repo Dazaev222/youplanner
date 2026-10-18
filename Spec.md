@@ -1860,6 +1860,10 @@ function getQazaPlan(qaza)
   изменённый объект при успехе и `null` при провале `saveHabits`.
   `removeHabit` возвращает boolean: `true` только если сохранены и
   привычки, и записи; `scheduleSync()` — только при полном успехе.
+- **`saveNormalized`.** Возвращает результат обёрнутой `write()`-функции
+  (boolean от `save*`). Сейчас вызывающие (`migratePressHabit`, `loadQaza`,
+  `settleHabitsAfterSync`) результат не проверяют — это фоновые пути
+  чтения/миграции, где провал записи не блокирует работу приложения.
 - **Молитвы.** `applyPrayerCoords` возвращает boolean от `savePrayer`
   и не перерисовывает ничего сама: `afterPrayerChange()` вызывают
   обработчики (`onPrayerGeo`, `onPrayerRefresh`, `onPrayerManualSave`)
@@ -1999,7 +2003,7 @@ saveFast(fast)              // → boolean, пишет ключ (remaining пр�
 appendFastHistory(fast, count, source)  // → void, history.push({ date: сегодня,
                             //   count, source }); растущий массив, не стек (§5)
 markFastDone(fast)          // → boolean (было: Fast), остаток-- при remaining > 0, запись source 'done'
-                            //   с count 1; при нуле — no-op
+                            //   с count 1; при remaining <= 0 — no-op, возвращает false
 addFast(fast, count)        // → boolean (было: Fast), остаток += count, запись source 'add'
 setFast(fast, count)        // → boolean (было: Fast), остаток перезаписывается, запись source 'set'
 parseFastInput(text, mode)  // → number | null; только целое: пустое, дробное,
