@@ -5415,7 +5415,9 @@ function applyCloudData(data, ts) {
       localStorage.setItem(STORAGE_KEYS.records, JSON.stringify(data.records));
       invalidateRecordsCache();
     }
-    if (validCloudQaza(data.qaza) &&
+    // Раздел каза не применяется, пока есть неотправленная правка:
+    // серверной копии она ещё не видела, и снимок затёр бы её молча.
+    if (!syncPending && validCloudQaza(data.qaza) &&
         (hasData(data.qaza) || !hasData(local.qaza))) {
       localStorage.setItem(QAZA_STORAGE_KEY, JSON.stringify(data.qaza));
     }
@@ -5454,7 +5456,9 @@ function applyCloudData(data, ts) {
     // бы и при следующем чтении пропал бы вовсе (§5, loadQazaLog).
     // Записи из снимка чистятся, но раздел из-за них не отклоняется:
     // битая запись — не повод терять историю (§5, validQazaLogEntries)
-    if (validCloudQazaLog(data.qazaLog) &&
+    // Журнал каза защищён тем же правилом: неотправленная правка дороже
+    // серверного снимка, который её ещё не содержит.
+    if (!syncPending && validCloudQazaLog(data.qazaLog) &&
         (hasData(data.qazaLog) || !hasData(local.qazaLog))) {
       localStorage.setItem(QAZA_LOG_KEY, JSON.stringify({
         version: QAZA_LOG_VERSION,
@@ -5545,11 +5549,11 @@ function syncFromCloud() {
     .catch(function () { return { reachable: false, serverEmpty: false }; });
 }
 
-// Отправляет локальные данные наверх. Ключ времени пишется до запроса: ответ
-// на свой же PUT не должен выглядеть новее локальной копии.
+// Отправляет локальные данные наверх. Ключ времени пишется ПОСЛЕ успешного
+// PUT: если отправка не дошла, локальная копия и в реальности не новее
+// серверной, и завышенный таймстамп помешал бы принять следующий снимок.
 function syncToCloud() {
   const ts = Date.now();
-  localStorage.setItem(SYNC_TS_KEY, String(ts));
 
   // Сначала копия, потом запись: сбой копирования данные всё равно отправит.
   // Заодно оттуда берётся предыдущий узел — он нужен телу запроса.
@@ -5561,6 +5565,12 @@ function syncToCloud() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: syncBody(ts, previous),
+      }).then(function (response) {
+        if (response.ok) {
+          localStorage.setItem(SYNC_TS_KEY, String(ts));
+          if (!syncTimer) syncPending = false;
+        }
+        return response;
       });
     })
     .catch(function () {});
@@ -5643,12 +5653,13 @@ function backupCloudSnapshot() {
 // Отложенная отправка: несколько правок подряд дают один PUT
 function scheduleSync() {
   if (syncing) return;
-  // До первой сверки отправлять нельзя: локальное состояние ещё не сверено,
-  // а PUT затирает узел целиком. Правку запоминаем и отправим после ответа.
-  if (!cloudReady) {
-    if (!normalizing) syncPending = true;
-    return;
-  }
+  // Правка взводит syncPending всегда (кроме записей при чтении): серверный
+  // снимок застарел — данные правки ещё не дошли наверх. До первой сверки
+  // отправлять нельзя: локальное состояние ещё не сверено, а PUT затирает
+  // узел целиком — правка отправится после ответа.
+  if (!normalizing) syncPending = true;
+  if (!cloudReady) return;
+
   if (syncTimer) clearTimeout(syncTimer);
   syncTimer = setTimeout(function () {
     syncTimer = null;
