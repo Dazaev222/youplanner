@@ -7,25 +7,29 @@
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
   <meta name="apple-mobile-web-app-title" content="Планер">
-  <meta name="theme-color" content="#f4f4f7">
+  <meta name="theme-color" content="#FEFEFE">
   <link rel="icon" type="image/svg+xml" href="icon.svg">
   <link rel="icon" type="image/png" sizes="180x180" href="icon-180.png">
   <link rel="apple-touch-icon" href="icon-180.png">
   <link rel="manifest" href="manifest.json">
+  <!-- Шрифт Inter: локального файла нет, поэтому грузим с Google Fonts, при офлайне работает system-ui -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
   <title>YouPlanner — трекер привычек</title>
   <style>
 /* YouPlanner — стили. Палитра приложения задана переменными в :root. */
 
 /* --- Палитра --- */
 :root {
-  --bg: #f4f4f7;
-  --text: #1c1c22;          /* контраст к --surface #ffffff ≈ 16.9:1 */
+  --bg: #FEFEFE;            /* основной фон страницы */
+  --text: #1c1c22;          /* контраст к --surface #D8EDF7 ≈ 14:1 */
   --text-muted: #5c5c6e;
-  --surface: #ffffff;
-  --surface-alt: #f0f0f5;
-  --border: #d9d9e3;
-  --accent: #0062CC;        /* системный синий iOS */
-  --accent-soft: #e6f0fb;
+  --surface: #D8EDF7;       /* вторичный фон: карточки, панели, строки таблицы */
+  --surface-alt: #EEF3FA;   /* вторичные поверхности: шапка таблицы, селекты, вторичные кнопки */
+  --border: #9AAFD4;
+  --accent: #5870C5;        /* кнопки, активные ссылки; белый текст на нём ≈ 4.5:1 */
+  --accent-soft: #E8EDF8;   /* светлая подложка акцента: подсветка, выбранное состояние */
   --success: #1f9d63;
   --danger: #c93a3a;        /* контраст к белому тексту ≈ 5.1:1 */
   --two-min: #38bdf8;       /* уровень «2 минуты»: голубая граница поля */
@@ -48,7 +52,7 @@ body {
 body {
   background-color: var(--bg);
   color: var(--text);
-  font-family: -apple-system, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  font-family: 'Inter', system-ui, sans-serif;
   font-size: 14px;
   line-height: 1.45;
   transition: background-color .15s, color .15s;
@@ -1596,7 +1600,7 @@ body {
 .prayer-method-option.is-active {
   border-color: var(--accent);
   background: var(--accent-soft);
-  color: var(--accent);
+  color: var(--text);
 }
 
 /* Радио скрыто визуально, но остаётся фокусируемым: кольцо фокуса рисуется
@@ -2046,7 +2050,7 @@ body.view-stats #header-actions {
   #mobile-day-tabs .btn.is-active {
     background-color: var(--accent-soft);
     border-color: var(--accent);
-    color: var(--accent);
+    color: var(--text);
   }
 
   /* Переключатель «День / Неделя»: два сегмента на общей подложке */
