@@ -1750,16 +1750,6 @@ body {
   font-variant-numeric: tabular-nums;
 }
 
-/* Строка, за которой экрана ещё нет: гаснет атрибутом disabled, а не
-   подменой тега — <div> выпал бы из таб-навигации, а .settings-row
-   написан под кнопку. Вид остаётся строкой списка: она не «недоступна»,
-   а «пока никуда не ведёт», и приглушать её незачем */
-.stats-row-soon:disabled {
-  cursor: default;
-  opacity: 1;
-  color: var(--text);
-}
-
 /* Пустое состояние экрана статистики: вместо цифр или графика одна строка
    текста. Приглушена и мельче строк — это пояснение, а не значение, и
    отступ у неё как у подписи в карточке (.qaza-summary) */
@@ -2782,7 +2772,7 @@ body.view-stats #header-actions {
     <p id="qaza-plan-start" class="qaza-plan-start"></p>
     <div id="qaza-plan" class="qaza-plan"></div>
     <p id="qaza-note" class="qaza-note" hidden></p>
-    <section id="qaza-add-block">
+    <section>
       <h3 class="qaza-subtitle">Добавить пропущенный намаз</h3>
       <div id="qaza-add" class="qaza-add" role="radiogroup" aria-label="Какой намаз добавить"></div>
       <p class="qaza-add-hint">Выберите намаз и нажмите «Добавить»: остаток вырастет на 1,
@@ -2997,7 +2987,7 @@ body.view-stats #header-actions {
     <p class="qaza-summary">Раздел в разработке. Здесь появится выбор цвета фона.</p>
   </section>
 
-  <section id="schedule-edit-view" class="view" hidden>
+  <section id="schedule-edit-view" hidden>
     <div class="qaza-head">
       <button type="button" class="btn btn-secondary" id="schedule-edit-back">← Назад</button>
       <h2>Расписание</h2>
@@ -3300,7 +3290,7 @@ body.view-stats #header-actions {
         </div>
         <p id="form-error" class="form-error" role="alert"></p>
         <div class="form-actions">
-          <button id="form-submit" type="submit" class="btn btn-primary">Добавить</button>
+          <button type="submit" class="btn btn-primary">Добавить</button>
           <button id="form-cancel" type="button" class="btn btn-secondary">Сбросить</button>
         </div>
       </form>
@@ -3315,7 +3305,7 @@ body.view-stats #header-actions {
   <div class="sheet-backdrop" data-level-sheet-close></div>
   <div class="sheet-panel" role="dialog" aria-modal="true">
     <div class="sheet-head">
-      <h2 id="level-sheet-title">Как выполнено?</h2>
+      <h2>Как выполнено?</h2>
     </div>
     <button type="button" id="level-option-full" class="level-option" data-level="full">Полная версия</button>
     <button type="button" id="level-option-two-min" class="level-option" data-level="two-min">2 минуты</button>
@@ -3353,16 +3343,7 @@ function invalidateRecordsCache() {
 // Базовое расписание. Хранится по ключу youplanner.schedule: ключа нет в
 // хранилище штатно — человек ещё не редактировал расписание, и loadSchedule()
 // подставляет DEFAULT_SCHEDULE. Редактирование через Настройки — Этап 6.
-const SCHEDULE_KEY = 'youplanner.schedule';
-
 const SCHEDULE_TYPES = ['weekday', 'weekend', 'fasting', 'physical'];
-
-const SCHEDULE_LABELS = {
-  weekday: 'Будний',
-  weekend: 'Выходной',
-  fasting: 'Ураза',
-  physical: 'Физработа',
-};
 
 const DEFAULT_SCHEDULE = {
   weekday: [
@@ -3507,7 +3488,7 @@ function migrateDropTasks() {
   if (migrationDone('drop-tasks')) return;
   markMigration('drop-tasks');
   localStorage.removeItem(STORAGE_KEYS.tasks);
-  syncToCloud();
+  scheduleSync();
 }
 
 // «Пресс» заведена в дефолтах позже остальных привычек, поэтому у устройства
@@ -4125,6 +4106,15 @@ function nextQazaIndex(qaza, from) {
   return from;
 }
 
+// Инвариант очереди: курсор обязан указывать на намаз с остатком > 0.
+// Если остаток на текущем стал нулём, курсор сдвигается к следующему
+// ненулевому по кругу; при полностью пустой очереди остаётся на месте.
+function normalizeQazaCursor(qaza) {
+  if (qaza.remaining[NAMAZ_ORDER[qaza.cursor]] === 0) {
+    qaza.cursor = nextQazaIndex(qaza, qaza.cursor);
+  }
+}
+
 // План на сегодня: до трёх намазов по кругу от курсора, нулевые пропускаются.
 // Нигде не сохраняется — считается заново на каждый рендер.
 function getQazaPlan(qaza) {
@@ -4149,7 +4139,7 @@ function qazaTotalRemaining(qaza) {
 // Состояние каза. При отсутствии ключа или битом JSON пишет начальные данные.
 // История обрезается до сегодняшнего дня: стек нужен только для отмены,
 // поэтому он не растёт бесконечно.
-function loadQaza() {
+function loadQaza(skipSave = false) {
   // День каза: до Фаджра это ещё вчера, поэтому и журнал хранит вчерашние
   // записи — иначе выполнение, сделанное ночью, нечем было бы отменить (§7)
   const today = kazaDayFor(new Date());
@@ -4173,15 +4163,17 @@ function loadQaza() {
     });
 
     // Курсор обязан указывать на намаз с остатком > 0
-    if (qaza.remaining[NAMAZ_ORDER[qaza.cursor]] === 0) {
-      qaza.cursor = nextQazaIndex(qaza, qaza.cursor);
-    }
+    normalizeQazaCursor(qaza);
 
-    saveNormalized(function () { saveQaza(qaza); });
+    if (!skipSave) {
+      saveNormalized(function () { saveQaza(qaza); });
+    }
     return qaza;
   } catch (e) {
     const fresh = copyQaza(DEFAULT_QAZA);
-    saveNormalized(function () { saveQaza(fresh); });
+    if (!skipSave) {
+      saveNormalized(function () { saveQaza(fresh); });
+    }
     return fresh;
   }
 }
@@ -5236,6 +5228,9 @@ let cloudReachable = false;
 // Флаг же говорит и обратное: пока он взведён, серверный снимок локальному
 // не указ (см. cloudSnapshotWins).
 let syncPending = false;
+
+function markSyncPending() { syncPending = true; }
+function clearSyncPending() { syncPending = false; }
 // Чтение приводит данные в порядок и пишет их обратно: дефолты привычек,
 // миграция версии каза, обрезка истории, курсор. Это не правка пользователя,
 // поэтому приоритета локальному состоянию такая запись не даёт и syncPending
@@ -5399,7 +5394,7 @@ function applyCloudData(data, ts) {
     const local = {
       habits: loadHabits(),
       records: loadRecords(),
-      qaza: loadQaza(),
+      qaza: loadQaza(true),
       prayer: loadPrayer() || {},
       fast: loadFast() || null,
       qazaLog: loadQazaLog() || null,
@@ -5407,25 +5402,34 @@ function applyCloudData(data, ts) {
       schedule: loadSchedule(),
     };
 
+    // Снимок считается принятым, если хотя бы один раздел прошёл проверку
+    // и был применён. Только тогда двигаем SYNC_TS_KEY: отметка времени
+    // на отброшенных данных заставила бы считать сервер свежее, чем он есть.
+    let cloudApplied = false;
+
     if (validCloudHabits(data.habits) && (hasData(data.habits) || !hasData(local.habits))) {
       localStorage.setItem(STORAGE_KEYS.habits, JSON.stringify(data.habits));
+      cloudApplied = true;
     }
     if (validCloudRecords(data.records) &&
         (hasData(data.records) || !hasData(local.records))) {
       localStorage.setItem(STORAGE_KEYS.records, JSON.stringify(data.records));
       invalidateRecordsCache();
+      cloudApplied = true;
     }
     // Раздел каза не применяется, пока есть неотправленная правка:
     // серверной копии она ещё не видела, и снимок затёр бы её молча.
     if (!syncPending && validCloudQaza(data.qaza) &&
         (hasData(data.qaza) || !hasData(local.qaza))) {
       localStorage.setItem(QAZA_STORAGE_KEY, JSON.stringify(data.qaza));
+      cloudApplied = true;
     }
     // Координаты — один раздел целиком. Пустой объект с сервера
     // не затирает заданные координаты: это след неполного снимка.
     if (validCloudPrayer(data.prayer) &&
         (hasData(data.prayer) || !hasData(local.prayer))) {
       localStorage.setItem(PRAYER_KEY, JSON.stringify(data.prayer));
+      cloudApplied = true;
     }
     // Счётчик уразы — один раздел целиком, как координаты. Ноль
     // здесь значимое значение: объект с remaining: 0 непуст по ключам,
@@ -5448,6 +5452,7 @@ function applyCloudData(data, ts) {
         remaining: data.fast.remaining,
         history: validFastHistory(data.fast.history),
       }));
+      cloudApplied = true;
     }
     // Журнал выполнений каза — отдельный раздел, один целиком, как счётчик
     // уразы. Пустой журнал (entries: []) ключами непуст, поэтому hasData даёт
@@ -5465,6 +5470,7 @@ function applyCloudData(data, ts) {
         since: data.qazaLog.since,
         entries: validQazaLogEntries(data.qazaLog.entries),
       }));
+      cloudApplied = true;
     }
     // Запись о сне — отдельный раздел, один целиком, как счётчик уразы.
     // Пустой объект с сервера не затирает заведённую запись: он приходит
@@ -5474,6 +5480,7 @@ function applyCloudData(data, ts) {
       localStorage.setItem(SLEEP_KEY, JSON.stringify(Object.assign({}, data.sleep, {
         history: validSleepHistory(data.sleep.history),
       })));
+      cloudApplied = true;
     }
     // Расписание заменяется целиком, как запись о сне. Дефолтов здесь нет:
     // loadSchedule подставляет их сама, поэтому раздел с сервера, прошедший
@@ -5482,14 +5489,14 @@ function applyCloudData(data, ts) {
     // снимка (§11v)
     if (validCloudSchedule(data.schedule)) {
       localStorage.setItem(STORAGE_KEYS.schedule, JSON.stringify(data.schedule));
+      cloudApplied = true;
       const sw = document.getElementById('schedule-view');
       if (sw && !sw.hidden) renderScheduleView();
     }
-    localStorage.setItem(SYNC_TS_KEY, String(ts));
+    if (cloudApplied) localStorage.setItem(SYNC_TS_KEY, String(ts));
 
     appState.habits = loadHabits();
-    appState.records = loadRecords();
-    qazaState = loadQaza();
+    qazaState = loadQaza(true);
   } finally {
     syncing = false;
   }
@@ -5546,7 +5553,10 @@ function syncFromCloud() {
       applyCloudData(data, serverTs);
       return { reachable: true, serverEmpty: false };
     })
-    .catch(function () { return { reachable: false, serverEmpty: false }; });
+    .catch(function () {
+      cloudReachable = false;
+      return { reachable: false, serverEmpty: false };
+    });
 }
 
 // Отправляет локальные данные наверх. Ключ времени пишется ПОСЛЕ успешного
@@ -5568,12 +5578,17 @@ function syncToCloud() {
       }).then(function (response) {
         if (response.ok) {
           localStorage.setItem(SYNC_TS_KEY, String(ts));
-          if (!syncTimer) syncPending = false;
+          if (!syncTimer) clearSyncPending();
         }
         return response;
       });
     })
-    .catch(function () {});
+    .catch(function () {
+      // Сеть отвалилась на PUT: до следующего успешного ответа сервер
+      // считается недоступным, иначе cloudReachable залипает в true
+      // и syncBody перестаёт беречь серверные привычки при пустом локальном списке.
+      cloudReachable = false;
+    });
 }
 
 // Тело PUT. Привычки берём локальные — кроме одного случая: сверка ни разу
@@ -5652,12 +5667,14 @@ function backupCloudSnapshot() {
 
 // Отложенная отправка: несколько правок подряд дают один PUT
 function scheduleSync() {
-  if (syncing) return;
   // Правка взводит syncPending всегда (кроме записей при чтении): серверный
-  // снимок застарел — данные правки ещё не дошли наверх. До первой сверки
+  // снимок застарел — данные правки ещё не дошли наверх. Флаг встаёт и тогда,
+  // когда синк уже идёт: таймер в этом случае не создаётся, но правку
+  // заберёт текущий обмен или следующая отправка. До первой сверки
   // отправлять нельзя: локальное состояние ещё не сверено, а PUT затирает
   // узел целиком — правка отправится после ответа.
-  if (!normalizing) syncPending = true;
+  if (!normalizing) markSyncPending();
+  if (syncing) return;
   if (!cloudReady) return;
 
   if (syncTimer) clearTimeout(syncTimer);
@@ -5889,7 +5906,6 @@ function applyBackup(data) {
   }
 
   appState.habits = loadHabits();
-  appState.records = loadRecords();
   qazaState = loadQaza();
 
   scheduleSync();
@@ -6042,9 +6058,7 @@ function addMissedQaza(qaza, key, today) {
 
   // Если очередь была исчерпана, курсор стоял на нулевом остатке.
   // Возвращаем инвариант «курсор указывает на намаз с остатком > 0».
-  if (qaza.remaining[NAMAZ_ORDER[qaza.cursor]] === 0) {
-    qaza.cursor = nextQazaIndex(qaza, qaza.cursor);
-  }
+  normalizeQazaCursor(qaza);
 
   if (!saveQaza(qaza)) {
     rollback();
@@ -6112,9 +6126,7 @@ function undoQazaDone(qaza, today) {
   }
 
   // Курсор не должен указывать на намаз с нулевым остатком
-  if (qaza.remaining[NAMAZ_ORDER[qaza.cursor]] === 0) {
-    qaza.cursor = nextQazaIndex(qaza, qaza.cursor);
-  }
+  normalizeQazaCursor(qaza);
 
   if (!saveQaza(qaza)) {
     rollback();
@@ -6140,7 +6152,6 @@ function undoQazaDone(qaza, today) {
 
 const appState = {
   habits: [],      // Habit[]
-  records: {},     // кэш youplanner.records
   weekStart: null, // Date — понедельник отображаемой недели
 };
 
@@ -6266,8 +6277,8 @@ function typeOptionsMarkup(current) {
   let html = '';
   for (let i = 0; i < HABIT_TYPES.length; i++) {
     const type = HABIT_TYPES[i];
-    html += '<option value="' + type.value + '"' +
-      (type.value === current ? ' selected' : '') + '>' + type.label + '</option>';
+    html += '<option value="' + escapeHtml(type.value) + '"' +
+      (type.value === current ? ' selected' : '') + '>' + escapeHtml(type.label) + '</option>';
   }
   return html;
 }
@@ -6431,7 +6442,6 @@ function init() {
   });
 
   appState.habits = loadHabits();
-  appState.records = loadRecords();
   appState.weekStart = getWeekStart(new Date());
 
   // Начальные данные каза записываются при первом запуске, а не при открытии
@@ -6450,8 +6460,10 @@ function init() {
 
   // Раз в минуту обновляются счётчик и окно намаза. Таймер один на приложение
   // и идёт всегда: вкладка может быть закрыта, а при её открытии экран всё
-  // равно собирается заново.
-  if (!prayerTimer) prayerTimer = setInterval(prayerTick, 60000);
+  // равно собирается заново. Старый таймер снимаем: повторный init не должен
+  // оставлять второй интервал.
+  if (prayerTimer) clearInterval(prayerTimer);
+  prayerTimer = setInterval(prayerTick, 60000);
 
   // Пустой сервер заполняем своей копией, иначе забираем то, что там новее.
   // Только после этого разрешаем отправку: loadQaza() выше уже зовёт
@@ -6479,7 +6491,7 @@ function init() {
       // исчерпан: оставленный флаг запирал бы применение серверных снимков
       // до конца сеанса.
       const pending = syncPending;
-      syncPending = false;
+      clearSyncPending();
       if ((result && result.serverEmpty) || pending) syncToCloud();
 
       // Список привычек мог измениться только что — перерисовываем главную,
@@ -7192,9 +7204,9 @@ function renderDayCards() {
       const xActive = value === false ? ' is-active' : '';
       inner = '<div class="day-card-controls">' +
         '<input type="checkbox" class="cell-check" data-habit-id="' + escapeHtml(habit.id) +
-        '" data-date="' + today + '"' + checked + ' aria-label="Выполнено">' +
+        '" data-date="' + escapeHtml(today) + '"' + checked + ' aria-label="Выполнено">' +
         '<button type="button" class="cell-x' + xActive + '" data-habit-id="' +
-        escapeHtml(habit.id) + '" data-date="' + today + '" aria-label="Не выполнено">✗</button>' +
+        escapeHtml(habit.id) + '" data-date="' + escapeHtml(today) + '" aria-label="Не выполнено">✗</button>' +
         '</div>';
     } else if (habit.id === QAZA_HABIT_ID) {
       // Каза ведётся во вкладке, карточка только показывает счётчик дня
@@ -7206,7 +7218,7 @@ function renderDayCards() {
       inner = '<div class="day-card-controls">' +
         '<input type="number" class="cell-number' +
         levelClass(entry ? entry.level : null) + '" min="0" step="1" data-habit-id="' +
-        escapeHtml(habit.id) + '" data-date="' + today + '" value="' + escapeHtml(text) +
+        escapeHtml(habit.id) + '" data-date="' + escapeHtml(today) + '" value="' + escapeHtml(text) +
         '" aria-label="Значение">' +
         (hasLevelPopup(habit.id) ? levelButtonMarkup(habit, today) : '') + '</div>';
     } else {
@@ -7215,7 +7227,7 @@ function renderDayCards() {
       inner = '<div class="day-card-controls">' +
         '<select class="cell-select' + levelClass(entry ? entry.level : null) +
         '" data-habit-id="' + escapeHtml(habit.id) +
-        '" data-date="' + today + '" aria-label="Значение">' +
+        '" data-date="' + escapeHtml(today) + '" aria-label="Значение">' +
         choiceOptionsMarkup(current, habit.id) + '</select></div>';
     }
 
@@ -7259,7 +7271,7 @@ function renderTable() {
   for (let h = 0; h < appState.habits.length; h++) {
     const habit = appState.habits[h];
     tbody += '<tr class="habit-row" data-habit-id="' + escapeHtml(habit.id) + '">';
-    tbody += '<td class="habit-cell"><span class="habit-name">' + escapeHtml(habit.name) + '</span>';
+    tbody += '<td><span class="habit-name">' + escapeHtml(habit.name) + '</span>';
     if (habit.unit) {
       tbody += '<span class="habit-unit">(' + escapeHtml(habit.unit) + ')</span>';
     }
@@ -7440,7 +7452,6 @@ function onCellChange(habit, date, value, level) {
 
   const markDate = habitMarkDate(habit, date, new Date());
   if (!writeHabitEntry(habit, markDate, value, level)) return false;
-  appState.records = loadRecords();
 
   if (markDate !== date) {
     renderTable();
@@ -7666,7 +7677,6 @@ function onLevelPick(event) {
   if (written === undefined) return;
 
   if (!writeHabitEntry(habit, date, written, level)) return;
-  appState.records = loadRecords();
 
   closeLevelSheet();
   syncLevelCells(habit.id, date);
@@ -7838,7 +7848,6 @@ function switchAppView(name) {
 
   if (name === 'edit-habits') {
     appState.habits = loadHabits();
-    appState.records = loadRecords();
     renderHabitsEditList();
   }
 
@@ -8327,7 +8336,7 @@ function renderStatsHabitsView() {
     const habit = habits[i];
     markup += '<li><button type="button" class="settings-row" data-habit-id="' +
       escapeHtml(habit.id) + '"><span>' + escapeHtml(habit.name) + '</span>' +
-      '<span class="stats-row-value">' + Math.round(calcProgress(habit, dates)) +
+      '<span class="stats-row-value">' + escapeHtml(Math.round(calcProgress(habit, dates))) +
       '%</span></button></li>';
   }
   list.innerHTML = markup;
@@ -8884,9 +8893,7 @@ function onQazaStartChange(event) {
   qazaState.cursor = index;
 
   // Курсор обязан указывать на намаз с остатком > 0
-  if (qazaState.remaining[NAMAZ_ORDER[index]] === 0) {
-    qazaState.cursor = nextQazaIndex(qazaState, index);
-  }
+  normalizeQazaCursor(qazaState);
 
   if (!saveQaza(qazaState)) return;
   renderQazaView();
@@ -8920,7 +8927,7 @@ function renderQazaRemaining() {
       (isEmpty ? ' is-empty' : '') + '">' +
       '<span class="qaza-row-name">' + escapeHtml(NAMAZ_LABELS[key]) + '</span>' +
       (isCursor ? '<span class="qaza-row-mark">сейчас</span>' : '') +
-      '<span class="qaza-count">' + qazaState.remaining[key] + '</span>' +
+      '<span class="qaza-count">' + escapeHtml(qazaState.remaining[key]) + '</span>' +
       '</div>';
   }
 
@@ -9013,7 +9020,6 @@ function onQazaUndo() {
 // Общая часть после изменения очереди: перерисовать вкладку, ячейки каза
 // и прогресс-круг строки h6 в таблице
 function afterQazaChange() {
-  appState.records = loadRecords();
   renderQazaView();
   updateQazaCells();
   updateRowCircle(QAZA_HABIT_ID);
@@ -9323,7 +9329,7 @@ function sleepResultMarkup(decision, result) {
   const pick = result.recommended[0];
   const parts = [];
 
-  parts.push('<p class="sleep-alarm">Будильник: ' + pick.time + '</p>');
+  parts.push('<p class="sleep-alarm">Будильник: ' + escapeHtml(pick.time) + '</p>');
   let actualText;
   if (decision.realWake) {
     actualText = 'В историю: ' + decision.realWake + ' (по факту)';
@@ -9334,23 +9340,23 @@ function sleepResultMarkup(decision, result) {
   } else {
     actualText = 'В историю: —';
   }
-  parts.push('<p class="sleep-actual">' + actualText + '</p>');
+  parts.push('<p class="sleep-actual">' + escapeHtml(actualText) + '</p>');
   parts.push('<p class="sleep-duration">Сон: ' +
-    sleepFormatDuration(decision.realSleepMin ?? decision.sleepMin) + '</p>');
+    escapeHtml(sleepFormatDuration(decision.realSleepMin ?? decision.sleepMin)) + '</p>');
 
   let detail = sleepCycleLabel(pick.cycles) + ', ' + sleepFormatDuration(pick.sleepMinutes);
   if (result.recommended.length === 2) {
     detail += ' · встать раньше — ' + result.recommended[0].time +
       ', встать позже — ' + result.recommended[1].time;
   }
-  parts.push('<p class="sleep-detail">' + detail + '</p>');
+  parts.push('<p class="sleep-detail">' + escapeHtml(detail) + '</p>');
 
   parts.push('<div class="sleep-cycles">');
   for (let i = 0; i < result.cycles.length; i++) {
     const cycle = result.cycles[i];
     const recommended = result.recommended.indexOf(cycle) !== -1;
     parts.push('<p' + (recommended ? ' class="is-recommended"' : '') + '>' +
-      sleepCycleLabel(cycle.cycles) + ' — ' + cycle.time + '</p>');
+      escapeHtml(sleepCycleLabel(cycle.cycles) + ' — ' + cycle.time) + '</p>');
   }
   parts.push('</div>');
 
@@ -9425,7 +9431,6 @@ function onSleepFieldChange() {
 
 function openModal() {
   appState.habits = loadHabits();
-  appState.records = loadRecords();
   renderHabitList();
   const modal = document.getElementById('habit-modal');
   if (modal) modal.hidden = false;
@@ -9455,12 +9460,12 @@ function renderHabitList() {
       ? 'Тип каза задаётся вкладкой «Каза-намазы»'
       : 'Тип нельзя изменить: по привычке уже есть записи';
     const lockedAttr = locked
-      ? ' disabled title="' + lockedTitle + '"'
+      ? ' disabled title="' + escapeHtml(lockedTitle) + '"'
       : '';
     const goalValue = habit.goal === null || habit.goal === undefined
       ? '' : String(habit.goal);
 
-    html += '<li class="habit-item" data-habit-id="' + escapeHtml(habit.id) + '">' +
+    html += '<li data-habit-id="' + escapeHtml(habit.id) + '">' +
       '<input type="text" class="habit-edit-name" value="' + escapeHtml(habit.name) +
       '" aria-label="Название">' +
       '<select class="habit-type"' + lockedAttr + ' aria-label="Тип">' +
@@ -9499,7 +9504,6 @@ function onHabitListClick(event) {
     if (!window.confirm('Удалить привычку «' + habit.name + '» и все её записи?')) return;
     if (!removeHabit(habitId)) return;
     appState.habits = loadHabits();
-    appState.records = loadRecords();
     setFormError('');
     renderHabitList();
     renderMainView();
@@ -9521,7 +9525,6 @@ function onHabitListClick(event) {
 
     if (!updateHabit(habitId, patch)) return;
     appState.habits = loadHabits();
-    appState.records = loadRecords();
     setFormError('');
     renderHabitList();
     renderMainView();
@@ -9544,7 +9547,7 @@ function renderHabitsEditList() {
       ? 'Тип каза задаётся вкладкой «Каза-намазы»'
       : 'Тип нельзя изменить: по привычке уже есть записи';
     const lockedAttr = locked
-      ? ' disabled title="' + lockedTitle + '"'
+      ? ' disabled title="' + escapeHtml(lockedTitle) + '"'
       : '';
     const isNumber = habit.type === 'number';
     const numberHidden = isNumber ? '' : ' hidden';
@@ -9628,7 +9631,6 @@ function onHabitsEditClick(event) {
     if (!window.confirm('Удалить привычку «' + habit.name + '» и все её записи?')) return;
     if (!removeHabit(habitId)) return;
     appState.habits = loadHabits();
-    appState.records = loadRecords();
     renderHabitsEditList();
     renderMainView();
     return;
@@ -9649,7 +9651,6 @@ function onHabitsEditClick(event) {
 
     if (!updateHabit(habitId, patch)) return;
     appState.habits = loadHabits();
-    appState.records = loadRecords();
     renderHabitsEditList();
     renderMainView();
   }
@@ -9753,7 +9754,6 @@ function onFormSubmit(event) {
   if (!created) return;
 
   appState.habits = loadHabits();
-  appState.records = loadRecords();
   setFormError('');
 
   const form = document.getElementById('habit-form');
