@@ -59,6 +59,14 @@ body {
   transition: background-color .15s, color .15s;
 }
 
+/* Clarity: у любого поля ввода текст плотный и тёмный. Приглушённые оттенки
+   здесь недопустимы — иначе цифры и время читаются хуже подписи. */
+input,
+select,
+textarea {
+  color: #1c1c22 !important;
+}
+
 /* --- Каркас страницы --- */
 #app {
   min-width: 1024px;
@@ -206,8 +214,8 @@ body {
 }
 
 #habits-thead th {
-  background-color: var(--surface-alt);
-  color: var(--text-muted);
+  background-color: #F2F2F7;
+  color: #1c1c22;
   font-size: 12px;
   font-weight: 600;
   text-align: center;
@@ -248,9 +256,10 @@ body {
 /* Контур карточки собирается из крайних ячеек строки: рамка сверху и снизу
    у всех, слева — у первой, справа — у последней, там же и радиусы. */
 .habit-row td {
-  background-color: var(--surface);
+  background-color: #FFFFFF;
   border-top: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.03);
   transition: border-color .18s ease;
 }
 
@@ -343,11 +352,11 @@ body {
 .cell-number,
 .cell-select {
   padding: 4px 6px;
-  border: 1px solid rgba(255, 255, 255, 0.6);
+  border: 1px solid rgba(154, 175, 212, 0.8);
   border-radius: 10px;
-  background: rgba(255, 255, 255, 0.4);
+  background: #FFFFFF;
   outline: none;
-  color: var(--text);
+  color: #1c1c22 !important;
   font: inherit;
   font-size: 13px;
   transition: border-color .15s ease, transform .15s ease;
@@ -758,7 +767,8 @@ body {
 
 /* «Ураза» — карточка того же образца: раздел открывается из шапки каза
    и живёт внутри той же вкладки. «Цикл сна» — тоже: свой вход, но та же
-   карточка с появлением */
+   карточка с появлением. Подложка почти непрозрачная: стекло остаётся
+   фоном, а текст лежит на плотном материале (Apple HIG, контраст 4.5:1). */
 #qaza-view,
 #fast-view,
 #sleep-view {
@@ -766,7 +776,7 @@ body {
   padding: 22px 26px 26px;
   border: 1px solid rgba(255, 255, 255, 0.6);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.45) !important;
+  background: rgba(255, 255, 255, 0.85) !important;
   -webkit-backdrop-filter: blur(16px) saturate(1.2);
   backdrop-filter: blur(16px) saturate(1.2);
   box-shadow: var(--shadow);
@@ -791,7 +801,7 @@ body {
   justify-content: space-between;
   gap: 16px;
   padding-bottom: 12px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid rgba(60, 60, 67, 0.15);
 }
 
 .qaza-head h2 {
@@ -803,15 +813,20 @@ body {
 
 .qaza-summary {
   margin: 16px 0 0;
-  color: var(--text-muted);
+  color: #8E8E93;
   font-variant-numeric: tabular-nums;
+}
+
+/* Сводка каза — счётчики, то есть данные, а не подпись: серый им нельзя */
+#qaza-summary {
+  color: var(--text);
 }
 
 .qaza-subtitle {
   margin: 24px 0 12px;
   font-size: 14px;
   font-weight: 600;
-  color: var(--text-muted);
+  color: var(--text);
 }
 
 /* Список пяти намазов с остатками */
@@ -957,19 +972,19 @@ body {
 /* Надпись «Начать с: …» над планом */
 .qaza-plan-start {
   margin: 0 0 12px;
-  color: var(--text-muted);
+  color: #8E8E93;
   font-size: 13px;
 }
 
 /* Превью следующих пунктов плана: без кнопки, приглушённые */
 .qaza-plan-next {
-  color: var(--text-muted);
+  color: #8E8E93;
   font-size: 12px;
 }
 
 .qaza-note {
   margin: 16px 0 0;
-  color: var(--text-muted);
+  color: #8E8E93;
 }
 
 .qaza-actions {
@@ -1099,7 +1114,7 @@ body {
 .qaza-add-hint {
   max-width: 68ch;
   margin: 12px 0 0;
-  color: var(--text-muted);
+  color: #8E8E93;
   font-size: 13px;
 }
 
@@ -1744,7 +1759,7 @@ body {
   padding: 22px 26px 26px;
   border: 1px solid rgba(255, 255, 255, 0.6);
   border-radius: 16px;
-  background: rgba(255, 255, 255, 0.45) !important;
+  background: rgba(255, 255, 255, 0.85) !important;
   -webkit-backdrop-filter: blur(16px) saturate(1.2);
   backdrop-filter: blur(16px) saturate(1.2);
   box-shadow: var(--shadow);
@@ -1772,7 +1787,7 @@ body {
   min-height: 44px;
   padding: 14px;
   border: 0;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.5);
+  border-bottom: 1px solid rgba(60, 60, 67, 0.15);
   background: transparent;
   color: var(--text);
   font: inherit;
@@ -1786,7 +1801,7 @@ body {
 }
 
 .settings-chevron {
-  color: var(--text-muted);
+  color: #8E8E93;
   font-size: 20px;
   line-height: 1;
 }
@@ -1795,16 +1810,17 @@ body {
    Селектор составной намеренно: одиночный .settings-version проигрывает
    правилу .settings-row:hover, и текст окрашивался бы в акцент при наведении. */
 .settings-row.settings-version {
-  color: var(--text-muted);
+  color: #8E8E93;
   font-size: 13px;
   cursor: default;
 }
 
 /* --- Раздел «Статистика» -------------------------------------------------- */
-/* Цифра строки хаба. Приглушена и набрана табличными цифрами: значения
-   меняются при смене периода, и без tabular-nums строка дёргалась бы. */
+/* Цифра строки хаба — данные, поэтому основной цвет, а не приглушённый.
+   Табличные цифры остаются: значения меняются при смене периода, и без
+   tabular-nums строка дёргалась бы. */
 .stats-row-value {
-  color: var(--text-muted);
+  color: var(--text);
   font-size: 15px;
   font-variant-numeric: tabular-nums;
 }
@@ -1814,7 +1830,7 @@ body {
    отступ у неё как у подписи в карточке (.qaza-summary) */
 .stats-empty-note {
   margin: 16px 0 0;
-  color: var(--text-muted);
+  color: #8E8E93;
   font-size: 13px;
 }
 
@@ -1849,7 +1865,7 @@ body {
   display: block;
   width: 100%;
   height: 120px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid rgba(60, 60, 67, 0.15);
 }
 
 .stats-chart rect {
@@ -2283,7 +2299,7 @@ body.view-stats #header-actions {
   .stats-menu-title {
     margin: 0 0 8px;
     padding: 0 20px;
-    color: var(--text-muted);
+    color: #8E8E93;
     font-size: 13px;
     font-weight: 400;
   }
@@ -3057,7 +3073,7 @@ body.view-stats #header-actions {
       </li>
       <li>
         <p id="settings-sync-status" class="qaza-summary"
-           style="padding:12px 4px;border-bottom:1px solid var(--border)"></p>
+           style="padding:12px 4px;border-bottom:1px solid rgba(60, 60, 67, 0.15)"></p>
       </li>
     </ul>
     <p class="qaza-summary">Раздел в разработке. Здесь появится выбор цвета фона.</p>
