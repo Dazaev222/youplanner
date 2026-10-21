@@ -51,7 +51,7 @@ body {
 
 body {
   background: linear-gradient(135deg, #FEFEFE 0%, #E8EDF8 40%, #D8EDF7 80%, #FEFEFE 100%);
-  min-height: 100vh;
+  min-height: 100dvh;
   color: var(--text);
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 14px;
@@ -343,9 +343,10 @@ body {
 .cell-number,
 .cell-select {
   padding: 4px 6px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background-color: var(--surface-alt);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.4);
+  outline: none;
   color: var(--text);
   font: inherit;
   font-size: 13px;
@@ -596,9 +597,10 @@ body {
 #habit-list select {
   min-height: 32px;
   padding: 4px 8px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background-color: var(--surface);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.4);
+  outline: none;
   color: var(--text);
   font: inherit;
   font-size: 13px;
@@ -645,9 +647,10 @@ body {
 .form-fields select {
   min-height: 34px;
   padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background-color: var(--surface-alt);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.4);
+  outline: none;
   color: var(--text);
   font: inherit;
   font-size: 13px;
@@ -658,9 +661,10 @@ body {
 .input {
   min-height: 34px;
   padding: 6px 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background-color: var(--surface-alt);
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.4);
+  outline: none;
   color: var(--text);
   font: inherit;
   font-size: 13px;
@@ -678,6 +682,20 @@ body {
 #habit-list select:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: 1px;
+}
+
+.cell-number:focus,
+.cell-select:focus,
+.form-fields input:focus,
+.form-fields select:focus,
+#habit-list input:focus,
+#habit-list select:focus,
+.input:focus,
+.prayer-field input:focus,
+.habit-row-body input:focus,
+.habit-row-body select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px rgba(88, 112, 197, 0.2);
 }
 
 #form-name {
@@ -1176,9 +1194,9 @@ body {
 }
 
 .view-switch-btn.is-active {
-  background: var(--surface);
+  background: #FFFFFF;
   color: var(--text);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, .08);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 /* Пустая таблица без ответа сервера: пометка стоит над карточками дня
@@ -1564,9 +1582,10 @@ body {
   width: 100%;
   min-height: 44px;
   padding: 10px 12px;
-  border: 1px solid var(--border);
+  border: 1px solid rgba(255, 255, 255, 0.6);
   border-radius: 10px;
-  background: var(--surface);
+  background: rgba(255, 255, 255, 0.4);
+  outline: none;
   color: var(--text);
   font: inherit;
   font-size: 16px;
@@ -1980,9 +1999,10 @@ body {
   width: 100%;
   min-height: 44px;
   padding: 10px 12px;
-  border: 1px solid var(--border);
+  border: 1px solid rgba(255, 255, 255, 0.6);
   border-radius: 10px;
-  background-color: var(--surface);
+  background: rgba(255, 255, 255, 0.4);
+  outline: none;
   color: var(--text);
   font: inherit;
   font-size: 15px;
@@ -2076,8 +2096,9 @@ body.view-stats #header-actions {
     gap: 0;
     margin-bottom: 12px;
     padding: 3px;
+    border: 1px solid rgba(255, 255, 255, 0.6);
     border-radius: 10px;
-    background: var(--surface-alt);
+    background: rgba(255, 255, 255, 0.4);
   }
 
   /* Карточка привычки в режиме «День» */
