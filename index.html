@@ -50,7 +50,8 @@ body {
 }
 
 body {
-  background-color: var(--bg);
+  background: linear-gradient(135deg, #FEFEFE 0%, #E8EDF8 40%, #D8EDF7 80%, #FEFEFE 100%);
+  min-height: 100vh;
   color: var(--text);
   font-family: 'Inter', system-ui, sans-serif;
   font-size: 14px;
@@ -65,6 +66,11 @@ body {
   margin: 0 auto;
   padding: 0 24px 48px;
   transition: background-color .15s, color .15s;
+}
+
+/* Запас под парящий таб-бар: последние карточки не уходят под стекло */
+#main {
+  padding-bottom: 90px;
 }
 
 /* --- Шапка --- */
@@ -122,7 +128,7 @@ body {
   cursor: pointer;
   white-space: nowrap;
   transition: background-color .15s, border-color .15s, color .15s,
-    transform .15s ease, box-shadow .15s ease;
+    transform .2s cubic-bezier(0.34, 1.56, 0.64, 1), box-shadow .15s ease;
 }
 
 .btn:focus-visible {
@@ -135,6 +141,12 @@ body {
   .btn:hover {
     transform: translateY(-1px);
   }
+}
+
+/* Тактильный отклик: лёгкое пружинное сжатие при нажатии */
+.btn:active,
+.day-card:active {
+  transform: scale(0.96);
 }
 
 .btn-primary {
@@ -521,11 +533,13 @@ body {
   max-height: 80vh;
   overflow-y: auto;
   padding: 22px 26px 26px;
-  border: 1px solid var(--border);
-  border-radius: 14px;
-  background-color: var(--surface);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.55);
+  -webkit-backdrop-filter: blur(18px) saturate(1.3);
+  backdrop-filter: blur(18px) saturate(1.3);
   color: var(--text);
-  box-shadow: var(--shadow);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 8px 32px rgba(0, 0, 0, 0.08);
 }
 
 .modal-header {
@@ -1303,9 +1317,12 @@ body {
   width: 420px;
   max-width: calc(100vw - 32px);
   padding: 16px;
-  background: var(--surface);
-  border-radius: 16px;
-  box-shadow: 0 8px 32px rgba(0, 0, 0, .18);
+  background: rgba(255, 255, 255, 0.55);
+  -webkit-backdrop-filter: blur(18px) saturate(1.3);
+  backdrop-filter: blur(18px) saturate(1.3);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 20px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 8px 32px rgba(0, 0, 0, 0.08);
   /* Панель не выше экрана: длинная панель прокручивается,
      а не уезжает верхом за край. */
   max-height: calc(100vh - 24px);
@@ -2070,9 +2087,13 @@ body.view-stats #header-actions {
     gap: 12px;
     min-height: 60px;
     padding: 14px 16px;
-    border: 1px solid var(--border);
-    border-radius: 14px;
-    background: var(--surface);
+    border: 1px solid rgba(255, 255, 255, 0.35);
+    border-radius: 20px;
+    background: rgba(255, 255, 255, 0.55);
+    -webkit-backdrop-filter: blur(18px) saturate(1.3);
+    backdrop-filter: blur(18px) saturate(1.3);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 8px 32px rgba(0, 0, 0, 0.08);
+    transition: transform 0.2s cubic-bezier(0.34, 1.56, 0.64, 1);
   }
 
   .day-card-name {
@@ -2611,17 +2632,20 @@ body.view-stats #header-actions {
     font-size: 12px;
   }
 
-  /* Нижний таб-бар: три раздела, прижат к низу экрана */
+  /* Нижний таб-бар: парящее стекло над контентом (iOS style) */
   #tab-bar {
     display: flex;
     position: fixed;
     bottom: 0;
     left: 0;
-    right: 0;
-    z-index: 50;
-    background: var(--surface);
-    border-top: 1px solid var(--border);
-    padding: 6px 0 calc(6px + env(safe-area-inset-bottom, 0px));
+    width: 100%;
+    z-index: 1000;
+    background: rgba(255, 255, 255, 0.65);
+    -webkit-backdrop-filter: blur(20px) saturate(1.5);
+    backdrop-filter: blur(20px) saturate(1.5);
+    border-top: 1px solid rgba(255, 255, 255, 0.5);
+    box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.05);
+    padding: 6px 0 env(safe-area-inset-bottom, 0px);
     justify-content: space-around;
   }
 
