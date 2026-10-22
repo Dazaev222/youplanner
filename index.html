@@ -1461,9 +1461,9 @@ textarea {
 }
 
 /* --- Вкладка «Молитвы» ---------------------------------------------------- */
-/* Единственная карточка приложения с фоном-градиентом: голубое небо сверху,
-   светлое снизу. Кольцо и акценты — те же --accent, что и везде, поэтому
-   новых цветов палитра не заводит, а карточки строк остаются белыми. */
+/* Стеклянная карточка: полупрозрачный белый фон и размытие подложки.
+   Кольцо и акценты — те же --accent, что и везде, поэтому новых цветов
+   палитра не заводит, а карточки строк остаются белыми. */
 #prayer-view,
 #prayer-settings-view {
   margin-top: 20px;
@@ -1475,7 +1475,9 @@ textarea {
 }
 
 #prayer-view {
-  background: linear-gradient(180deg, #d8e8fb 0%, #eff6fe 46%, var(--surface) 100%);
+  background: rgba(255, 255, 255, 0.45) !important;
+  -webkit-backdrop-filter: blur(20px);
+  backdrop-filter: blur(20px);
 }
 
 #prayer-settings-view {
@@ -1567,13 +1569,13 @@ textarea {
   padding: 12px 14px;
   border: 1px solid var(--border);
   border-radius: 12px;
-  background: var(--surface);
+  background: #FFFFFF;
 }
 
 /* Текущий намаз: рамка и фон плюс счётчик у следующей строки — состояние
    видно и без опоры на один цвет */
 .prayer-row.is-current {
-  border-color: var(--accent);
+  border: 1px solid var(--accent);
   background: var(--accent-soft);
 }
 
