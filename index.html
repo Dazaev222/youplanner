@@ -2779,26 +2779,96 @@ body.view-stats #header-actions {
     font-size: 12px;
   }
 
-  /* Нижний таб-бар: матовое стекло iOS над контентом */
+  /* Нижний таб-бар: плавающая белая капсула в стиле TickTick.
+     position: fixed — чтобы капсула висела над контентом; она же задаёт
+     containing block для .glass-indicator (дублирующий position: relative
+     из ТЗ опущен: в одной декларации работает только последняя, и она бы
+     превратила бар в обычный блок потока) */
   #tab-bar {
     display: flex;
     position: fixed;
-    bottom: 0;
-    left: 0;
-    width: 100%;
-    margin-bottom: env(safe-area-inset-bottom, 0px);
+    bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+    left: 20px;
+    right: 20px;
+    width: auto;
+    height: 64px;
+    border-radius: 32px;
+    background: #FFFFFF !important;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    border: none;
+    box-shadow: 0 -2px 16px rgba(0, 0, 0, 0.08), 0 4px 24px rgba(0, 0, 0, 0.06);
     z-index: 1000;
-    background: rgba(250, 250, 252, 0.85) !important;
-    -webkit-backdrop-filter: blur(30px) saturate(1.8);
-    backdrop-filter: blur(30px) saturate(1.8);
-    border-top: 1px solid rgba(255, 255, 255, 0.8);
-    box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.05);
-    padding: 6px 0 env(safe-area-inset-bottom, 0px);
+    align-items: center;
     justify-content: space-around;
+    padding: 0 12px;
   }
 
   #tab-bar[hidden] {
     display: none;
+  }
+
+  /* Шаг 1: текст не нужен вовсе — только иконки */
+  #tab-bar button {
+    font-size: 0 !important;
+    color: transparent !important;
+  }
+
+  #tab-bar button span {
+    display: none !important;
+  }
+
+  /* Шаг 3: кнопки — прозрачные, тянутся на всю высоту капсулы */
+  #tab-bar button {
+    position: relative;
+    z-index: 2;
+    background: transparent !important;
+    border: none !important;
+    flex: 1;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    border-radius: 14px;
+  }
+
+  /* Шаги 1 и 4: жёсткий размер иконок + глубокая серая заливка */
+  #tab-bar button svg {
+    width: 26px;
+    height: 26px;
+    display: block;
+  }
+
+  #tab-bar button svg,
+  #tab-bar button svg * {
+    fill: #8E8E93 !important;
+    stroke: #8E8E93 !important;
+    stroke-width: 1.5px;
+    stroke-linecap: round;
+    stroke-linejoin: round;
+    transition: all 0.2s;
+  }
+
+  #tab-bar button.is-active svg,
+  #tab-bar button.is-active svg * {
+    fill: #FFFFFF !important;
+    stroke: #FFFFFF !important;
+    stroke-width: 2px;
+  }
+
+  /* Шаг 5: синяя капсула-индикатор */
+  #tab-bar .glass-indicator {
+    position: absolute;
+    top: 8px;
+    height: 48px;
+    left: 0;
+    border-radius: 14px;
+    background: #5B7CFF !important;
+    box-shadow: none !important;
+    transition: transform 0.3s cubic-bezier(0.25, 1, 0.5, 1), width 0.3s ease;
+    z-index: 1;
+    pointer-events: none;
   }
 
   .tab-item {
@@ -2826,11 +2896,11 @@ body.view-stats #header-actions {
   }
 
   /* Запас снизу, чтобы таб-бар не накрывал последнюю строку таблицы или
-     карточку. 67px — высота таб-бара без безопасного отступа; сам отступ
-     добавлен здесь же, поэтому между контентом и таб-баром остаётся
-     12–16px независимо от модели телефона. */
+     карточку. 64px — высота плавающей капсулы, +20px отступ от низа экрана;
+     безопасный отступ добавлен и в бар, и сюда, поэтому зазор между
+     контентом и таб-баром остаётся прежним независимо от модели телефона. */
   #app {
-    padding-bottom: calc(67px + env(safe-area-inset-bottom, 0px));
+    padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px));
   }
 
   /* Дополнительный зазор под контент — на случай, когда последний элемент
@@ -10033,16 +10103,31 @@ if ('serviceWorker' in navigator) {
 // --- Анимированный индикатор (капля) для переключателей ---
 window.moveIndicator = function(container) {
   if (!container) return;
-  var btn = container.querySelector('.is-active, .active');
-  var ind = container.querySelector('.glass-indicator');
+  const btn = container.querySelector('.is-active, .active');
+  const ind = container.querySelector('.glass-indicator');
   if (!btn || !ind) return;
 
-  var containerRect = container.getBoundingClientRect();
-  var btnRect = btn.getBoundingClientRect();
-  if (btnRect.width === 0) return; // Предохранитель для скрытых экранов
+  if (btn.offsetWidth === 0) return;
 
-  ind.style.width = btnRect.width + 'px';
-  ind.style.transform = 'translateX(' + (btnRect.left - containerRect.left) + 'px)';
+  const containerRect = container.getBoundingClientRect();
+  const btnRect = btn.getBoundingClientRect();
+
+  if (container.id === 'tab-bar') {
+    // Капсула максимум 48px, но не шире самой кнопки (защита от узких экранов)
+    const capsuleWidth = Math.min(48, btnRect.width - 8);
+    ind.style.width = capsuleWidth + 'px';
+    ind.style.height = '48px';
+
+    // Центрируем капсулу точно по центру иконки
+    const relativeLeft = (btnRect.left - containerRect.left) + (btnRect.width / 2) - (capsuleWidth / 2);
+    ind.style.transform = 'translateX(' + relativeLeft + 'px)';
+  } else {
+    ind.style.width = btnRect.width + 'px';
+    ind.style.height = 'calc(100% - 8px)';
+    ind.style.top = '4px';
+    const relativeLeft = btnRect.left - containerRect.left;
+    ind.style.transform = 'translateX(' + relativeLeft + 'px)';
+  }
 };
 
 function initIndicators() {
@@ -10065,6 +10150,11 @@ document.addEventListener('click', function (e) {
 });
 
 window.addEventListener('resize', initIndicators);
+// Защита при повороте экрана: пересчёт капсулы для всех переключателей
+window.addEventListener('resize', function () {
+  document.querySelectorAll('#tab-bar, #main-view-switch, #schedule-switch')
+    .forEach(window.moveIndicator);
+});
   </script>
 </body>
 </html>
