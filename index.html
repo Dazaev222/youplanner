@@ -1793,6 +1793,15 @@ textarea {
   display: none;
 }
 
+/* Кнопка «Назад» на экране настроек — прилипает к верху, чтобы не уезжать
+   при прокрутке длинного списка */
+#settings-back {
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: #F2F2F7;
+}
+
 /* Статистика открывается из Настроек и живёт карточкой того же образца */
 #settings-view,
 #stats-view,
@@ -6498,6 +6507,9 @@ function cellMarkup(habit, date) {
   } else if (habit.id === QAZA_HABIT_ID) {
     // Каза ведётся во вкладке «Каза-намазы», ячейка только показывает счётчик дня
     inner = qazaCellMarkup(date);
+  } else if (habit.id === QURAN_HABIT_ID) {
+    // Коран: только кнопка уровня (как у Спорта), без инпута
+    inner = levelButtonMarkup(habit, date);
   } else if (habit.type === 'number') {
     const text = typeof value === 'number' ? String(value) : '';
     // Класс нужен только мобильному медиа-запросу: там поле делит ширину
@@ -7791,6 +7803,20 @@ function openLevelSheet(habitId, date) {
 
   const sheet = document.getElementById('level-sheet');
   if (!sheet) return;
+
+  // Для Корана показываем только «Полная версия» и «2 минуты»,
+  // остальные кнопки скрываем
+  const options = sheet.querySelectorAll('.level-option');
+  for (let i = 0; i < options.length; i++) {
+    const opt = options[i];
+    if (habitId === QURAN_HABIT_ID) {
+      const lvl = opt.getAttribute('data-level');
+      opt.style.display = (lvl === 'full' || lvl === 'two-min') ? '' : 'none';
+    } else {
+      opt.style.display = '';
+    }
+  }
+
   sheet.hidden = false;
   syncSheetToKeyboard();
 }
@@ -7921,6 +7947,7 @@ let currentView = 'main';
 // Переключение разделов. Единая точка входа для таб-бара на телефоне,
 // кнопки «Каза-намазы» и «Назад» на ПК.
 function switchAppView(name) {
+  const weekNav = document.getElementById('week-nav'); if (weekNav) weekNav.hidden = (name === 'settings');
   // Панель статистики принадлежит главной: любой переход её закрывает
   closeStatsMenu();
   // Попап уровня — тоже: программный переход (из консоли, теста или будущего
@@ -7952,7 +7979,7 @@ function switchAppView(name) {
   document.getElementById('schedule-edit-view').hidden = name !== 'schedule-edit';
   document.getElementById('mobile-day-tabs').hidden = name !== 'main' || !isMobileView();
   document.getElementById('tab-bar').hidden = !isMobileView();
-  document.getElementById('week-nav').hidden = name !== 'main';
+  document.getElementById('week-nav').hidden = name === 'settings';
   document.getElementById('qaza-btn').hidden = name !== 'main';
   document.getElementById('schedule-btn').hidden = name !== 'main';
   document.getElementById('settings-btn').hidden = name !== 'main';
