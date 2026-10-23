@@ -1,17 +1,19 @@
-const CACHE = 'youplanner-v5';
+const CACHE = 'youplanner-v6';
 const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon.svg',
-  './js/core/bus.js', './js/core/dates.js', './js/core/storage.js',
-  './js/core/dom.js',
   './styles/tokens.css', './styles/layout.css', './styles/buttons.css',
   './styles/table.css', './styles/cells.css', './styles/progress-circle.css',
   './styles/modal.css', './styles/qaza.css', './styles/day-view.css',
   './styles/schedule.css', './styles/sheets.css', './styles/prayer.css',
   './styles/toast.css', './styles/settings.css', './styles/stats.css',
   './styles/habits-edit.css', './styles/mobile.css', './styles/effects.css',
+  './js/app.js',
+  './js/core/bus.js', './js/core/dates.js', './js/core/storage.js', './js/core/dom.js',
   './js/data/storage.js', './js/data/schedule.js', './js/data/habits.js',
-  './js/data/qaza.js', './js/data/prayer.js', './js/data/fast.js',
-  './js/data/sleep.js', './js/data/stats.js', './js/data/sync.js',
-  './js/data/backup.js', './js/data/ui.js'];
+  './js/data/migrations.js', './js/data/records.js', './js/data/qaza.js',
+  './js/data/prayer.js', './js/data/fast.js', './js/data/sleep.js',
+  './js/data/stats.js', './js/data/backup.js', './js/data/ui.js',
+  './js/data/sync.js',
+  './js/sync/state.js', './js/sync/validators.js'];
 
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(ASSETS); }));
@@ -32,11 +34,15 @@ self.addEventListener('fetch', function (e) {
   const url = e.request.url;
   // Синхронизация с Firebase не кэшируется и не задерживается на caches.match
   if (url.indexOf('firebaseio.com') !== -1 || url.indexOf('firebase.google.com') !== -1) return;
-  // HTML — network-first: свежая версия с GitHub важнее кэша
-  if (url.endsWith('.html') || url.endsWith('/')) {
+  // HTML, JS и CSS — network-first: свежий index.html + свежие модули важнее
+  // кэша. До Фазы 3.2 не-HTML отдавался cache-first, и обновление деплоя
+  // давало version-skew: новый HTML подключал старые скрипты из кэша.
+  // Успешный ответ кладётся в кэш и работает офлайн; при офлайне или ошибке
+  // 404/500 в кэш мусор не кладём — отдаётся прежняя рабочая версия.
+  if (url.endsWith('.html') || url.endsWith('/') ||
+      url.endsWith('.js') || url.endsWith('.css')) {
     e.respondWith(
       fetch(e.request).then(function (resp) {
-        // При 404/500 в кэш мусор не кладём: офлайн покажется прежняя рабочая версия
         if (resp && resp.ok) {
           const copy = resp.clone();
           caches.open(CACHE).then(function (c) { c.put(e.request, copy); });

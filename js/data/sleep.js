@@ -1,3 +1,7 @@
+import { bus } from '../core/bus.js';
+import { toISODate } from '../core/dates.js';
+import { pad2 } from '../core/dom.js';
+import { safeSetItem } from '../core/storage.js';
 // Длина одного цикла сна в минутах и потолок расчёта. Циклов шесть:
 // от 90 минут до 9 часов. Раздел живёт по ключу youplanner.sleep и ходит
 // и в синхронизацию, и в файл копии восьмым разделом (§5).
@@ -10,15 +14,15 @@
 // Версия 4 добавила пару realWake/realSleepMin и флаг excluded: во сколько
 // человек встал на самом деле и не выбросить ли день из статистики.
 // Отсутствие пары — признак версии 1 или 3, и это возраст, а не порча
-const SLEEP_KEY = 'youplanner.sleep';
-const SLEEP_VERSION = 4;
+export const SLEEP_KEY = 'youplanner.sleep';
+export const SLEEP_VERSION = 4;
 // Больше суток от засыпания до подъёма быть не может: оба конца лежат
 // на одной ночи. Потолок нужен только для чтения чужой записи
-const SLEEP_MAX_MINUTES = 1440;
-const SLEEP_CYCLE_MIN = 90;
-const SLEEP_CYCLE_COUNT = 6;
+export const SLEEP_MAX_MINUTES = 1440;
+export const SLEEP_CYCLE_MIN = 90;
+export const SLEEP_CYCLE_COUNT = 6;
 // Больше двух часов засыпания в поле не влезает: это уже не засыпание
-const SLEEP_MAX_FALL = 120;
+export const SLEEP_MAX_FALL = 120;
 
 // Среднее по массиву минут от полуночи — точка на циферблате, а не сумма.
 // Время живёт на сутках, и обычное среднее на нём врёт: отбой 23:30 и 00:30
@@ -27,7 +31,7 @@ const SLEEP_MAX_FALL = 120;
 // не сдвигается. Порог — не догадка: отбой вечером, подъём утром, и 18:00
 // лежит между ними. Среднее сворачивается по модулю 1440 — обратно
 // на циферблат. Пустой массив — null: среднего нет
-function sleepAverageMinutes(minutes) {
+export function sleepAverageMinutes(minutes) {
   if (!minutes || minutes.length === 0) return null;
 
   // Только числа: null, undefined и строки сюда не проходят.
@@ -46,20 +50,20 @@ function sleepAverageMinutes(minutes) {
 }
 // 'HH:MM' → минуты от полуночи. Всё прочее, включая '7:30' и '24:00', —
 // null: поле времени браузера даёт ровно такой формат
-function sleepTimeMinutes(text) {
+export function sleepTimeMinutes(text) {
   const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(String(text));
   if (!match) return null;
   return Number(match[1]) * 60 + Number(match[2]);
 }
 // Минуты от полуночи → 'HH:MM'. Значение сворачивается по суткам: конец
 // шестого цикла у позднего отхода уходит на следующий день
-function sleepTimeLabel(minutes) {
+export function sleepTimeLabel(minutes) {
   const day = ((Math.round(minutes) % 1440) + 1440) % 1440;
   return pad2(Math.floor(day / 60)) + ':' + pad2(day % 60);
 }
 // Значение поля «Через сколько заснул» — и оно же поле хранилища: целое
 // 0…120. Пустая строка, дробное, отрицательное и большее потолка — null
-function sleepFallMinutes(value) {
+export function sleepFallMinutes(value) {
   const text = String(value).trim();
   if (!/^\d+$/.test(text)) return null;
   const minutes = Number(text);
@@ -69,7 +73,7 @@ function sleepFallMinutes(value) {
 // отхода — значит следующие сутки, поэтому к нему прибавляется 1440.
 // Сравнивается он с отходом, а не с засыпанием: «встать раньше, чем лёг»
 // и «встать раньше, чем заснул» — разные вещи, и первое и есть смена суток
-function sleepAnchors(bed, fall, wake) {
+export function sleepAnchors(bed, fall, wake) {
   const bedMinutes = sleepTimeMinutes(bed);
   const wakeMinutes = sleepTimeMinutes(wake);
   if (bedMinutes === null || wakeMinutes === null) return null;
@@ -84,7 +88,7 @@ function sleepAnchors(bed, fall, wake) {
 // Концы циклов и рекомендуемый будильник. Время в cycle.time свёрнуто
 // по суткам, а в recommended — нет: слева и справа ищется ближайший
 // по времени, и пара «раньше / позже» должна остаться парой
-function sleepCycleTimes(bed, fall, wake) {
+export function sleepCycleTimes(bed, fall, wake) {
   const anchors = sleepAnchors(bed, fall, wake);
   if (!anchors) return null;
 
@@ -119,7 +123,7 @@ function sleepCycleTimes(bed, fall, wake) {
 // расстоянии побеждает более поздний — «<=» вместо «<» при переборе
 // по возрастанию. Обоснование: встать на сорок минут позже, чем просил,
 // безобиднее, чем оборвать цикл ровно на середине
-function nearestSleepCycle(anchors) {
+export function nearestSleepCycle(anchors) {
   let best = null;
   for (let n = 1; n <= SLEEP_CYCLE_COUNT; n++) {
     const end = anchors.asleepMinutes + n * SLEEP_CYCLE_MIN;
@@ -134,7 +138,7 @@ function nearestSleepCycle(anchors) {
 // ближайший конец цикла. Считается из состояния галочки при каждом рендере:
 // отдельной константы режима нет, второй источник правды не нужен.
 // Возврат свёрнут по суткам — как и всё, что показывается человеку
-function actualWakeTime(bed, fall, wake, followRec) {
+export function actualWakeTime(bed, fall, wake, followRec) {
   const anchors = sleepAnchors(bed, fall, wake);
   if (!anchors) return null;
   if (followRec !== true) return sleepTimeLabel(anchors.wakeMinutes);
@@ -145,7 +149,7 @@ function actualWakeTime(bed, fall, wake, followRec) {
 // засыпания. «Пока», а не «если»: при отходе 23:30 и засыпании 120 минут
 // засыпание (25:30) уже перевалило за полночь, и одного добавления мало —
 // разница ушла бы в минус
-function sleepDurationMinutes(bed, fall, actualWake) {
+export function sleepDurationMinutes(bed, fall, actualWake) {
   const bedMinutes = sleepTimeMinutes(bed);
   const wakeMinutes = sleepTimeMinutes(actualWake);
   if (bedMinutes === null || wakeMinutes === null) return null;
@@ -157,7 +161,7 @@ function sleepDurationMinutes(bed, fall, actualWake) {
   return end - asleepMinutes;
 }
 // «30 мин», «1 ч», «1 ч 30 мин», «9 ч»
-function sleepFormatDuration(minutes) {
+export function sleepFormatDuration(minutes) {
   const total = Math.max(0, Math.round(minutes));
   const hours = Math.floor(total / 60);
   const rest = total % 60;
@@ -166,7 +170,7 @@ function sleepFormatDuration(minutes) {
   return hours + ' ч ' + rest + ' мин';
 }
 // «1 цикл», «4 цикла», «5 циклов»
-function sleepCycleLabel(count) {
+export function sleepCycleLabel(count) {
   const word = count === 1 ? 'цикл' : count >= 2 && count <= 4 ? 'цикла' : 'циклов';
   return count + ' ' + word;
 }
@@ -181,7 +185,7 @@ function sleepCycleLabel(count) {
 // годна: отсутствие пары значит «встал по плану». Половинчатая пара —
 // realWake без длительности или наоборот — отбрасывается: собрать из неё
 // нечего, а день с ней всё равно попал бы в статистику наполовину
-function validSleepHistory(history) {
+export function validSleepHistory(history) {
   if (!Array.isArray(history)) return [];
 
   return history.filter(function (item) {
@@ -211,7 +215,7 @@ function validSleepHistory(history) {
 // при импорте копии, и он разошёлся бы с содержимым истории. Дата — день
 // сохранения формы, тем же toISODate, что и у истории уразы: раздел
 // заполняют перед сном, и она отвечает на вопрос «день, когда лёг»
-function sleepHistoryEntry(history, entry) {
+export function sleepHistoryEntry(history, entry) {
   const entries = Array.isArray(history) ? history.slice() : [];
   for (let i = 0; i < entries.length; i++) {
     if (entries[i] && entries[i].date === entry.date) {
@@ -225,7 +229,7 @@ function sleepHistoryEntry(history, entry) {
 // Чтение с проверкой. null — записей нет: нет ключа, битый JSON, не объект,
 // bed или wake не в виде 'HH:MM', fall не целое 0…120, пара actualWake/sleepMin
 // битая. Ничего не пишет: незаполненный раздел и есть отсутствие ключа
-function loadSleep() {
+export function loadSleep() {
   try {
     const raw = localStorage.getItem(SLEEP_KEY);
     if (!raw) return null;
@@ -303,7 +307,7 @@ function loadSleep() {
 // время из неё и уходит в историю, — поэтому проверяется и это. Отложенная
 // отправка ставится здесь же: запись входит в снимок узла и в файл копии
 // восьмым разделом (§5)
-function saveSleep(sleep) {
+export function saveSleep(sleep) {
   if (!sleep || typeof sleep !== 'object') return;
   if (sleepTimeMinutes(sleep.bed) === null) return;
   if (sleepTimeMinutes(sleep.wake) === null) return;

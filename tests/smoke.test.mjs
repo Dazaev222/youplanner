@@ -14,7 +14,11 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readIndexHtml, getScriptSources, getAppJs } from './helpers/sources.mjs';
+import { existsSync, readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import {
+  readIndexHtml, getEntry, getModuleOrder, getAppJs, stripModuleSyntax,
+} from './helpers/sources.mjs';
 
 const html = readIndexHtml();
 const js = getAppJs();
@@ -25,21 +29,45 @@ const markupIds = new Set(
   [...markup.matchAll(/ id="([^"]+)"/g)].map((m) => m[1]),
 );
 
-test('в index.html есть встроенный скрипт', () => {
-  const inline = getScriptSources().find((s) => s.type === 'inline');
-  assert.ok(inline, 'не найден блок <script>…</script>');
-  assert.ok(inline.code.trim().length > 0, 'инлайн-скрипт пуст');
+test('приложение подключается модулем js/app.js', () => {
+  assert.equal(getEntry(), 'js/app.js',
+    'вход приложения должен быть ES-модулем js/app.js');
+  assert.ok(existsSync(join(process.cwd(), 'js/app.js')) === true ||
+    getModuleOrder().includes('js/app.js'), 'js/app.js не входит в граф модулей');
 });
 
-test('все подключённые файлы скриптов существуют и непустые', () => {
-  const sources = getScriptSources();
-  const files = sources.filter((s) => s.type === 'file');
-  assert.ok(files.length > 0, 'нет ни одного <script src> — данные не подключены');
-  for (const source of files) {
-    assert.ok(source.code.trim().length > 0, `${source.path} пуст`);
-    // каждый файл — отдельный <script> и обязан парситься сам по себе
-    assert.doesNotThrow(() => new Function(source.code),
-      `${source.path}: синтаксическая ошибка`);
+test('граф модулей разрешается, все файлы непустые и валидные', () => {
+  const order = getModuleOrder();
+  assert.ok(order.length >= 20, `граф подозрительно мал: ${order.length} файлов`);
+  for (const file of order) {
+    assert.ok(existsSync(join(process.cwd(), file)), `файл модуля не найден: ${file}`);
+    const code = readFileSync(join(process.cwd(), file), 'utf8');
+    assert.ok(code.trim().length > 0, `${file} пуст`);
+    assert.doesNotThrow(() => new Function(stripModuleSyntax(code)),
+      `${file}: синтаксическая ошибка`);
+  }
+});
+
+test('каждый именованный import находит реальный export', () => {
+  // вырезанный import-синтаксис должен соответствовать настоящим export'ам —
+  // иначе браузер упадёт на загрузке модуля, а конкатенация этого не видит
+  for (const file of getModuleOrder()) {
+    const text = readFileSync(join(process.cwd(), file), 'utf8');
+    const importBlockRe = /^import\s+\{([^}]*)\}\s+from\s+['"]([^'"]+)['"];?\s*$/gm;
+    for (const m of text.matchAll(importBlockRe)) {
+      const names = m[1].split(',').map((s) => s.trim())
+        .filter(Boolean).map((s) => s.split(/\s+as\s+/)[0]);
+      const targetAbs = resolve(dirname(join(process.cwd(), file)), m[2]);
+      assert.ok(existsSync(targetAbs), `${file}: import ${m[2]} не разрешается`);
+      const targetText = readFileSync(targetAbs, 'utf8');
+      const exported = new Set(
+        [...targetText.matchAll(/^export\s+(?:const|let|function)\s+([A-Za-z_$][\w$]*)/gm)]
+          .map((x) => x[1]));
+      for (const name of names) {
+        assert.ok(exported.has(name),
+          `${file}: импорт ${name} из ${m[2]} не экспортирован`);
+      }
+    }
   }
 });
 

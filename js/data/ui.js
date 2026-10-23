@@ -1,16 +1,16 @@
 // Геометрия прогресс-круга: радиус 27, длина окружности 2 * π * 27 ≈ 169.646
-const CIRCLE_RADIUS = 27;
-const CIRCLE_LENGTH = 2 * Math.PI * CIRCLE_RADIUS;
-const CIRCLE_CENTER = 32;
-const CIRCLE_SIZE = 64;
+export const CIRCLE_RADIUS = 27;
+export const CIRCLE_LENGTH = 2 * Math.PI * CIRCLE_RADIUS;
+export const CIRCLE_CENTER = 32;
+export const CIRCLE_SIZE = 64;
 // Месяцы: именительный падеж — для заголовка, родительный — для диапазона дней
-const MONTHS_NOMINATIVE = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
+export const MONTHS_NOMINATIVE = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
   'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
-const MONTHS_GENITIVE = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
+export const MONTHS_GENITIVE = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
   'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
-const MONTHS_SHORT = ['янв', 'фев', 'мар', 'апр', 'май', 'июн',
+export const MONTHS_SHORT = ['янв', 'фев', 'мар', 'апр', 'май', 'июн',
   'июл', 'авг', 'сент', 'окт', 'ноя', 'дек'];
 // Версия приложения для строки в Настройках. Номер живёт здесь, а не в разметке:
 // обновлять его придётся в одном месте.
-const APP_VERSION = '1.0';
-const APP_BUILD = '2026-10-01';
+export const APP_VERSION = '1.0';
+export const APP_BUILD = '2026-10-01';

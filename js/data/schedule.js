@@ -1,8 +1,11 @@
+import { bus } from '../core/bus.js';
+import { safeSetItem } from '../core/storage.js';
+import { STORAGE_KEYS } from './storage.js';
 // Базовое расписание. Хранится по ключу youplanner.schedule: ключа нет в
 // хранилище штатно — человек ещё не редактировал расписание, и loadSchedule()
 // подставляет DEFAULT_SCHEDULE. Редактирование через Настройки — Этап 6.
-const SCHEDULE_TYPES = ['weekday', 'weekend', 'fasting', 'physical'];
-const DEFAULT_SCHEDULE = {
+export const SCHEDULE_TYPES = ['weekday', 'weekend', 'fasting', 'physical'];
+export const DEFAULT_SCHEDULE = {
   weekday: [
     { time: '04:30', text: 'Подъём' },
     { time: '04:45', text: 'Фаджр' },
@@ -86,7 +89,7 @@ const DEFAULT_SCHEDULE = {
 // расписание по умолчанию: DEFAULT_SCHEDULE остаётся отсылкой, пока человек
 // не отредактирует его через Настройки. Копия, а не ссылка: правки
 // из редактора не должны мутировать сам константный список.
-function loadSchedule() {
+export function loadSchedule() {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.schedule);
     if (!raw) return JSON.parse(JSON.stringify(DEFAULT_SCHEDULE));
@@ -101,7 +104,7 @@ function loadSchedule() {
 }
 // Запись расписания. Как saveHabits: safeSetItem с тостом на переполнение,
 // при успехе — отложенная отправка и boolean для вызывающего кода.
-function saveSchedule(schedule) {
+export function saveSchedule(schedule) {
   if (!safeSetItem(STORAGE_KEYS.schedule, JSON.stringify(schedule))) return false;
   bus.emit('data:changed');
   return true;

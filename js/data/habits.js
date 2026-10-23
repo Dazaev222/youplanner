@@ -1,5 +1,9 @@
+import { bus } from '../core/bus.js';
+import { safeSetItem } from '../core/storage.js';
+import { loadRecords, saveRecords } from './records.js';
+import { STORAGE_KEYS } from './storage.js';
 // 12 привычек по умолчанию (порядок и значения — из спеки, п.5)
-const DEFAULT_HABITS = [
+export const DEFAULT_HABITS = [
   { id: 'h1', name: 'Фаджр', type: 'boolean', unit: '', goal: null },
   { id: 'h2', name: 'Зухр', type: 'boolean', unit: '', goal: null },
   { id: 'h3', name: 'Аср', type: 'boolean', unit: '', goal: null },
@@ -15,41 +19,12 @@ const DEFAULT_HABITS = [
   { id: 'h11', name: 'Таблицы', type: 'boolean', unit: '', goal: null },
   { id: 'h12', name: 'Пресс', type: 'choice', unit: '', goal: null, time: null },
 ];
-// Привычки с уровнями: у них запись — объект { value, level }, а у привычки
-// есть необязательное время time (§1.1). Id из спеки трекера, как у каза.
-const SPORT_HABIT_ID = 'h7';
-const QURAN_HABIT_ID = 'h8';
-const PRESS_HABIT_ID = 'h12';
-// Уровни выполнения записи
-const LEVEL_ON_TIME = 'on-time';
-const LEVEL_LATE = 'late';
-const LEVEL_TWO_MIN = 'two-min';
-// Окно «вовремя» — ±60 минут от назначенного времени (§1.6)
-const LEVEL_WINDOW_MIN = 60;
-// Варианты привычек «Спорт» и «Пресс»: «да», «нет», «2 минуты», «отдых» (§3.1).
-// «Отдых» — запланированный пропуск: уровня у него нет, серию он не рвёт
-// и в прогресс не входит.
-const SPORT_VALUES = ['yes', 'no', 'two-min', 'rest'];
-const SPORT_VALUE_LABELS = {
-  'yes': 'да',
-  'no': 'нет',
-  'two-min': '2 минуты',
-  'rest': 'отдых',
-};
-// Коды прежней схемы. «Частично» убрано из списка, но в записях его
-// достаточно, и оно читается как «2 минуты» (§3.2).
-const SPORT_LEGACY_VALUES = {
-  'да': 'yes',
-  'нет': 'no',
-  'частично': 'two-min',
-  'отдых': 'rest',
-};
 // Варианты значения для привычек типа choice (пустая опция = «нет записи»).
 // Коды привычек с уровнями лежат в SPORT_VALUES рядом с уровнями: у Спорта
 // и Пресса список свой, и «частично» в нём больше нет (§3.1).
-const CHOICE_OPTIONS = ['да', 'нет', 'частично', 'отдых'];
+export const CHOICE_OPTIONS = ['да', 'нет', 'частично', 'отдых'];
 // Доступные типы привычек для формы
-const HABIT_TYPES = [
+export const HABIT_TYPES = [
   { value: 'boolean', label: 'Да / Нет' },
   { value: 'number', label: 'Число' },
   { value: 'choice', label: 'Выбор' },
@@ -58,7 +33,7 @@ const HABIT_TYPES = [
 // Копия привычки по умолчанию по id. Копия, а не ссылка на элемент
 // DEFAULT_HABITS: записанное в localStorage не должно править сам список.
 // Ключ time переносится только если он у привычки есть вовсе.
-function defaultHabit(id) {
+export function defaultHabit(id) {
   for (let i = 0; i < DEFAULT_HABITS.length; i++) {
     const h = DEFAULT_HABITS[i];
     if (h.id !== id) continue;
@@ -72,7 +47,7 @@ function defaultHabit(id) {
 // пустой список и битый JSON читаются одинаково — как «привычек нет».
 // Дефолты здесь не пишутся: пустое хранилище значит «ещё не знаем», а не
 // «привычек нет», и засевает его init после подтверждённой сверки (§13).
-function loadHabits() {
+export function loadHabits() {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.habits);
     if (!raw) return [];
@@ -83,13 +58,13 @@ function loadHabits() {
     return [];
   }
 }
-function saveHabits(habits) {
+export function saveHabits(habits) {
   if (!safeSetItem(STORAGE_KEYS.habits, JSON.stringify(habits))) return false;
   bus.emit('data:changed');
   return true;
 }
 // Есть ли хотя бы одна запись у привычки
-function hasRecords(habitId) {
+export function hasRecords(habitId) {
   const records = loadRecords();
   const dates = Object.keys(records);
   for (let i = 0; i < dates.length; i++) {
@@ -98,7 +73,7 @@ function hasRecords(habitId) {
   return false;
 }
 // Добавляет привычку, id генерируется автоматически
-function addHabit(habit) {
+export function addHabit(habit) {
   const habits = loadHabits();
   const newHabit = {
     id: 'h' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7),
@@ -115,7 +90,7 @@ function addHabit(habit) {
   return newHabit;
 }
 // Меняет поля привычки. Неизвестный id → null. id менять нельзя.
-function updateHabit(id, patch) {
+export function updateHabit(id, patch) {
   const habits = loadHabits();
   for (let i = 0; i < habits.length; i++) {
     if (habits[i].id !== id) continue;
@@ -129,7 +104,7 @@ function updateHabit(id, patch) {
 // Удаляет привычку и вычищает все её значения из записей.
 // true — только если сохранены и привычки, и записи; при провале записи
 // привычек на диске пробуем вернуть список как был (best-effort).
-function removeHabit(id) {
+export function removeHabit(id) {
   const habitsSnapshot = JSON.parse(JSON.stringify(loadHabits()));
   const habits = habitsSnapshot.filter(function (h) { return h.id !== id; });
   // Глубокая копия снимка: filter выше даёт новый массив, но объекты привычек

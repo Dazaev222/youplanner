@@ -1,5 +1,5 @@
 // Ключи localStorage
-const STORAGE_KEYS = {
+export const STORAGE_KEYS = {
   habits: 'youplanner.habits',
   records: 'youplanner.records',
   // Ключ снятого раздела задач: нужен только миграции migrateDropTasks(),

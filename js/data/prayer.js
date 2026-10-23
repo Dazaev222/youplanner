@@ -1,54 +1,56 @@
+import { bus } from '../core/bus.js';
+import { safeSetItem } from '../core/storage.js';
 // Координаты и мазхаб живут одним ключом и ходят на сервер одним разделом,
 // как каза. Ключа нет — координаты не заданы: это и есть первый
 // запуск, по нему показывается приветственный экран.
-const PRAYER_KEY = 'youplanner.prayer';
+export const PRAYER_KEY = 'youplanner.prayer';
 // Часовой пояс расчёта. Расписание ДУМ ЧР публикуется по московскому времени,
 // перевода часов в России нет, поэтому пояс задан числом и от настроек
 // устройства не зависит: иначе у телефона в другом поясе времена уехали бы.
-const PRAYER_TZ = 3;
+export const PRAYER_TZ = 3;
 // Мазхаб влияет только на Аср: во сколько раз тень предмета должна превысить
 // его высоту. Ханафитский — ×2, шафиитский — ×1, как в методе ДУМ ЧР (§11q).
-const PRAYER_SHADOW = { shafi: 1, hanafi: 2 };
-const PRAYER_MADHHABS = ['shafi', 'hanafi'];
-const PRAYER_MADHHAB_LABELS = { shafi: 'Шафиитский', hanafi: 'Ханафитский' };
+export const PRAYER_SHADOW = { shafi: 1, hanafi: 2 };
+export const PRAYER_MADHHABS = ['shafi', 'hanafi'];
+export const PRAYER_MADHHAB_LABELS = { shafi: 'Шафиитский', hanafi: 'Ханафитский' };
 // Метод расчёта. Отличаются только Зухром: ДУМ ЧР закрепляет его на 12:30
 // круглый год, астрономический берёт истинный солнечный полдень.
-const PRAYER_METHODS = ['dum-chr', 'astro'];
-const PRAYER_METHOD_LABELS = { 'dum-chr': 'ДУМ ЧР', astro: 'Астрономический' };
-const PRAYER_METHOD_DEFAULT = 'dum-chr';
+export const PRAYER_METHODS = ['dum-chr', 'astro'];
+export const PRAYER_METHOD_LABELS = { 'dum-chr': 'ДУМ ЧР', astro: 'Астрономический' };
+export const PRAYER_METHOD_DEFAULT = 'dum-chr';
 // Порядок времён в списке. Восход — не намаз, но он строка списка и участвует
 // в «следующем»: пользователь видит его время и ждёт его появления.
-const PRAYER_ORDER = ['fajr', 'sunrise', 'dhuhr', 'asr', 'maghrib', 'isha'];
-const PRAYER_LABELS = {
+export const PRAYER_ORDER = ['fajr', 'sunrise', 'dhuhr', 'asr', 'maghrib', 'isha'];
+export const PRAYER_LABELS = {
   fajr: 'Фаджр', sunrise: 'Восход', dhuhr: 'Зухр',
   asr: 'Аср', maghrib: 'Магриб', isha: 'Иша',
 };
 // Окна намазов: [начало, конец). Восход окна не имеет — это не намаз, а
 // граница утреннего. Иша тянется до полуночи: её продолжение после 00:00
 // принадлежит уже следующему дню, и экран за него не отвечает.
-const PRAYER_WINDOWS = [
+export const PRAYER_WINDOWS = [
   ['fajr', 'sunrise'], ['dhuhr', 'asr'], ['asr', 'maghrib'],
   ['maghrib', 'isha'], ['isha', null],
 ];
 // Углы метода ДУМ ЧР: Фаджр — 16° под горизонтом, Иша — 15°.
-const PRAYER_FAJR_ANGLE = 16;
-const PRAYER_ISHA_ANGLE = 15;
+export const PRAYER_FAJR_ANGLE = 16;
+export const PRAYER_ISHA_ANGLE = 15;
 // Восход и закат: 0,833° — высота с учётом рефракции и радиуса диска
-const PRAYER_HORIZON_ANGLE = 0.833;
+export const PRAYER_HORIZON_ANGLE = 0.833;
 // Зухр метода ДУМ ЧР: закреплён на 12:30 круглый год, а не солнечный полдень.
 // Постоянных правок в минутах нет и не нужно: чистый расчёт с этими углами
 // и тенью ×1 совпадает с эталоном ДУМ ЧР на весь сентябрь 2026 в пределах
 // минуты (§11q, §13).
-const PRAYER_DHUHR_FIXED = 12 * 60 + 30;
+export const PRAYER_DHUHR_FIXED = 12 * 60 + 30;
 
-function prayerRad(deg) { return deg * Math.PI / 180; }
-function prayerDeg(rad) { return rad * 180 / Math.PI; }
+export function prayerRad(deg) { return deg * Math.PI / 180; }
+export function prayerDeg(rad) { return rad * 180 / Math.PI; }
 // Угол в [0, 360)
-function prayerFixAngle(a) { return a - 360 * Math.floor(a / 360); }
+export function prayerFixAngle(a) { return a - 360 * Math.floor(a / 360); }
 // Час в [0, 24)
-function prayerFixHour(a) { return a - 24 * Math.floor(a / 24); }
+export function prayerFixHour(a) { return a - 24 * Math.floor(a / 24); }
 // Юлианский день на 00:00 UTC указанной даты
-function prayerJulian(iso) {
+export function prayerJulian(iso) {
   const parts = String(iso).split('-');
   let year = Number(parts[0]);
   let month = Number(parts[1]);
@@ -60,7 +62,7 @@ function prayerJulian(iso) {
     day + b - 1524.5;
 }
 // Склонение Солнца (градусы) и уравнение времени (часы) — стандартные ряды
-function prayerSun(jd) {
+export function prayerSun(jd) {
   const d = jd - 2451545.0;
   const g = prayerFixAngle(357.529 + 0.98560028 * d);
   const q = prayerFixAngle(280.459 + 0.98564736 * d);
@@ -80,7 +82,7 @@ function prayerSun(jd) {
 // под горизонт, и выдумывать вместо этого нечего.
 // method — метод расчёта; неизвестный читается как метод по умолчанию, чтобы
 // старый ключ без поля не ронял экран.
-function prayerTimes(iso, lat, lng, madhhab, method) {
+export function prayerTimes(iso, lat, lng, madhhab, method) {
   if (!/^\d{4}-\d{2}-\d{2}$/.test(String(iso))) return null;
   if (!isFinite(lat) || !isFinite(lng)) return null;
   if (lat < -89.8 || lat > 89.8 || lng < -180 || lng > 180) return null;
@@ -159,22 +161,22 @@ function prayerTimes(iso, lat, lng, madhhab, method) {
 }
 // Дата по UTC+3 в формате 'YYYY-MM-DD'. Именно пояс расчёта, а не пояс
 // устройства: времена намазов не должны зависеть от того, где сейчас телефон.
-function prayerDateISO(date) {
+export function prayerDateISO(date) {
   return new Date(date.getTime() + PRAYER_TZ * 3600000).toISOString().slice(0, 10);
 }
 // Минуты от полуночи UTC+3
-function prayerMinutes(date) {
+export function prayerMinutes(date) {
   const shifted = new Date(date.getTime() + PRAYER_TZ * 3600000);
   return shifted.getUTCHours() * 60 + shifted.getUTCMinutes() +
     shifted.getUTCSeconds() / 60 + shifted.getUTCMilliseconds() / 60000;
 }
 // Пять знаков после запятой — столько же даёт геолокация
-function prayerRound(value) {
+export function prayerRound(value) {
   return Math.round(value * 100000) / 100000;
 }
 // Чтение с проверкой: битый ключ читается как «координат нет», а не роняет
 // расчёт. Мазхаб вне списка — шафиитский.
-function loadPrayer() {
+export function loadPrayer() {
   try {
     const raw = localStorage.getItem(PRAYER_KEY);
     if (!raw) return null;
@@ -202,7 +204,7 @@ function loadPrayer() {
   }
 }
 // Раздел уходит наверх тем же отложенным PUT, что привычки и каза
-function savePrayer(prayer) {
+export function savePrayer(prayer) {
   const lat = Number(prayer && prayer.lat);
   const lng = Number(prayer && prayer.lng);
   if (!isFinite(lat) || !isFinite(lng)) return;

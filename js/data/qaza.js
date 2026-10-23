@@ -1,12 +1,18 @@
-const QAZA_STORAGE_KEY = 'youplanner.qaza';
+import { bus } from '../core/bus.js';
+import { addDays, toISODate } from '../core/dates.js';
+import { safeSetItem } from '../core/storage.js';
+import { loadPrayer, prayerDateISO, prayerMinutes, prayerTimes } from './prayer.js';
+import { getRecord, setRecord } from './records.js';
+import { saveNormalized } from '../sync/state.js';
+export const QAZA_STORAGE_KEY = 'youplanner.qaza';
 // Привычка, которая показывает счётчик каза за день. Id из спеки трекера:
 // дефолтные привычки имеют стабильные id h1…h12.
-const QAZA_HABIT_ID = 'h6';
+export const QAZA_HABIT_ID = 'h6';
 // Дневная цель — ориентир, а не жёсткий лимит
-const QAZA_DAILY_GOAL = 3;
+export const QAZA_DAILY_GOAL = 3;
 // Порядок обхода очереди: Фаджр → Зухр → Аср → Магриб → Иша → снова Фаджр
-const NAMAZ_ORDER = ['fajr', 'zuhr', 'asr', 'maghrib', 'isha'];
-const NAMAZ_LABELS = {
+export const NAMAZ_ORDER = ['fajr', 'zuhr', 'asr', 'maghrib', 'isha'];
+export const NAMAZ_LABELS = {
   fajr: 'Фаджр',
   zuhr: 'Зухр',
   asr: 'Аср',
@@ -16,17 +22,17 @@ const NAMAZ_LABELS = {
 // Версия схемы состояния. 2 — стартовый курсор перестал быть жёстким нулём
 // и задаётся вручную в блоке «Откуда продолжаем?».
 // 3 — запись истории получила поле source (обычное выполнение или ручное добавление).
-const QAZA_VERSION = 3;
+export const QAZA_VERSION = 3;
 // Источник записи в истории. Ручные записи не считаются выполнением:
 // они увеличивают остаток, но не счётчик каза за день.
-const QAZA_SOURCE_DONE = 'done';
-const QAZA_SOURCE_MANUAL = 'manual';
+export const QAZA_SOURCE_DONE = 'done';
+export const QAZA_SOURCE_MANUAL = 'manual';
 // Магриб (индекс 3) — откуда продолжается очередь при начальных данных:
 // сегодня уже выполнены Фаджр, Магриб и Иша.
-const QAZA_DEFAULT_CURSOR = 3;
+export const QAZA_DEFAULT_CURSOR = 3;
 // Начальные данные: 1530 каза, по 306 на намаз. Сегодня уже выполнены
 // Фаджр, Магриб и Иша, поэтому у них 305.
-const DEFAULT_QAZA = {
+export const DEFAULT_QAZA = {
   version: QAZA_VERSION,
   cursor: QAZA_DEFAULT_CURSOR,
   remaining: { fajr: 305, zuhr: 306, asr: 306, maghrib: 305, isha: 305 },
@@ -34,13 +40,13 @@ const DEFAULT_QAZA = {
 };
 // Ключ растущего журнала выполнений — сосед youplanner.qaza, но не его
 // часть: там стек отмены за сегодня, здесь история на годы (§5).
-const QAZA_LOG_KEY = 'youplanner.qaza.log';
+export const QAZA_LOG_KEY = 'youplanner.qaza.log';
 // Версия схемы журнала. 1 — записи с полем source, как у истории уразы (§5).
-const QAZA_LOG_VERSION = 1;
+export const QAZA_LOG_VERSION = 1;
 
 // Копия состояния каза с проверкой типов. Возвращает новые объекты,
 // чтобы правки никогда не задели константу DEFAULT_QAZA.
-function copyQaza(source) {
+export function copyQaza(source) {
   const remaining = {};
   for (let i = 0; i < NAMAZ_ORDER.length; i++) {
     const key = NAMAZ_ORDER[i];
@@ -71,7 +77,7 @@ function copyQaza(source) {
 }
 // Следующий по кругу индекс с ненулевым остатком. Поиск начинается с from + 1,
 // сам from не проверяется. Если ненулевых нет вовсе — возвращается from.
-function nextQazaIndex(qaza, from) {
+export function nextQazaIndex(qaza, from) {
   const total = NAMAZ_ORDER.length;
   for (let step = 1; step <= total; step++) {
     const index = (from + step) % total;
@@ -82,14 +88,14 @@ function nextQazaIndex(qaza, from) {
 // Инвариант очереди: курсор обязан указывать на намаз с остатком > 0.
 // Если остаток на текущем стал нулём, курсор сдвигается к следующему
 // ненулевому по кругу; при полностью пустой очереди остаётся на месте.
-function normalizeQazaCursor(qaza) {
+export function normalizeQazaCursor(qaza) {
   if (qaza.remaining[NAMAZ_ORDER[qaza.cursor]] === 0) {
     qaza.cursor = nextQazaIndex(qaza, qaza.cursor);
   }
 }
 // План на сегодня: до трёх намазов по кругу от курсора, нулевые пропускаются.
 // Нигде не сохраняется — считается заново на каждый рендер.
-function getQazaPlan(qaza) {
+export function getQazaPlan(qaza) {
   const total = NAMAZ_ORDER.length;
   const plan = [];
   for (let step = 0; step < total && plan.length < QAZA_DAILY_GOAL; step++) {
@@ -99,7 +105,7 @@ function getQazaPlan(qaza) {
   return plan;
 }
 // Сумма остатков по всем пяти намазам
-function qazaTotalRemaining(qaza) {
+export function qazaTotalRemaining(qaza) {
   let sum = 0;
   for (let i = 0; i < NAMAZ_ORDER.length; i++) {
     sum += qaza.remaining[NAMAZ_ORDER[i]];
@@ -109,7 +115,7 @@ function qazaTotalRemaining(qaza) {
 // Состояние каза. При отсутствии ключа или битом JSON пишет начальные данные.
 // История обрезается до сегодняшнего дня: стек нужен только для отмены,
 // поэтому он не растёт бесконечно.
-function loadQaza(skipSave = false) {
+export function loadQaza(skipSave = false) {
   // День каза: до Фаджра это ещё вчера, поэтому и журнал хранит вчерашние
   // записи — иначе выполнение, сделанное ночью, нечем было бы отменить (§7)
   const today = kazaDayFor(new Date());
@@ -147,13 +153,13 @@ function loadQaza(skipSave = false) {
     return fresh;
   }
 }
-function saveQaza(qaza) {
+export function saveQaza(qaza) {
   if (!safeSetItem(QAZA_STORAGE_KEY, JSON.stringify(qaza))) return false;
   bus.emit('data:changed');
   return true;
 }
 // Календарный день 'YYYY-MM-DD' — и у since, и у даты записи
-function validQazaLogDate(value) {
+export function validQazaLogDate(value) {
   return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
 }
 // Чистка записей журнала. Правило то же, что у истории уразы
@@ -161,7 +167,7 @@ function validQazaLogDate(value) {
 // 'YYYY-MM-DD', известным намазом и известным источником. Битые записи
 // отбрасываются молча: журнал растёт годами, и одна испорченная строка
 // не должна ронять статистику
-function validQazaLogEntries(entries) {
+export function validQazaLogEntries(entries) {
   if (!Array.isArray(entries)) return [];
 
   return entries.filter(function (item) {
@@ -175,7 +181,7 @@ function validQazaLogEntries(entries) {
 // битый JSON, не объект, since не дата или entries не массив. Записи при
 // чтении чистятся, а не отклоняются: из-за одной битой строки журнал
 // не теряется (§5). Как loadFast(), ничего не пишет.
-function loadQazaLog() {
+export function loadQazaLog() {
   try {
     const raw = localStorage.getItem(QAZA_LOG_KEY);
     if (!raw) return null;
@@ -195,7 +201,7 @@ function loadQazaLog() {
 }
 // Запись ключа. Журнал не чистится по датам и не обрезается: ограничения
 // размера нет, как у истории уразы (§5).
-function saveQazaLog(log) {
+export function saveQazaLog(log) {
   if (!log || !validQazaLogDate(log.since)) return;
 
   if (!safeSetItem(QAZA_LOG_KEY, JSON.stringify({
@@ -208,7 +214,7 @@ function saveQazaLog(log) {
 }
 // Одно событие в журнал. Журнала нет — он заводится с since по дате первой
 // записи: за дни до неё статистика читает h6, за неё и позже — журнал (§5).
-function appendQazaLog(namaz, date, source) {
+export function appendQazaLog(namaz, date, source) {
   if (NAMAZ_ORDER.indexOf(namaz) === -1) return false;
   if (source !== QAZA_SOURCE_DONE && source !== QAZA_SOURCE_MANUAL) return false;
   if (!validQazaLogDate(date)) return false;
@@ -224,7 +230,7 @@ function appendQazaLog(namaz, date, source) {
 // в статистике дня. Ищется с конца — тем же порядком, каким записи
 // добавлялись. Журнала нет или записи в нём нет (она старше since) —
 // ничего не делается.
-function dropLastQazaLog(namaz, date, source) {
+export function dropLastQazaLog(namaz, date, source) {
   const log = loadQazaLog();
   // Журнала или подходящей записи нет — снимать нечего, это не ошибка записи.
   if (!log) return true;
@@ -243,7 +249,7 @@ function dropLastQazaLog(namaz, date, source) {
 // Ручные добавления пропусков не считаются: намаз не выполнен, а вспомнен
 // (§6.6). Возвращается карта «день → число», а не поиск по журналу на каждый
 // день периода: на окне в 365 дней это был бы квадрат (§11y)
-function qazaLogDoneByDay(log) {
+export function qazaLogDoneByDay(log) {
   const byDay = {};
   if (!log || !Array.isArray(log.entries)) return byDay;
 
@@ -258,7 +264,7 @@ function qazaLogDoneByDay(log) {
 // стека: если страница открыта через полночь, в журнале остаются записи прошлого
 // дня, и длина стека дала бы завышенный счётчик.
 // Ручные добавления пропусков в счётчик не входят: намаз не выполнен, а вспомнен.
-function qazaDoneCount(qaza, date) {
+export function qazaDoneCount(qaza, date) {
   let count = 0;
   for (let i = 0; i < qaza.history.length; i++) {
     const entry = qaza.history[i];
@@ -272,7 +278,7 @@ function qazaDoneCount(qaza, date) {
 // Начало дня каза в минутах от полуночи (§5): намаз, сделанный до Фаджра,
 // относится к предыдущему дню. Фаджр берётся из prayerTimes() по текущим
 // координатам; координат нет или расчёт не удался — 05:00 UTC+3.
-function kazaDayBoundary(now) {
+export function kazaDayBoundary(now) {
   const FALLBACK = 5 * 60;
 
   const prayer = loadPrayer();
@@ -293,13 +299,13 @@ function kazaDayBoundary(now) {
 // вчерашний день: ночью человек завершает вчерашний намаз, а не сегодняшний.
 // Часы сверяются по UTC+3 — тому же поясу, в котором считает prayerTimes(),
 // а ключ дня берётся общим toISODate, как у остальных записей.
-function kazaDayFor(now) {
+export function kazaDayFor(now) {
   const minutes = prayerMinutes(now);
   return minutes >= kazaDayBoundary(now)
     ? toISODate(now)
     : toISODate(addDays(now, -1));
 }
-function markQazaDone(qaza, today) {
+export function markQazaDone(qaza, today) {
   const key = NAMAZ_ORDER[qaza.cursor];
   if (!key || qaza.remaining[key] <= 0) return false;
 
@@ -341,7 +347,7 @@ function markQazaDone(qaza, today) {
 // Ручное добавление пропущенного намаза: «вспомнил, что не сделал».
 // Остаток растёт, а счётчик дня и курсор очереди остаются на месте —
 // очередь продолжается с того намаза, на котором стояла.
-function addMissedQaza(qaza, key, today) {
+export function addMissedQaza(qaza, key, today) {
   if (NAMAZ_ORDER.indexOf(key) === -1) return false;
 
   const snapshot = JSON.parse(JSON.stringify(qaza));
@@ -385,7 +391,7 @@ function addMissedQaza(qaza, key, today) {
 // Запись журнала снимается вместе со стековой: журнал — второй свидетель
 // того же события, и без снятия отменённое выполнение осталось бы в статистике
 // дня навсегда (§5).
-function undoQazaDone(qaza, today) {
+export function undoQazaDone(qaza, today) {
   if (qaza.history.length === 0) return false;
 
   const last = qaza.history[qaza.history.length - 1];

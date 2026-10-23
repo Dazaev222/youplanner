@@ -1,15 +1,48 @@
+import { bus } from '../core/bus.js';
+import { addDays, toISODate } from '../core/dates.js';
+import { safeSetItem } from '../core/storage.js';
+import { STORAGE_KEYS } from './storage.js';
+// Привычки с уровнями: у них запись — объект { value, level }, а у привычки
+// есть необязательное время time (§1.1). Id из спеки трекера, как у каза.
+export const SPORT_HABIT_ID = 'h7';
+export const QURAN_HABIT_ID = 'h8';
+export const PRESS_HABIT_ID = 'h12';
+// Уровни выполнения записи
+export const LEVEL_ON_TIME = 'on-time';
+export const LEVEL_LATE = 'late';
+export const LEVEL_TWO_MIN = 'two-min';
+// Окно «вовремя» — ±60 минут от назначенного времени (§1.6)
+export const LEVEL_WINDOW_MIN = 60;
+// Варианты привычек «Спорт» и «Пресс»: «да», «нет», «2 минуты», «отдых» (§3.1).
+// «Отдых» — запланированный пропуск: уровня у него нет, серию он не рвёт
+// и в прогресс не входит.
+export const SPORT_VALUES = ['yes', 'no', 'two-min', 'rest'];
+export const SPORT_VALUE_LABELS = {
+  'yes': 'да',
+  'no': 'нет',
+  'two-min': '2 минуты',
+  'rest': 'отдых',
+};
+// Коды прежней схемы. «Частично» убрано из списка, но в записях его
+// достаточно, и оно читается как «2 минуты» (§3.2).
+export const SPORT_LEGACY_VALUES = {
+  'да': 'yes',
+  'нет': 'no',
+  'частично': 'two-min',
+  'отдых': 'rest',
+};
 
 
 // Кэш записей: null — «ещё не загружено», {} — валидное «записей нет».
-let recordsCache = null;
-function invalidateRecordsCache() {
+export let recordsCache = null;
+export function invalidateRecordsCache() {
   recordsCache = null;
 }
 // Возвращает объект записей. Битый JSON или не-объект → пустой объект.
 // Возвращает общий кэш-объект. Мутирующие пути (setRecord, removeHabit)
 // опираются на то, что это тот же объект, что потом уходит в saveRecords.
 // Наружу этот объект не передавай и не мутируй без отката.
-function loadRecords() {
+export function loadRecords() {
   if (recordsCache !== null) return recordsCache;
 
   try {
@@ -33,13 +66,13 @@ function loadRecords() {
 // write-through: после успешной записи кэш — тот же объект,
 // что лёг на диск. При провале вызывающий (setRecord/removeHabit) откатит
 // его in-place; кэш трогать нельзя, иначе откат разойдётся с кэшем.
-function saveRecords(records) {
+export function saveRecords(records) {
   const ok = safeSetItem(STORAGE_KEYS.records, JSON.stringify(records));
   if (ok) recordsCache = records;
   return ok;
 }
 // Значение привычки в конкретный день или undefined, если записи нет
-function getRecord(date, habitId) {
+export function getRecord(date, habitId) {
   const records = loadRecords();
   const day = records[date];
   if (!day) return undefined;
@@ -47,7 +80,7 @@ function getRecord(date, habitId) {
 }
 // Запись значения. undefined/null/'' — удаление записи.
 // Значения 0 и false значимы и сохраняются.
-function setRecord(date, habitId, value) {
+export function setRecord(date, habitId, value) {
   const records = loadRecords();
   const dayExisted = Object.prototype.hasOwnProperty.call(records, date);
   const daySnapshot = dayExisted ? JSON.parse(JSON.stringify(records[date])) : null;
@@ -77,22 +110,22 @@ function setRecord(date, habitId, value) {
   return true;
 }
 // Спорт и Пресс — привычки типа choice со своим списком кодов вместо общего
-function isChoiceLevelHabit(habitId) {
+export function isChoiceLevelHabit(habitId) {
   return habitId === SPORT_HABIT_ID || habitId === PRESS_HABIT_ID;
 }
 // Есть ли у привычки уровни
-function isLevelHabit(habitId) {
+export function isLevelHabit(habitId) {
   return isChoiceLevelHabit(habitId) || habitId === QURAN_HABIT_ID;
 }
 // У кого есть попап уровня. Только у Корана: у Спорта «2 минуты» уже стоят
 // пунктом в самом списке, и второй способ задать тот же уровень не нужен (§11r).
-function hasLevelPopup(habitId) {
+export function hasLevelPopup(habitId) {
   return habitId === QURAN_HABIT_ID;
 }
 // Приводит запись к виду { value, level }. Старые записи — скаляр (число
 // страниц или строка варианта) — читаются как { value: оно, level: null };
 // перезапись в localStorage при чтении не делается. null — записи нет.
-function normalizeEntry(habitId, raw) {
+export function normalizeEntry(habitId, raw) {
   if (raw === undefined || raw === null || raw === '') return null;
 
   if (typeof raw === 'object' && !Array.isArray(raw)) {
@@ -112,19 +145,19 @@ function normalizeEntry(habitId, raw) {
 }
 // Запись в виде { value, level } или null. У привычек без уровней запись
 // остаётся скаляром и просто оборачивается.
-function getEntry(date, habitId) {
+export function getEntry(date, habitId) {
   const raw = getRecord(date, habitId);
   if (raw === undefined) return null;
   if (!isLevelHabit(habitId)) return { value: raw, level: null };
   return normalizeEntry(habitId, raw);
 }
 // Значение записи без уровня — то, что показывает поле отметки
-function recordValue(date, habitId) {
+export function recordValue(date, habitId) {
   const entry = getEntry(date, habitId);
   return entry ? entry.value : undefined;
 }
 // 'HH:MM' → минуты от полуночи; null, если строка не время
-function habitTimeMinutes(time) {
+export function habitTimeMinutes(time) {
   if (typeof time !== 'string') return null;
   const match = /^(\d{1,2}):(\d{2})$/.exec(time);
   if (!match) return null;
@@ -136,7 +169,7 @@ function habitTimeMinutes(time) {
 // Уровень по времени отметки: 'on-time' — в окне ±60 минут от назначенного,
 // 'late' — вне окна, null — время у привычки не задано (§1.6). При null
 // граница поля не красится вовсе.
-function habitLevelByTime(habit, now) {
+export function habitLevelByTime(habit, now) {
   if (!habit || habit.time === null || habit.time === undefined) return null;
   const plan = habitTimeMinutes(habit.time);
   if (plan === null) return null;
@@ -155,7 +188,7 @@ function habitLevelByTime(habit, now) {
 // это ещё вчера: окно вокруг назначенного момента переходит через полночь.
 // Правило смотрит только на сегодняшнюю колонку: день, выбранный руками,
 // человек выбрал осознанно.
-function habitMarkDate(habit, date, now) {
+export function habitMarkDate(habit, date, now) {
   if (!habit || !isLevelHabit(habit.id)) return date;
   if (date !== toISODate(now)) return date;
 
@@ -174,7 +207,7 @@ function habitMarkDate(habit, date, now) {
 // у Спорта выполнением считается только ответ «да» — «нет» и «отдых»
 // уровнем не отмечаются, а у Корана и «да» он выводится из времени
 // отметки и бывает пустым, когда время у привычки не задано (§1.6).
-function defaultLevel(habit, value) {
+export function defaultLevel(habit, value) {
   if (value === LEVEL_TWO_MIN) return LEVEL_TWO_MIN;
   if (isChoiceLevelHabit(habit.id) && value !== 'yes') return null;
   return habitLevelByTime(habit, new Date());
@@ -183,7 +216,7 @@ function defaultLevel(habit, value) {
 // вместе с ней уходит и уровень. Объектную запись получают только привычки
 // с уровнями: у остальных значение остаётся скаляром, как было, — иначе
 // чужая схема разошлась бы с уже сохранёнными записями.
-function writeHabitEntry(habit, date, value, level) {
+export function writeHabitEntry(habit, date, value, level) {
   if (!habit) return false;
   if (value === undefined || !isLevelHabit(habit.id)) {
     if (!setRecord(date, habit.id, value)) return false;
@@ -196,7 +229,7 @@ function writeHabitEntry(habit, date, value, level) {
 // База — все дни периода, включая пустые: непроставленный день даёт 0.
 // Знаменатель обрезается до первой записи: пользователь видит прогресс за
 // тот период, когда реально вёл привычку, а не за весь календарь.
-function calcProgress(habit, dates) {
+export function calcProgress(habit, dates) {
   if (!dates || dates.length === 0) return 0;
 
   // Веса вариантов ответа для типа "choice". Коды Спорта и Пресса и русские
