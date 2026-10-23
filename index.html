@@ -2957,6 +2957,195 @@ body.view-stats #header-actions {
   }
 }
 
+/* === Liquid Glass: финальные переопределения (таб-бар, переключатели, drawer) === */
+
+#tab-bar {
+  position: fixed;
+  left: 20px;
+  right: 20px;
+  bottom: calc(20px + env(safe-area-inset-bottom, 0px));
+  width: auto;
+  height: 64px;
+  box-sizing: border-box;
+  display: flex;
+  align-items: center;
+  justify-content: space-around;
+  padding: 0 12px;
+  border: none;
+  border-radius: 32px;
+  background: #FFFFFF !important;
+  box-shadow: 0 -2px 16px rgba(0, 0, 0, 0.08), 0 4px 24px rgba(0, 0, 0, 0.06);
+  z-index: 1000;
+}
+
+#tab-bar[hidden] {
+  display: none;
+}
+
+#tab-bar > button {
+  position: relative;
+  z-index: 2;
+  flex: 1 1 0;
+  min-width: 0;
+  width: auto;
+  height: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  border: none !important;
+  border-radius: 14px;
+  background: transparent !important;
+  color: transparent !important;
+  font-size: 0 !important;
+}
+
+#tab-bar > button span {
+  display: none !important;
+}
+
+#tab-bar > button svg {
+  width: 26px;
+  height: 26px;
+  display: block;
+  overflow: visible;
+}
+
+#tab-bar > button svg {
+  color: #8E8E93;
+  fill: currentColor;
+  stroke: none;
+  transition: color 0.2s ease, fill 0.2s ease, stroke 0.2s ease;
+}
+
+#tab-bar > button svg .icon-fill {
+  fill: currentColor;
+  stroke: none;
+}
+
+#tab-bar > button.is-active svg {
+  color: #FFFFFF;
+}
+
+#tab-bar > button.is-active svg .icon-fill {
+  fill: currentColor;
+}
+
+#tab-bar > button svg text {
+  fill: currentColor;
+  stroke: none;
+}
+
+#tab-bar > .glass-indicator {
+  position: absolute;
+  top: 8px;
+  left: 0;
+  width: 48px;
+  height: 48px;
+  box-sizing: border-box;
+  border-radius: 14px;
+  background: #5B7CFF !important;
+  box-shadow: none !important;
+  z-index: 1;
+  pointer-events: none;
+  transform: translateX(0);
+  transition:
+    transform 0.3s cubic-bezier(0.25, 1, 0.5, 1),
+    width 0.3s ease;
+}
+
+#main-view-switch,
+#schedule-switch,
+#schedule-edit-switch,
+#stats-period,
+#stats-qaza-period,
+#stats-habits-period,
+#stats-habit-period,
+#stats-fast-period,
+#stats-sleep-period {
+  position: relative;
+  isolation: isolate;
+}
+
+#main-view-switch > .glass-indicator,
+#schedule-switch > .glass-indicator,
+#schedule-edit-switch > .glass-indicator,
+#stats-period > .glass-indicator,
+#stats-qaza-period > .glass-indicator,
+#stats-habits-period > .glass-indicator,
+#stats-habit-period > .glass-indicator,
+#stats-fast-period > .glass-indicator,
+#stats-sleep-period > .glass-indicator {
+  position: absolute;
+  top: 4px;
+  left: 0;
+  width: 0;
+  height: calc(100% - 8px);
+  box-sizing: border-box;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.92);
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.10);
+  z-index: 1;
+  pointer-events: none;
+  transform: translateX(0);
+  transition:
+    transform 0.3s cubic-bezier(0.25, 1, 0.5, 1),
+    width 0.3s ease;
+}
+
+#main-view-switch > button,
+#schedule-switch > button,
+#schedule-edit-switch > button,
+#stats-period > button,
+#stats-qaza-period > button,
+#stats-habits-period > button,
+#stats-habit-period > button,
+#stats-fast-period > button,
+#stats-sleep-period > button {
+  position: relative;
+  z-index: 2;
+  background: transparent !important;
+  border: none;
+}
+
+.view-switch-btn.is-active,
+.tab-item.is-active {
+  background: transparent;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #tab-bar > .glass-indicator,
+  #main-view-switch > .glass-indicator,
+  #schedule-switch > .glass-indicator,
+  #schedule-edit-switch > .glass-indicator,
+  #stats-period > .glass-indicator,
+  #stats-qaza-period > .glass-indicator,
+  #stats-habits-period > .glass-indicator,
+  #stats-habit-period > .glass-indicator,
+  #stats-fast-period > .glass-indicator,
+  #stats-sleep-period > .glass-indicator {
+    transition: none;
+  }
+}
+
+/* Drawer: плотный белый, без размытия */
+#stats-menu {
+  background: #FFFFFF !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  border-right: 1px solid rgba(0, 0, 0, 0.08);
+  box-shadow: 12px 0 28px rgba(0, 0, 0, 0.18);
+  z-index: 1200;
+}
+
+#stats-menu.is-open {
+  z-index: 1200;
+}
+
+#stats-menu-backdrop {
+  z-index: 1100;
+}
+
   </style>
 </head>
 <body>
@@ -3250,6 +3439,7 @@ body.view-stats #header-actions {
       <h2>Расписание</h2>
     </div>
     <div class="view-switch" id="schedule-edit-switch" style="margin-top: 16px; padding: 0 16px;">
+      <div class="glass-indicator"></div>
       <button type="button" class="view-switch-btn is-active" data-schedule-type="weekday">Будний</button>
       <button type="button" class="view-switch-btn" data-schedule-type="weekend">Выходной</button>
       <button type="button" class="view-switch-btn" data-schedule-type="fasting">Ураза</button>
@@ -3274,6 +3464,7 @@ body.view-stats #header-actions {
       <button type="button" id="stats-back" class="btn btn-secondary">← Назад</button>
     </div>
     <div id="stats-period" role="radiogroup" aria-label="Период статистики">
+      <div class="glass-indicator"></div>
       <button type="button" class="view-switch-btn" data-period="week">Неделя</button>
       <button type="button" class="view-switch-btn is-active" data-period="month">Месяц</button>
       <button type="button" class="view-switch-btn" data-period="year">Год</button>
@@ -3313,6 +3504,7 @@ body.view-stats #header-actions {
       <button type="button" id="stats-qaza-back" class="btn btn-secondary">← Назад</button>
     </div>
     <div id="stats-qaza-period" role="radiogroup" aria-label="Период статистики">
+      <div class="glass-indicator"></div>
       <button type="button" class="view-switch-btn" data-period="week">Неделя</button>
       <button type="button" class="view-switch-btn is-active" data-period="month">Месяц</button>
       <button type="button" class="view-switch-btn" data-period="year">Год</button>
@@ -3331,6 +3523,7 @@ body.view-stats #header-actions {
       <button type="button" id="stats-habits-back" class="btn btn-secondary">← Назад</button>
     </div>
     <div id="stats-habits-period" role="radiogroup" aria-label="Период статистики">
+      <div class="glass-indicator"></div>
       <button type="button" class="view-switch-btn" data-period="week">Неделя</button>
       <button type="button" class="view-switch-btn is-active" data-period="month">Месяц</button>
       <button type="button" class="view-switch-btn" data-period="year">Год</button>
@@ -3349,6 +3542,7 @@ body.view-stats #header-actions {
       <button type="button" id="stats-habit-back" class="btn btn-secondary">← Назад</button>
     </div>
     <div id="stats-habit-period" role="radiogroup" aria-label="Период статистики">
+      <div class="glass-indicator"></div>
       <button type="button" class="view-switch-btn" data-period="week">Неделя</button>
       <button type="button" class="view-switch-btn is-active" data-period="month">Месяц</button>
       <button type="button" class="view-switch-btn" data-period="year">Год</button>
@@ -3368,6 +3562,7 @@ body.view-stats #header-actions {
       <button type="button" id="stats-fast-back" class="btn btn-secondary">← Назад</button>
     </div>
     <div id="stats-fast-period" role="radiogroup" aria-label="Период статистики">
+      <div class="glass-indicator"></div>
       <button type="button" class="view-switch-btn" data-period="week">Неделя</button>
       <button type="button" class="view-switch-btn is-active" data-period="month">Месяц</button>
       <button type="button" class="view-switch-btn" data-period="year">Год</button>
@@ -3389,6 +3584,7 @@ body.view-stats #header-actions {
       <button type="button" id="stats-sleep-back" class="btn btn-secondary">← Назад</button>
     </div>
     <div id="stats-sleep-period" role="radiogroup" aria-label="Период статистики">
+      <div class="glass-indicator"></div>
       <button type="button" class="view-switch-btn" data-period="week">Неделя</button>
       <button type="button" class="view-switch-btn is-active" data-period="month">Месяц</button>
       <button type="button" class="view-switch-btn" data-period="year">Год</button>
@@ -3503,23 +3699,26 @@ body.view-stats #header-actions {
   <nav id="tab-bar" hidden>
     <div class="glass-indicator"></div>
     <button type="button" class="tab-item" data-view="main">
-      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="4"></rect><path d="M8 12l3 3 5-6"></path></svg>
+      <svg class="tab-icon tab-icon-check" viewBox="0 0 24 24" aria-hidden="true">
+        <path class="icon-fill" d="M5 3h14a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2Zm3.2 8.3a1.4 1.4 0 0 0-2 2l3.2 3.2a1.4 1.4 0 0 0 2 0l6.4-6.4a1.4 1.4 0 0 0-2-2l-5.4 5.4-2.2-2.2Z"></path>
+      </svg>
       <span>Главное</span></button>
     <button type="button" class="tab-item" data-view="qaza">
-      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"></path></svg>
+      <svg class="tab-icon tab-icon-moon" viewBox="0 0 24 24" aria-hidden="true">
+        <path class="icon-fill" d="M20.8 14.6A8.8 8.8 0 0 1 9.4 3.2a9.2 9.2 0 1 0 11.4 11.4Z"></path>
+      </svg>
       <span>Каза</span></button>
     <button type="button" class="tab-item" data-view="schedule">
-      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <rect x="3" y="4" width="18" height="17" rx="3"></rect>
-        <path d="M3 9h18"></path>
-        <path d="M8 2v4"></path>
-        <path d="M16 2v4"></path>
-        <text x="12" y="18" text-anchor="middle" font-size="7" font-weight="700" fill="currentColor" stroke="none">17</text>
+      <svg class="tab-icon tab-icon-calendar" viewBox="0 0 24 24" aria-hidden="true">
+        <path class="icon-fill" fill-rule="evenodd" d="M5 2a1 1 0 0 1 1 1v1h12V3a1 1 0 1 1 2 0v1h1a2 2 0 0 1 2 2v13a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h1V3a1 1 0 0 1 2-1Zm-2 8v9h18v-9H3Zm0-2h18V6H3v2Z"></path>
+        <text id="tab-calendar-date" x="12" y="17" text-anchor="middle" font-size="7" font-weight="800" fill="currentColor" stroke="none"></text>
       </svg>
       <span>Расписание</span>
     </button>
     <button type="button" class="tab-item" data-view="settings">
-      <svg viewBox="0 0 24 24" width="24" height="24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+      <svg class="tab-icon tab-icon-hexagon" viewBox="0 0 24 24" aria-hidden="true">
+        <path class="icon-fill" fill-rule="evenodd" d="m12 2 8.66 5v10L12 22l-8.66-5V7L12 2Zm0 4.3L7.34 9v6L12 17.7 16.66 15V9L12 6.3Zm0 4.2a1.5 1.5 0 1 1 0 3 1.5 1.5 0 0 1 0-3Z"></path>
+      </svg>
       <span>Настройки</span></button>
   </nav>
 </div>
@@ -8193,13 +8392,8 @@ function switchAppView(name) {
   window.scrollTo(0, 0);
   currentView = name;
 
-  // Обновить каплю-индикатор в переключателях
-  setTimeout(function () {
-    var el = document.getElementById('main-view-switch');
-    if (el) window.moveIndicator(el);
-    var sc = document.getElementById('schedule-switch');
-    if (sc) window.moveIndicator(sc);
-  }, 50);
+  // Обновить каплю-индикаторы всех переключателей через общий планировщик
+  scheduleLiquidIndicators();
 }
 
 // Строка версии в Настройках
@@ -10100,60 +10294,154 @@ if ('serviceWorker' in navigator) {
   });
 }
 
-// --- Анимированный индикатор (капля) для переключателей ---
-window.moveIndicator = function(container) {
-  if (!container) return;
-  const btn = container.querySelector('.is-active, .active');
-  const ind = container.querySelector('.glass-indicator');
-  if (!btn || !ind) return;
+// --- Liquid Glass: плавающая капсула для таб-бара и всех переключателей ---
+const LIQUID_SWITCH_SELECTORS = [
+  '#tab-bar',
+  '#main-view-switch',
+  '#schedule-switch',
+  '#schedule-edit-switch',
+  '#stats-period',
+  '#stats-qaza-period',
+  '#stats-habits-period',
+  '#stats-habit-period',
+  '#stats-fast-period',
+  '#stats-sleep-period'
+];
 
-  if (btn.offsetWidth === 0) return;
+window.moveIndicator = function (container) {
+  if (!container || container.hidden) return;
+
+  const indicator = container.querySelector(':scope > .glass-indicator');
+  const button = container.querySelector(':scope > button.is-active');
+
+  if (!indicator || !button) return;
+  if (button.offsetWidth <= 0 || button.offsetHeight <= 0) return;
 
   const containerRect = container.getBoundingClientRect();
-  const btnRect = btn.getBoundingClientRect();
+  const buttonRect = button.getBoundingClientRect();
+
+  if (containerRect.width <= 0 || containerRect.height <= 0) return;
 
   if (container.id === 'tab-bar') {
-    // Капсула максимум 48px, но не шире самой кнопки (защита от узких экранов)
-    const capsuleWidth = Math.min(48, btnRect.width - 8);
-    ind.style.width = capsuleWidth + 'px';
-    ind.style.height = '48px';
+    const availableButtonWidth = Math.max(0, buttonRect.width - 8);
+    const capsuleWidth = Math.max(0, Math.min(48, availableButtonWidth));
 
-    // Центрируем капсулу точно по центру иконки
-    const relativeLeft = (btnRect.left - containerRect.left) + (btnRect.width / 2) - (capsuleWidth / 2);
-    ind.style.transform = 'translateX(' + relativeLeft + 'px)';
+    const rawLeft =
+      (buttonRect.left - containerRect.left) +
+      (buttonRect.width / 2) -
+      (capsuleWidth / 2);
+
+    const maxLeft = Math.max(0, containerRect.width - capsuleWidth);
+    const relativeLeft = Math.max(0, Math.min(rawLeft, maxLeft));
+
+    indicator.style.width = capsuleWidth + 'px';
+    indicator.style.height = '48px';
+    indicator.style.top = '8px';
+    indicator.style.transform = 'translate3d(' + relativeLeft + 'px, 0, 0)';
   } else {
-    ind.style.width = btnRect.width + 'px';
-    ind.style.height = 'calc(100% - 8px)';
-    ind.style.top = '4px';
-    const relativeLeft = btnRect.left - containerRect.left;
-    ind.style.transform = 'translateX(' + relativeLeft + 'px)';
+    const rawLeft = buttonRect.left - containerRect.left;
+    const maxWidth = Math.max(0, containerRect.width - Math.max(0, rawLeft));
+    const buttonWidth = Math.max(0, Math.min(buttonRect.width, maxWidth));
+
+    indicator.style.width = buttonWidth + 'px';
+    indicator.style.height = 'calc(100% - 8px)';
+    indicator.style.top = '4px';
+    indicator.style.transform =
+      'translate3d(' + Math.max(0, rawLeft) + 'px, 0, 0)';
   }
 };
 
-function initIndicators() {
-  ['tab-bar', 'main-view-switch', 'schedule-switch'].forEach(function (id) {
-    var el = document.getElementById(id);
-    if (el) window.moveIndicator(el);
+function getLiquidSwitchContainers() {
+  return LIQUID_SWITCH_SELECTORS
+    .map(function (selector) {
+      return document.querySelector(selector);
+    })
+    .filter(Boolean);
+}
+
+function moveAllIndicators() {
+  getLiquidSwitchContainers().forEach(function (container) {
+    window.moveIndicator(container);
   });
 }
 
-document.addEventListener('DOMContentLoaded', function () {
-  setTimeout(initIndicators, 100);
-});
+let liquidIndicatorFrame = 0;
 
-document.addEventListener('click', function (e) {
-  var btn = e.target.closest('#tab-bar button, #main-view-switch button, #schedule-switch button');
-  if (btn) {
-    var container = btn.closest('#tab-bar, #main-view-switch, #schedule-switch');
-    setTimeout(function () { window.moveIndicator(container); }, 20);
+function scheduleLiquidIndicators() {
+  if (liquidIndicatorFrame) {
+    cancelAnimationFrame(liquidIndicatorFrame);
   }
+
+  liquidIndicatorFrame = requestAnimationFrame(function () {
+    liquidIndicatorFrame = 0;
+    moveAllIndicators();
+  });
+}
+
+document.addEventListener('click', function (event) {
+  const button = event.target.closest(
+    LIQUID_SWITCH_SELECTORS.join(', ') + ' > button'
+  );
+
+  if (!button) return;
+
+  requestAnimationFrame(function () {
+    requestAnimationFrame(scheduleLiquidIndicators);
+  });
 });
 
-window.addEventListener('resize', initIndicators);
-// Защита при повороте экрана: пересчёт капсулы для всех переключателей
-window.addEventListener('resize', function () {
-  document.querySelectorAll('#tab-bar, #main-view-switch, #schedule-switch')
-    .forEach(window.moveIndicator);
+// Наблюдатель следит за class/hidden; style не наблюдаем, чтобы собственные
+// изменения индикатора не зацикливали пересчёт.
+const liquidObserver = new MutationObserver(function () {
+  scheduleLiquidIndicators();
+});
+
+function observeLiquidSwitches() {
+  getLiquidSwitchContainers().forEach(function (container) {
+    liquidObserver.observe(container, {
+      subtree: true,
+      attributes: true,
+      attributeFilter: ['class', 'hidden']
+    });
+  });
+}
+
+let liquidResizeObserver = null;
+
+function observeLiquidSwitchSizes() {
+  if (!('ResizeObserver' in window)) return;
+
+  if (liquidResizeObserver) {
+    liquidResizeObserver.disconnect();
+  }
+
+  liquidResizeObserver = new ResizeObserver(function () {
+    scheduleLiquidIndicators();
+  });
+
+  getLiquidSwitchContainers().forEach(function (container) {
+    liquidResizeObserver.observe(container);
+  });
+}
+
+function updateTabCalendarDate() {
+  const dateElement = document.getElementById('tab-calendar-date');
+  if (!dateElement) return;
+
+  dateElement.textContent = String(new Date().getDate());
+}
+
+document.addEventListener('DOMContentLoaded', function () {
+  updateTabCalendarDate();
+  observeLiquidSwitches();
+  observeLiquidSwitchSizes();
+  scheduleLiquidIndicators();
+});
+
+window.addEventListener('resize', scheduleLiquidIndicators);
+
+window.addEventListener('orientationchange', function () {
+  scheduleLiquidIndicators();
 });
   </script>
 </body>
