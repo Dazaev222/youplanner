@@ -944,7 +944,11 @@ textarea {
 }
 
 /* Цвет плюс слово-пометка — выбор не передаётся только цветом */
-.qaza-start-option.is-cursor,
+.qaza-start-option.is-cursor {
+  background: rgba(88, 112, 197, 0.12);
+  color: #5870C5;
+  border: 1px solid rgba(88, 112, 197, 0.3);
+}
 .qaza-add-option.is-picked {
   border-color: var(--accent);
   background-color: var(--accent-soft);
@@ -1433,7 +1437,7 @@ textarea {
 /* --- Попап уровня выполнения (§1.3) --------------------------------------
    Одна шторка на обе привычки со строками во всю ширину панели. */
 #level-sheet {
-  z-index: 120;
+  z-index: 1200;
 }
 
 /* iOS-style bottom sheet */
@@ -2939,6 +2943,12 @@ body.view-stats #header-actions {
   padding: 0;
   color: #1A1A1A;
   font-size: 0;
+}
+
+#qaza-done {
+  background: rgba(88, 112, 197, 0.12);
+  color: #5870C5;
+  border: 1px solid rgba(88, 112, 197, 0.3);
 }
 
 #tab-bar > button span {
@@ -5575,12 +5585,12 @@ function habitsAveragePercent(habits, dates) {
 
 /* ---------- Синхронизация с Firebase (REST, без SDK) --------------------- */
 
-const FIREBASE_URL = 'https://youplanner-5c2f5-default-rtdb.firebaseio.com/youplanner-a7x9k2';
+const FIREBASE_URL = 'https://youplanner-5c2f5-default-rtdb.firebaseio.com/youplanner-d8aaea12-60e6-4ac9-973c-46c19b387cd9';
 // Бэкапы живут ОТДЕЛЬНЫМ корнем, а не ребёнком синхронизируемого узла:
 // PUT на FIREBASE_URL заменяет узел целиком вместе со всеми детьми,
 // поэтому вложенный /backups стирался бы каждой же синхронизацией
 // сразу после записи. Соседний корень основной PUT не трогает.
-const FIREBASE_BACKUPS_URL = 'https://youplanner-5c2f5-default-rtdb.firebaseio.com/youplanner-a7x9k2-backups';
+const FIREBASE_BACKUPS_URL = 'https://youplanner-5c2f5-default-rtdb.firebaseio.com/youplanner-d8aaea12-60e6-4ac9-973c-46c19b387cd9-backups';
 const SYNC_TS_KEY = 'youplanner.sync.ts';
 
 // Сколько версий держим в узле бэкапов (FIREBASE_BACKUPS_URL)
@@ -7303,6 +7313,26 @@ function bindEvents() {
     window.visualViewport.addEventListener('resize', syncSheetToKeyboard);
     window.visualViewport.addEventListener('scroll', syncSheetToKeyboard);
   }
+
+  // Поднимать поле ввода над клавиатурой при фокусе внутри шторок
+  document.addEventListener('focusin', function(e) {
+    const input = e.target;
+    if (!input || !input.matches) return;
+    const sheetPanel = input.closest('.sheet-panel');
+    if (!sheetPanel) return;
+    requestAnimationFrame(function() {
+      input.scrollIntoView({ block: 'nearest' });
+      sheetPanel.style.paddingBottom = '40px';
+    });
+  });
+
+  document.addEventListener('focusout', function(e) {
+    const input = e.target;
+    if (!input || !input.matches) return;
+    const sheetPanel = input.closest('.sheet-panel');
+    if (!sheetPanel) return;
+    sheetPanel.style.paddingBottom = '';
+  });
 
 
 
