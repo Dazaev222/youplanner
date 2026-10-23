@@ -645,13 +645,14 @@
     </div>
     <button type="button" id="level-option-full" class="level-option" data-level="full">Полная версия</button>
     <button type="button" id="level-option-two-min" class="level-option" data-level="two-min">2 минуты</button>
-    <button type="button" class="btn btn-secondary sheet-cancel-btn" onclick="closeLevelSheet()">Отмена</button>
+    <button type="button" class="btn btn-secondary sheet-cancel-btn" data-level-sheet-close>Отмена</button>
   </div>
 </div>
 
 <!-- Тост: короткая подсказка поверх шторок. Текст кладёт showToast() -->
 <div id="toast" role="status" hidden></div>
 
+  <script src="js/core/bus.js"></script>
   <script src="js/data/storage.js"></script>
   <script src="js/data/schedule.js"></script>
   <script src="js/data/habits.js"></script>
@@ -723,7 +724,7 @@ function migrateDropTasks() {
   if (migrationDone('drop-tasks')) return;
   markMigration('drop-tasks');
   localStorage.removeItem(STORAGE_KEYS.tasks);
-  scheduleSync();
+  bus.emit('data:changed');
 }
 
 // «Пресс» заведена в дефолтах позже остальных привычек, поэтому у устройства
@@ -772,14 +773,14 @@ function safeSetItem(key, value) {
     localStorage.setItem(key, value);
     return true;
   } catch (e) {
-    showToast('Не удалось сохранить: хранилище переполнено');
+    bus.emit('storage:error');
     return false;
   }
 }
 
 function saveHabits(habits) {
   if (!safeSetItem(STORAGE_KEYS.habits, JSON.stringify(habits))) return false;
-  scheduleSync();
+  bus.emit('data:changed');
   return true;
 }
 
@@ -806,7 +807,7 @@ function loadSchedule() {
 // при успехе — отложенная отправка и boolean для вызывающего кода.
 function saveSchedule(schedule) {
   if (!safeSetItem(STORAGE_KEYS.schedule, JSON.stringify(schedule))) return false;
-  scheduleSync();
+  bus.emit('data:changed');
   return true;
 }
 
@@ -883,7 +884,7 @@ function setRecord(date, habitId, value) {
     }
     return false;
   }
-  scheduleSync();
+  bus.emit('data:changed');
   return true;
 }
 
@@ -1092,7 +1093,7 @@ function removeHabit(id) {
     saveHabits(habitsRestore);
     return false;
   }
-  scheduleSync();
+  bus.emit('data:changed');
   return true;
 }
 
@@ -1363,7 +1364,7 @@ function loadQaza(skipSave = false) {
 
 function saveQaza(qaza) {
   if (!safeSetItem(QAZA_STORAGE_KEY, JSON.stringify(qaza))) return false;
-  scheduleSync();
+  bus.emit('data:changed');
   return true;
 }
 
@@ -1423,7 +1424,7 @@ function saveQazaLog(log) {
     since: log.since,
     entries: Array.isArray(log.entries) ? log.entries : [],
   }))) return false;
-  scheduleSync();
+  bus.emit('data:changed');
   return true;
 }
 
@@ -1662,7 +1663,7 @@ function savePrayer(prayer) {
     madhhab: PRAYER_SHADOW[prayer.madhhab] ? prayer.madhhab : 'shafi',
     method: PRAYER_METHODS.indexOf(prayer.method) >= 0 ? prayer.method : PRAYER_METHOD_DEFAULT,
   }))) return false;
-  scheduleSync();
+  bus.emit('data:changed');
   return true;
 }
 
@@ -1720,7 +1721,7 @@ function saveFast(fast) {
     remaining: Math.max(0, Math.floor(fast.remaining)),
     history: Array.isArray(fast.history) ? fast.history : [],
   }))) return false;
-  scheduleSync();
+  bus.emit('data:changed');
   return true;
 }
 
@@ -2148,7 +2149,7 @@ function saveSleep(sleep) {
     excluded: excluded,
     history: sleepHistoryEntry(previous ? previous.history : [], entry),
   }))) return false;
-  scheduleSync();
+  bus.emit('data:changed');
   return true;
 }
 
@@ -2527,14 +2528,12 @@ function applyCloudData(data, ts) {
     }
     // Расписание заменяется целиком, как запись о сне. Дефолтов здесь нет:
     // loadSchedule подставляет их сама, поэтому раздел с сервера, прошедший
-    // проверку, применяется всегда — пустым он быть не может. Открытый экран
-    // расписания перерисовывается так же, как остальные после применённого
-    // снимка (§11v)
+    // проверку, применяется всегда — пустым он быть не может. Перерисовка
+    // открытого экрана расписания — у подписчика sync:applied, вместе
+    // с остальными экранами (§11v)
     if (validCloudSchedule(data.schedule)) {
       localStorage.setItem(STORAGE_KEYS.schedule, JSON.stringify(data.schedule));
       cloudApplied = true;
-      const sw = document.getElementById('schedule-view');
-      if (sw && !sw.hidden) renderScheduleView();
     }
     if (cloudApplied) localStorage.setItem(SYNC_TS_KEY, String(ts));
 
@@ -2544,10 +2543,7 @@ function applyCloudData(data, ts) {
     syncing = false;
   }
 
-  renderMainView();
-  renderQazaView();
-  renderPrayerView();
-  renderFastView();
+  bus.emit('sync:applied');
 }
 
 // Уступает ли локальное состояние серверному снимку. Правило одно на все
@@ -2586,9 +2582,7 @@ function syncFromCloud() {
           // Список только что сменился, а DOM остался прежним: показываем его
           // тем же путём, что и применённый снимок (§11v)
           appState.habits = loadHabits();
-          renderMainView();
-          renderQazaView();
-          renderPrayerView();
+          bus.emit('sync:applied');
         }
         return { reachable: true, serverEmpty: false };
       }
@@ -2969,7 +2963,7 @@ function applyBackup(data) {
   appState.habits = loadHabits();
   qazaState = loadQaza();
 
-  scheduleSync();
+  bus.emit('data:changed');
   renderMainView();
   renderQazaView();
   renderPrayerView();
@@ -6872,6 +6866,25 @@ function validateHabitForm(data, excludeId) {
 
   return { ok: true };
 }
+
+/* --- Проводка слоёв через шину событий -------------------------------------
+   Единственное место, где слои слышат друг друга: данные эмитят правку,
+   синхронизация — применённый снимок, хранилище — ошибку записи. Прямых
+   вызовов между слоями нет, поэтому при переходе на ES-модули (Фаза 3.2)
+   граф импортов останется однонаправленным. */
+
+bus.on('data:changed', scheduleSync);
+bus.on('sync:applied', function () {
+  renderMainView();
+  renderQazaView();
+  renderPrayerView();
+  renderFastView();
+  const sw = document.getElementById('schedule-view');
+  if (sw && !sw.hidden) renderScheduleView();
+});
+bus.on('storage:error', function () {
+  showToast('Не удалось сохранить: хранилище переполнено');
+});
 
 document.addEventListener('DOMContentLoaded', init);
 
