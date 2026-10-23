@@ -14,7 +14,7 @@
    Обратный порядок отписки (return функции-off) нужен тестам и будущим
    модулям, в приложении подписки живут всё время работы страницы. */
 
-const bus = (() => {
+export const bus = (() => {
   const listeners = new Map();
 
   function on(event, handler) {

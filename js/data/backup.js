@@ -1,3 +1,13 @@
+import { bus } from '../core/bus.js';
+import { FAST_KEY, loadFast, validFastHistory } from './fast.js';
+import { loadHabits } from './habits.js';
+import { PRAYER_KEY, loadPrayer } from './prayer.js';
+import { QAZA_LOG_KEY, QAZA_STORAGE_KEY, loadQaza, loadQazaLog, validQazaLogDate, validQazaLogEntries } from './qaza.js';
+import { invalidateRecordsCache, loadRecords } from './records.js';
+import { loadSchedule } from './schedule.js';
+import { SLEEP_KEY, SLEEP_MAX_MINUTES, loadSleep, sleepDurationMinutes, sleepTimeMinutes, validSleepHistory } from './sleep.js';
+import { STORAGE_KEYS } from './storage.js';
+import { validCloudSchedule } from '../sync/validators.js';
 // Версия формата резервной копии. Растёт, если меняется состав полей файла:
 // версия 2 добавила раздел tasks, версия 3 — раздел prayer, версия 4 —
 // время у привычки и уровень у записи (§8), версия 5 — раздел fast (§11x),
@@ -6,12 +16,12 @@
 // Разбор принимает файлы ровно этой версии: расписание ходит разделом целиком,
 // и старые копии (до 11) расписание за собой не тянут — их отвергаем, чтобы
 // не соединять два поколения формата.
-const BACKUP_VERSION = 11;
+export const BACKUP_VERSION = 11;
 
 // Что попадает в файл. Метка синхронизации и режим главного экрана — состояние
 // устройства, а не данные, поэтому в копию не входят. Координат может не быть;
 // тогда раздел уходит пустым объектом и читается по общим правилам.
-function buildBackup() {
+export function buildBackup() {
   const backup = {
     version: BACKUP_VERSION,
     exportedAt: new Date().toISOString(),
@@ -46,7 +56,7 @@ function buildBackup() {
 }
 // Разбор файла копии. Возвращает данные или null, если файл не подходит:
 // непонятный файл не должен затирать рабочие данные.
-function parseBackup(text) {
+export function parseBackup(text) {
   let data;
   try {
     data = JSON.parse(text);
@@ -155,7 +165,7 @@ function parseBackup(text) {
 // Замена локальных данных копией. Пишем в localStorage напрямую: saveHabits и
 // saveQaza поставили бы по отправке на каждый ключ, а нужен один PUT на замену.
 // Раздела qaza в файле может не быть — тогда очередь остаётся текущей.
-function applyBackup(data) {
+export function applyBackup(data) {
   localStorage.setItem(STORAGE_KEYS.habits, JSON.stringify(data.habits));
   localStorage.setItem(STORAGE_KEYS.records, JSON.stringify(data.records));
   invalidateRecordsCache();

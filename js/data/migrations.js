@@ -1,9 +1,15 @@
+import { bus } from '../core/bus.js';
+import { defaultHabit, loadHabits, saveHabits } from './habits.js';
+import { PRESS_HABIT_ID } from './records.js';
+import { STORAGE_KEYS } from './storage.js';
+import { saveNormalized } from '../sync/state.js';
+import { hasData } from '../sync/validators.js';
 
 
 // Какие разовые правки устройство уже прошло. Отметка нужна затем, чтобы
 // правка не повторялась на каждой загрузке: иначе удалённую привычку
 // возвращал бы каждый старт, а не только первый.
-function loadMigrations() {
+export function loadMigrations() {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.migrations);
     if (!raw) return {};
@@ -14,16 +20,16 @@ function loadMigrations() {
     return {};
   }
 }
-function migrationDone(name) {
+export function migrationDone(name) {
   return loadMigrations()[name] === true;
 }
-function markMigration(name) {
+export function markMigration(name) {
   const migrations = loadMigrations();
   if (migrations[name] === true) return;
   migrations[name] = true;
   localStorage.setItem(STORAGE_KEYS.migrations, JSON.stringify(migrations));
 }
-function migrateDropTasks() {
+export function migrateDropTasks() {
   if (migrationDone('drop-tasks')) return;
   markMigration('drop-tasks');
   localStorage.removeItem(STORAGE_KEYS.tasks);
@@ -34,7 +40,7 @@ function migrateDropTasks() {
 // Срабатывает один раз: удалённый «Пресс» после неё не возвращается.
 // Зовётся только после сверки и только на непустом списке: пустое хранилище
 // значит «ещё не знаем», и дополнять в нём нечего (§13).
-function migratePressHabit() {
+export function migratePressHabit() {
   if (migrationDone('press')) return;
 
   const habits = loadHabits();

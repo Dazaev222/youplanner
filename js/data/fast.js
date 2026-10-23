@@ -1,27 +1,30 @@
+import { bus } from '../core/bus.js';
+import { toISODate } from '../core/dates.js';
+import { safeSetItem } from '../core/storage.js';
 // Ключ свой, отдельный от каза-намазов: счётчики независимы (§5).
 // Отсутствие ключа — это и есть первый запуск; дефолта у уразы нет,
 // начальное число задаёт человек.
-const FAST_KEY = 'youplanner.qaza.fast';
+export const FAST_KEY = 'youplanner.qaza.fast';
 // Версия схемы. 1 — растущая история событий с полем source.
-const FAST_VERSION = 1;
+export const FAST_VERSION = 1;
 // Источник записи истории: 'set' — первый запуск и «Изменить счётчик»,
 // 'done' — «Возместить 1 день», 'add' — «Добавить уразу».
-const FAST_SOURCE_SET = 'set';
-const FAST_SOURCE_DONE = 'done';
-const FAST_SOURCE_ADD = 'add';
+export const FAST_SOURCE_SET = 'set';
+export const FAST_SOURCE_DONE = 'done';
+export const FAST_SOURCE_ADD = 'add';
 // Больше этого числа за раз не принимается: случайное нажатие не должно
 // раздувать счётчик, а опечатка — историю
-const FAST_MAX_INPUT = 100000;
+export const FAST_MAX_INPUT = 100000;
 // Меньше этого числа событий за всё время — графика нет: три столбика на всю
 // ширину карточки читались бы как «истории достаточно», хотя её почти нет
-const FAST_HISTORY_MIN = 5;
+export const FAST_HISTORY_MIN = 5;
 
 // Чистка истории. Пришла из хранилища, с сервера или из файла копии — правило
 // одно: элемент годится, если это объект с датой 'YYYY-MM-DD', неотрицательным
 // конечным числом и известным источником. Битые записи отбрасываются молча:
 // история растёт годами, и одна испорченная строка не должна ронять счётчик
 // или подменять цифры статистики (§5)
-function validFastHistory(history) {
+export function validFastHistory(history) {
   if (!Array.isArray(history)) return [];
 
   return history.filter(function (item) {
@@ -38,7 +41,7 @@ function validFastHistory(history) {
 // записи не теряется — он важнее истории (§5). В отличие от loadQaza() ничего
 // не пишет: пустое хранилище здесь значит «число ещё не задано», а не «пора
 // поставить дефолт».
-function loadFast() {
+export function loadFast() {
   try {
     const raw = localStorage.getItem(FAST_KEY);
     if (!raw) return null;
@@ -58,7 +61,7 @@ function loadFast() {
 }
 // Запись ключа. Остаток приводится к целому и неотрицательному ещё раз:
 // счётчик не может уйти в минус, откуда бы значение ни пришло.
-function saveFast(fast) {
+export function saveFast(fast) {
   if (!fast || !Number.isFinite(fast.remaining)) return;
 
   if (!safeSetItem(FAST_KEY, JSON.stringify({
@@ -72,14 +75,14 @@ function saveFast(fast) {
 // Общий помощник: одно событие в историю. Это растущий массив, а не стек:
 // он не чистится по датам и нужен целиком разделу «Статистика» (§5).
 // Интерфейс историю не читает — только пишет.
-function appendFastHistory(fast, count, source) {
+export function appendFastHistory(fast, count, source) {
   if (!fast || !Array.isArray(fast.history)) return;
   fast.history.push({ date: toISODate(new Date()), count: count, source: source });
 }
 // «Возместить 1 день». Возмещённый пост — факт, отмены у него нет.
 // Проверка на остаток обязательна и здесь: погашенная кнопка — подсказка,
 // а не защита, и обработчик не должен полагаться только на неё.
-function markFastDone(fast) {
+export function markFastDone(fast) {
   if (!fast || !Number.isFinite(fast.remaining) || fast.remaining <= 0) return false;
 
   const snapshot = JSON.parse(JSON.stringify(fast));
@@ -93,7 +96,7 @@ function markFastDone(fast) {
   return true;
 }
 // «Добавить уразу»: остаток растёт на введённое число
-function addFast(fast, count) {
+export function addFast(fast, count) {
   if (!fast || !Number.isFinite(count) || count <= 0) return false;
 
   const snapshot = JSON.parse(JSON.stringify(fast));
@@ -108,7 +111,7 @@ function addFast(fast, count) {
 }
 // «Изменить счётчик»: перезапись остатка, а не прибавка. Ошибки ввода
 // исправляются только здесь — отдельной отмены у раздела нет.
-function setFast(fast, count) {
+export function setFast(fast, count) {
   if (!fast || !Number.isFinite(count) || count < 0) return false;
 
   const snapshot = JSON.parse(JSON.stringify(fast));
@@ -125,7 +128,7 @@ function setFast(fast, count) {
 // отрицательное, нечисловое и больше FAST_MAX_INPUT отклоняются — null.
 // mode 'counter' — первый запуск и «Изменить счётчик» (≥ 0),
 // mode 'add' — «Добавить уразу» (> 0, ноль не принимается: прибавлять нечего).
-function parseFastInput(text, mode) {
+export function parseFastInput(text, mode) {
   const raw = text === null || text === undefined ? '' : String(text).trim();
   if (!/^\d+$/.test(raw)) return null;
 
@@ -137,7 +140,7 @@ function parseFastInput(text, mode) {
 }
 // Склонение «день / дня / дней»: 1 и 21 — день, 2–4 и 22–24 — дня,
 // 0, 5–20 и 11–14 — дней
-function fastRemainingLabel(n) {
+export function fastRemainingLabel(n) {
   const mod100 = Math.abs(n) % 100;
   const mod10 = mod100 % 10;
 
