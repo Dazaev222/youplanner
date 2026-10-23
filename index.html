@@ -952,8 +952,9 @@ textarea {
   border: 1px solid rgba(88, 112, 197, 0.3);
 }
 .qaza-add-option.is-picked {
-  border-color: var(--accent);
-  background-color: var(--accent-soft);
+  background: rgba(88, 112, 197, 0.12);
+  color: #5870C5;
+  border: 1px solid rgba(88, 112, 197, 0.3);
 }
 
 /* Радио скрыто визуально, но остаётся фокусируемым с клавиатуры */
@@ -1626,10 +1627,8 @@ textarea {
   background: var(--accent-soft);
 }
 
-/* Восход — не намаз: приглушён и помечен пунктиром, чтобы не читался
-   как время молитвы */
+/* Восход — не намаз: приглушён текст, но карточка — такая же белая */
 .prayer-row.is-sunrise {
-  border-style: dashed;
   color: var(--text-muted);
 }
 
@@ -8210,7 +8209,7 @@ let currentView = 'main';
 // Переключение разделов. Единая точка входа для таб-бара на телефоне,
 // кнопки «Каза-намазы» и «Назад» на ПК.
 function switchAppView(name) {
-  const weekNav = document.getElementById('week-nav'); if (weekNav) weekNav.hidden = (name === 'settings');
+  const weekNav = document.getElementById('week-nav'); if (weekNav) weekNav.hidden = (name !== 'main');
   // Панель статистики принадлежит главной: любой переход её закрывает
   closeStatsMenu();
   // Попап уровня — тоже: программный переход (из консоли, теста или будущего
@@ -8242,7 +8241,7 @@ function switchAppView(name) {
   document.getElementById('schedule-edit-view').hidden = name !== 'schedule-edit';
   document.getElementById('mobile-day-tabs').hidden = name !== 'main' || !isMobileView();
   document.getElementById('tab-bar').hidden = !isMobileView();
-  document.getElementById('week-nav').hidden = name === 'settings';
+  document.getElementById('week-nav').hidden = name !== 'main';
   document.getElementById('qaza-btn').hidden = name !== 'main';
   document.getElementById('schedule-btn').hidden = name !== 'main';
   document.getElementById('settings-btn').hidden = name !== 'main';
