@@ -1,22 +1,13 @@
-// Загружает инлайн-скрипт index.html в песочницу node:vm — без браузера.
-// Функции, объявленные на верхнем уровне скрипта, становятся свойствами
-// contextify-глобала, поэтому тест может звать их напрямую: ctx.parseBackup,
-// ctx.syncToCloud и так далее. Сеть по умолчанию недоступна: fetch отклоняет
-// вызов, как при офлайне; тест может подсунуть свою реализацию.
+// Загружает JS приложения в песочницу node:vm — без браузера.
+// Источники — из tests/helpers/sources.mjs: файлы js/data/*.js по порядку
+// подключения, затем инлайн-скрипт. Функции, объявленные на верхнем уровне,
+// становятся свойствами contextify-глобала, поэтому тест может звать их
+// напрямую: ctx.parseBackup, ctx.syncToCloud и так далее. Сеть по умолчанию
+// недоступна: fetch отклоняет вызов, как при офлайне; тест может подсунуть
+// свою реализацию.
 
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import vm from 'node:vm';
-
-const root = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
-
-export function extractInlineScript() {
-  const html = readFileSync(join(root, 'index.html'), 'utf8');
-  const match = html.match(/<script>([\s\S]*)<\/script>/);
-  if (!match) throw new Error('в index.html нет встроенного скрипта');
-  return match[1];
-}
+import { getAppJs } from './sources.mjs';
 
 export function loadApp({ fetchImpl } = {}) {
   const storage = new Map();
@@ -63,6 +54,6 @@ export function loadApp({ fetchImpl } = {}) {
   sandbox.window.window = sandbox.window;
 
   const context = vm.createContext(sandbox);
-  vm.runInContext(extractInlineScript(), context, { filename: 'index.html-inline.js' });
+  vm.runInContext(getAppJs(), context, { filename: 'youplanner-app.js' });
   return { sandbox, context };
 }

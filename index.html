@@ -652,22 +652,23 @@
 <!-- Тост: короткая подсказка поверх шторок. Текст кладёт showToast() -->
 <div id="toast" role="status" hidden></div>
 
+  <script src="js/data/storage.js"></script>
+  <script src="js/data/schedule.js"></script>
+  <script src="js/data/habits.js"></script>
+  <script src="js/data/qaza.js"></script>
+  <script src="js/data/prayer.js"></script>
+  <script src="js/data/fast.js"></script>
+  <script src="js/data/sleep.js"></script>
+  <script src="js/data/stats.js"></script>
+  <script src="js/data/sync.js"></script>
+  <script src="js/data/backup.js"></script>
+  <script src="js/data/ui.js"></script>
   <script>
 /* YouPlanner — слой данных.
    Модульная сборка утрачена (§3 Spec.md), поэтому весь скрипт — один файл,
    а функции объявлены в глобальной области. Никаких внешних загрузок
    и обёрток-IIFE. */
 
-// Ключи localStorage
-const STORAGE_KEYS = {
-  habits: 'youplanner.habits',
-  records: 'youplanner.records',
-  // Ключ снятого раздела задач: нужен только миграции migrateDropTasks(),
-  // которая один раз удаляет старые данные задач с устройства.
-  tasks: 'youplanner.tasks',
-  schedule: 'youplanner.schedule',
-  migrations: 'youplanner.migrations',
-};
 
 // Кэш записей: null — «ещё не загружено», {} — валидное «записей нет».
 let recordsCache = null;
@@ -675,108 +676,6 @@ let recordsCache = null;
 function invalidateRecordsCache() {
   recordsCache = null;
 }
-
-// Базовое расписание. Хранится по ключу youplanner.schedule: ключа нет в
-// хранилище штатно — человек ещё не редактировал расписание, и loadSchedule()
-// подставляет DEFAULT_SCHEDULE. Редактирование через Настройки — Этап 6.
-const SCHEDULE_TYPES = ['weekday', 'weekend', 'fasting', 'physical'];
-
-const DEFAULT_SCHEDULE = {
-  weekday: [
-    { time: '04:30', text: 'Подъём' },
-    { time: '04:45', text: 'Фаджр' },
-    { time: '05:00', text: 'Тасбих' },
-    { time: '05:05', text: 'Каза' },
-    { time: '05:15', text: 'Коран' },
-    { time: '05:45', text: 'Планер' },
-    { time: '06:00', text: 'Кодинг' },
-    { time: '08:00', text: 'Завтрак' },
-    { time: '09:00', text: 'Кодинг' },
-    { time: '12:30', text: 'Зухр' },
-    { time: '12:50', text: 'Обед' },
-    { time: '13:30', text: 'Домашние' },
-    { time: '14:15', text: 'Кодинг' },
-    { time: '15:00', text: 'Аср' },
-    { time: '15:20', text: 'Спорт' },
-    { time: '15:40', text: 'Кодинг' },
-    { time: '18:00', text: 'Магриб' },
-    { time: '18:20', text: 'Каза' },
-    { time: '18:30', text: 'Ужин' },
-    { time: '19:00', text: 'Иша' },
-    { time: '19:30', text: 'Книга' },
-    { time: '20:00', text: 'Дневник' },
-    { time: '21:00', text: 'Отбой' },
-  ],
-  weekend: [
-    { time: '04:30', text: 'Подъём' },
-    { time: '04:45', text: 'Фаджр' },
-    { time: '05:00', text: 'Тасбих' },
-    { time: '05:05', text: 'Каза' },
-    { time: '05:15', text: 'Коран' },
-    { time: '05:45', text: 'Планер' },
-    { time: '06:00', text: 'Кодинг' },
-    { time: '12:30', text: 'Зухр' },
-    { time: '12:50', text: 'Обед' },
-    { time: '13:30', text: 'Выезд на учёбу' },
-    { time: '17:15', text: 'Аср' },
-    { time: '17:35', text: 'Спорт' },
-    { time: '18:00', text: 'Магриб' },
-    { time: '18:20', text: 'Каза' },
-    { time: '18:30', text: 'Ужин' },
-    { time: '19:00', text: 'Иша' },
-    { time: '19:30', text: 'Домашние' },
-    { time: '20:15', text: 'Книга' },
-    { time: '20:30', text: 'Дневник' },
-    { time: '21:30', text: 'Отбой' },
-  ],
-  fasting: [
-    { time: '04:30', text: 'Подъём, сухур' },
-    { time: '04:45', text: 'Фаджр' },
-    { time: '05:00', text: 'Тасбих' },
-    { time: '05:05', text: 'Каза' },
-    { time: '05:15', text: 'Коран' },
-    { time: '05:45', text: 'Планер' },
-    { time: '06:00', text: 'Кодинг' },
-    { time: '12:30', text: 'Зухр' },
-    { time: '13:45', text: 'Кодинг' },
-    { time: '15:00', text: 'Аср' },
-    { time: '15:20', text: 'Кодинг' },
-    { time: '18:00', text: 'Магриб (ифтар)' },
-    { time: '18:20', text: 'Каза' },
-    { time: '18:30', text: 'Еда' },
-    { time: '19:00', text: 'Иша' },
-    { time: '19:30', text: 'Книга' },
-    { time: '20:00', text: 'Дневник' },
-    { time: '21:00', text: 'Отбой' },
-  ],
-  physical: [
-    { time: '04:30', text: 'Подъём (по возможности)' },
-    { time: '04:45', text: 'Фаджр' },
-    { time: '12:30', text: 'Зухр' },
-    { time: '15:00', text: 'Аср' },
-    { time: '18:00', text: 'Магриб' },
-    { time: '19:00', text: 'Иша' },
-    { time: '21:00', text: 'Отбой' },
-  ],
-};
-
-// 12 привычек по умолчанию (порядок и значения — из спеки, п.5)
-const DEFAULT_HABITS = [
-  { id: 'h1', name: 'Фаджр', type: 'boolean', unit: '', goal: null },
-  { id: 'h2', name: 'Зухр', type: 'boolean', unit: '', goal: null },
-  { id: 'h3', name: 'Аср', type: 'boolean', unit: '', goal: null },
-  { id: 'h4', name: 'Магриб', type: 'boolean', unit: '', goal: null },
-  { id: 'h5', name: 'Иша', type: 'boolean', unit: '', goal: null },
-  { id: 'h6', name: 'Каза', type: 'number', unit: 'раз', goal: 3 },
-  // time — необязательное время привычки: у привычек с уровнями оно задаёт
-  // окно «вовремя» и цвет границы поля отметки (§1.1, §1.6)
-  { id: 'h7', name: 'Спорт', type: 'choice', unit: '', goal: null, time: null },
-  { id: 'h8', name: 'Коран', type: 'number', unit: 'стр.', goal: 5, time: null },
-  { id: 'h9', name: 'Работа с текстами', type: 'number', unit: 'мин', goal: 10 },
-  { id: 'h10', name: 'Чтение книги', type: 'number', unit: 'стр.', goal: 2 },
-  { id: 'h11', name: 'Таблицы', type: 'boolean', unit: '', goal: null },
-  { id: 'h12', name: 'Пресс', type: 'choice', unit: '', goal: null, time: null },
-];
 
 // Копия привычки по умолчанию по id. Копия, а не ссылка на элемент
 // DEFAULT_HABITS: записанное в localStorage не должно править сам список.
@@ -989,40 +888,6 @@ function setRecord(date, habitId, value) {
 }
 
 /* ---------- Уровни выполнения: Коран и Спорт ---------------------------- */
-
-// Привычки с уровнями: у них запись — объект { value, level }, а у привычки
-// есть необязательное время time (§1.1). Id из спеки трекера, как у каза.
-const SPORT_HABIT_ID = 'h7';
-const QURAN_HABIT_ID = 'h8';
-const PRESS_HABIT_ID = 'h12';
-
-// Уровни выполнения записи
-const LEVEL_ON_TIME = 'on-time';
-const LEVEL_LATE = 'late';
-const LEVEL_TWO_MIN = 'two-min';
-
-// Окно «вовремя» — ±60 минут от назначенного времени (§1.6)
-const LEVEL_WINDOW_MIN = 60;
-
-// Варианты привычек «Спорт» и «Пресс»: «да», «нет», «2 минуты», «отдых» (§3.1).
-// «Отдых» — запланированный пропуск: уровня у него нет, серию он не рвёт
-// и в прогресс не входит.
-const SPORT_VALUES = ['yes', 'no', 'two-min', 'rest'];
-const SPORT_VALUE_LABELS = {
-  'yes': 'да',
-  'no': 'нет',
-  'two-min': '2 минуты',
-  'rest': 'отдых',
-};
-
-// Коды прежней схемы. «Частично» убрано из списка, но в записях его
-// достаточно, и оно читается как «2 минуты» (§3.2).
-const SPORT_LEGACY_VALUES = {
-  'да': 'yes',
-  'нет': 'no',
-  'частично': 'two-min',
-  'отдых': 'rest',
-};
 
 // Спорт и Пресс — привычки типа choice со своим списком кодов вместо общего
 function isChoiceLevelHabit(habitId) {
@@ -1381,48 +1246,6 @@ function getMonthDatesToToday(year, month) {
 
 /* ---------- Каза-намазы: состояние очереди ---------- */
 
-const QAZA_STORAGE_KEY = 'youplanner.qaza';
-
-// Привычка, которая показывает счётчик каза за день. Id из спеки трекера:
-// дефолтные привычки имеют стабильные id h1…h12.
-const QAZA_HABIT_ID = 'h6';
-
-// Дневная цель — ориентир, а не жёсткий лимит
-const QAZA_DAILY_GOAL = 3;
-
-// Порядок обхода очереди: Фаджр → Зухр → Аср → Магриб → Иша → снова Фаджр
-const NAMAZ_ORDER = ['fajr', 'zuhr', 'asr', 'maghrib', 'isha'];
-const NAMAZ_LABELS = {
-  fajr: 'Фаджр',
-  zuhr: 'Зухр',
-  asr: 'Аср',
-  maghrib: 'Магриб',
-  isha: 'Иша',
-};
-
-// Версия схемы состояния. 2 — стартовый курсор перестал быть жёстким нулём
-// и задаётся вручную в блоке «Откуда продолжаем?».
-// 3 — запись истории получила поле source (обычное выполнение или ручное добавление).
-const QAZA_VERSION = 3;
-
-// Источник записи в истории. Ручные записи не считаются выполнением:
-// они увеличивают остаток, но не счётчик каза за день.
-const QAZA_SOURCE_DONE = 'done';
-const QAZA_SOURCE_MANUAL = 'manual';
-
-// Магриб (индекс 3) — откуда продолжается очередь при начальных данных:
-// сегодня уже выполнены Фаджр, Магриб и Иша.
-const QAZA_DEFAULT_CURSOR = 3;
-
-// Начальные данные: 1530 каза, по 306 на намаз. Сегодня уже выполнены
-// Фаджр, Магриб и Иша, поэтому у них 305.
-const DEFAULT_QAZA = {
-  version: QAZA_VERSION,
-  cursor: QAZA_DEFAULT_CURSOR,
-  remaining: { fajr: 305, zuhr: 306, asr: 306, maghrib: 305, isha: 305 },
-  history: [],
-};
-
 // Копия состояния каза с проверкой типов. Возвращает новые объекты,
 // чтобы правки никогда не задели константу DEFAULT_QAZA.
 function copyQaza(source) {
@@ -1546,13 +1369,6 @@ function saveQaza(qaza) {
 
 /* ---------- Каза-намазы: растущий журнал выполнений ---------------------- */
 
-// Ключ растущего журнала выполнений — сосед youplanner.qaza, но не его
-// часть: там стек отмены за сегодня, здесь история на годы (§5).
-const QAZA_LOG_KEY = 'youplanner.qaza.log';
-
-// Версия схемы журнала. 1 — записи с полем source, как у истории уразы (§5).
-const QAZA_LOG_VERSION = 1;
-
 // Календарный день 'YYYY-MM-DD' — и у since, и у даты записи
 function validQazaLogDate(value) {
   return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value);
@@ -1663,56 +1479,6 @@ function qazaLogDoneByDay(log) {
 }
 
 /* ---------- Молитвы: координаты, мазхаб и расчёт времён ------------------ */
-
-// Координаты и мазхаб живут одним ключом и ходят на сервер одним разделом,
-// как каза. Ключа нет — координаты не заданы: это и есть первый
-// запуск, по нему показывается приветственный экран.
-const PRAYER_KEY = 'youplanner.prayer';
-
-// Часовой пояс расчёта. Расписание ДУМ ЧР публикуется по московскому времени,
-// перевода часов в России нет, поэтому пояс задан числом и от настроек
-// устройства не зависит: иначе у телефона в другом поясе времена уехали бы.
-const PRAYER_TZ = 3;
-
-// Мазхаб влияет только на Аср: во сколько раз тень предмета должна превысить
-// его высоту. Ханафитский — ×2, шафиитский — ×1, как в методе ДУМ ЧР (§11q).
-const PRAYER_SHADOW = { shafi: 1, hanafi: 2 };
-const PRAYER_MADHHABS = ['shafi', 'hanafi'];
-const PRAYER_MADHHAB_LABELS = { shafi: 'Шафиитский', hanafi: 'Ханафитский' };
-
-// Метод расчёта. Отличаются только Зухром: ДУМ ЧР закрепляет его на 12:30
-// круглый год, астрономический берёт истинный солнечный полдень.
-const PRAYER_METHODS = ['dum-chr', 'astro'];
-const PRAYER_METHOD_LABELS = { 'dum-chr': 'ДУМ ЧР', astro: 'Астрономический' };
-const PRAYER_METHOD_DEFAULT = 'dum-chr';
-
-// Порядок времён в списке. Восход — не намаз, но он строка списка и участвует
-// в «следующем»: пользователь видит его время и ждёт его появления.
-const PRAYER_ORDER = ['fajr', 'sunrise', 'dhuhr', 'asr', 'maghrib', 'isha'];
-const PRAYER_LABELS = {
-  fajr: 'Фаджр', sunrise: 'Восход', dhuhr: 'Зухр',
-  asr: 'Аср', maghrib: 'Магриб', isha: 'Иша',
-};
-
-// Окна намазов: [начало, конец). Восход окна не имеет — это не намаз, а
-// граница утреннего. Иша тянется до полуночи: её продолжение после 00:00
-// принадлежит уже следующему дню, и экран за него не отвечает.
-const PRAYER_WINDOWS = [
-  ['fajr', 'sunrise'], ['dhuhr', 'asr'], ['asr', 'maghrib'],
-  ['maghrib', 'isha'], ['isha', null],
-];
-
-// Углы метода ДУМ ЧР: Фаджр — 16° под горизонтом, Иша — 15°.
-const PRAYER_FAJR_ANGLE = 16;
-const PRAYER_ISHA_ANGLE = 15;
-// Восход и закат: 0,833° — высота с учётом рефракции и радиуса диска
-const PRAYER_HORIZON_ANGLE = 0.833;
-
-// Зухр метода ДУМ ЧР: закреплён на 12:30 круглый год, а не солнечный полдень.
-// Постоянных правок в минутах нет и не нужно: чистый расчёт с этими углами
-// и тенью ×1 совпадает с эталоном ДУМ ЧР на весь сентябрь 2026 в пределах
-// минуты (§11q, §13).
-const PRAYER_DHUHR_FIXED = 12 * 60 + 30;
 
 function prayerRad(deg) { return deg * Math.PI / 180; }
 function prayerDeg(rad) { return rad * 180 / Math.PI; }
@@ -1902,28 +1668,6 @@ function savePrayer(prayer) {
 
 /* ---------- Ураза: счётчик каза-постов ----------------------------------- */
 
-// Ключ свой, отдельный от каза-намазов: счётчики независимы (§5).
-// Отсутствие ключа — это и есть первый запуск; дефолта у уразы нет,
-// начальное число задаёт человек.
-const FAST_KEY = 'youplanner.qaza.fast';
-
-// Версия схемы. 1 — растущая история событий с полем source.
-const FAST_VERSION = 1;
-
-// Источник записи истории: 'set' — первый запуск и «Изменить счётчик»,
-// 'done' — «Возместить 1 день», 'add' — «Добавить уразу».
-const FAST_SOURCE_SET = 'set';
-const FAST_SOURCE_DONE = 'done';
-const FAST_SOURCE_ADD = 'add';
-
-// Больше этого числа за раз не принимается: случайное нажатие не должно
-// раздувать счётчик, а опечатка — историю
-const FAST_MAX_INPUT = 100000;
-
-// Меньше этого числа событий за всё время — графика нет: три столбика на всю
-// ширину карточки читались бы как «истории достаточно», хотя её почти нет
-const FAST_HISTORY_MIN = 5;
-
 // Чистка истории. Пришла из хранилища, с сервера или из файла копии — правило
 // одно: элемент годится, если это объект с датой 'YYYY-MM-DD', неотрицательным
 // конечным числом и известным источником. Битые записи отбрасываются молча:
@@ -2068,27 +1812,6 @@ function fastRemainingLabel(n) {
 
 /* ---------- Цикл сна: расчёт и хранилище --------------------------------- */
 
-// Длина одного цикла сна в минутах и потолок расчёта. Циклов шесть:
-// от 90 минут до 9 часов. Раздел живёт по ключу youplanner.sleep и ходит
-// и в синхронизацию, и в файл копии восьмым разделом (§5).
-// Версия 2 добавила к трём опорам расчёта пару actualWake/sleepMin — время,
-// которое пойдёт в историю, и длительность сна. У записи версии 1 её нет,
-// и это не порча, а другой возраст: читается она по-прежнему, а недостающая
-// пара подставляется целью («встаю в своё время»).
-// Версия 3 добавила историю — массив записей по дням, растущий, как у уразы.
-// Отдельного ключа у неё нет: запись дня ищется проходом по полю date
-// Версия 4 добавила пару realWake/realSleepMin и флаг excluded: во сколько
-// человек встал на самом деле и не выбросить ли день из статистики.
-// Отсутствие пары — признак версии 1 или 3, и это возраст, а не порча
-const SLEEP_KEY = 'youplanner.sleep';
-const SLEEP_VERSION = 4;
-// Больше суток от засыпания до подъёма быть не может: оба конца лежат
-// на одной ночи. Потолок нужен только для чтения чужой записи
-const SLEEP_MAX_MINUTES = 1440;
-const SLEEP_CYCLE_MIN = 90;
-const SLEEP_CYCLE_COUNT = 6;
-// Больше двух часов засыпания в поле не влезает: это уже не засыпание
-const SLEEP_MAX_FALL = 120;
 
 // 'HH:MM' → минуты от полуночи. Всё прочее, включая '7:30' и '24:00', —
 // null: поле времени браузера даёт ровно такой формат
@@ -2431,30 +2154,6 @@ function saveSleep(sleep) {
 
 /* ---------- Раздел «Статистика» ------------------------------------------ */
 
-// Период — отметка устройства, как youplanner.mainView: в синхронизацию
-// и в файл резервной копии не входит (§5)
-const STATS_PERIOD_KEY = 'youplanner.stats.period';
-const STATS_PERIODS = ['week', 'month', 'year', 'all'];
-const STATS_PERIOD_DEFAULT = 'month';
-
-// Пять категорий статистики: у каждой свой период
-const STATS_PERIOD_CATEGORIES = ['hub', 'qaza', 'habits', 'fast', 'sleep'];
-
-// Блок периодов → категория. Блоков шесть, категорий пять: список привычек
-// и карточка одной привычки делят период категории «habits»
-const STATS_PERIOD_BOXES = {
-  'stats-period': 'hub',
-  'stats-qaza-period': 'qaza',
-  'stats-habits-period': 'habits',
-  'stats-habit-period': 'habits',
-  'stats-fast-period': 'fast',
-  'stats-sleep-period': 'sleep',
-};
-
-// «Всё время» — окно в 365 дней от сегодня, а не от первой записи: иначе
-// одна старая запись растянула бы график на годы пустых дней
-const STATS_ALL_DAYS = 365;
-
 // Содержимое ключа как объект периодов. Ключа нет и мусор в нём — пустой
 // объект: обе ветки читаются как «Месяц». Строка из списка — след прежней
 // версии, где период был один: переносится на все шесть категорий, и первая
@@ -2550,22 +2249,6 @@ function habitsAveragePercent(habits, dates) {
 }
 
 /* ---------- Синхронизация с Firebase (REST, без SDK) --------------------- */
-
-const FIREBASE_URL = 'https://youplanner-5c2f5-default-rtdb.firebaseio.com/youplanner-d8aaea12-60e6-4ac9-973c-46c19b387cd9';
-// Бэкапы живут ОТДЕЛЬНЫМ корнем, а не ребёнком синхронизируемого узла:
-// PUT на FIREBASE_URL заменяет узел целиком вместе со всеми детьми,
-// поэтому вложенный /backups стирался бы каждой же синхронизацией
-// сразу после записи. Соседний корень основной PUT не трогает.
-const FIREBASE_BACKUPS_URL = 'https://youplanner-5c2f5-default-rtdb.firebaseio.com/youplanner-d8aaea12-60e6-4ac9-973c-46c19b387cd9-backups';
-const SYNC_TS_KEY = 'youplanner.sync.ts';
-
-// Сколько версий держим в узле бэкапов (FIREBASE_BACKUPS_URL)
-const BACKUP_LIMIT = 10;
-
-// Отправка после правки откладывается: серия тапов по клеткам даёт один PUT
-const SYNC_DEBOUNCE_MS = 1500;
-// Сколько держится надпись о ручной синхронизации
-const SYNC_STATUS_MS = 2000;
 
 let syncTimer = null;
 let syncStatusTimer = null;
@@ -3085,15 +2768,6 @@ function showSyncStatus(message) {
 
 /* ---------- Экспорт и импорт данных -------------------------------------- */
 
-// Версия формата резервной копии. Растёт, если меняется состав полей файла:
-// версия 2 добавила раздел tasks, версия 3 — раздел prayer, версия 4 —
-// время у привычки и уровень у записи (§8), версия 5 — раздел fast (§11x),
-// версия 6 — раздел qazaLog (§5), 7 — раздел sleep, 8 — история сна (§11ab),
-// 10 — раздел tasks снят, 11 — раздел schedule (§11ac).
-// Разбор принимает файлы ровно этой версии: расписание ходит разделом целиком,
-// и старые копии (до 11) расписание за собой не тянут — их отвергаем, чтобы
-// не соединять два поколения формата.
-const BACKUP_VERSION = 11;
 
 // Что попадает в файл. Метка синхронизации и режим главного экрана — состояние
 // устройства, а не данные, поэтому в копию не входят. Координат может не быть;
@@ -3558,37 +3232,6 @@ let scheduleType = 'weekday';
 let scheduleEditType = 'weekday';
 
 /* --- Константы ----------------------------------------------------------- */
-
-// Геометрия прогресс-круга: радиус 27, длина окружности 2 * π * 27 ≈ 169.646
-const CIRCLE_RADIUS = 27;
-const CIRCLE_LENGTH = 2 * Math.PI * CIRCLE_RADIUS;
-const CIRCLE_CENTER = 32;
-const CIRCLE_SIZE = 64;
-
-// Месяцы: именительный падеж — для заголовка, родительный — для диапазона дней
-const MONTHS_NOMINATIVE = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
-  'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
-const MONTHS_GENITIVE = ['января', 'февраля', 'марта', 'апреля', 'мая', 'июня',
-  'июля', 'августа', 'сентября', 'октября', 'ноября', 'декабря'];
-const MONTHS_SHORT = ['янв', 'фев', 'мар', 'апр', 'май', 'июн',
-  'июл', 'авг', 'сент', 'окт', 'ноя', 'дек'];
-
-// Варианты значения для привычек типа choice (пустая опция = «нет записи»).
-// Коды привычек с уровнями лежат в SPORT_VALUES рядом с уровнями: у Спорта
-// и Пресса список свой, и «частично» в нём больше нет (§3.1).
-const CHOICE_OPTIONS = ['да', 'нет', 'частично', 'отдых'];
-
-// Доступные типы привычек для формы
-const HABIT_TYPES = [
-  { value: 'boolean', label: 'Да / Нет' },
-  { value: 'number', label: 'Число' },
-  { value: 'choice', label: 'Выбор' },
-];
-
-// Версия приложения для строки в Настройках. Номер живёт здесь, а не в разметке:
-// обновлять его придётся в одном месте.
-const APP_VERSION = '1.0';
-const APP_BUILD = '2026-10-01';
 
 /* --- Вспомогательные функции (не пересекаются с именами data.js) --------- */
 
@@ -4299,8 +3942,6 @@ function bindEvents() {
     });
   }
 
-
-
   // Клавиатура меняет visualViewport, а не resize окна
   if (window.visualViewport) {
     window.visualViewport.addEventListener('resize', syncSheetToKeyboard);
@@ -4326,8 +3967,6 @@ function bindEvents() {
     if (!sheetPanel) return;
     sheetPanel.style.paddingBottom = '';
   });
-
-
 
   const levelOptions = document.querySelectorAll('#level-sheet .level-option');
   for (let i = 0; i < levelOptions.length; i++) {
