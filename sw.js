@@ -1,5 +1,11 @@
-const CACHE = 'youplanner-v2';
-const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon.svg'];
+const CACHE = 'youplanner-v3';
+const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon.svg',
+  './styles/tokens.css', './styles/layout.css', './styles/buttons.css',
+  './styles/table.css', './styles/cells.css', './styles/progress-circle.css',
+  './styles/modal.css', './styles/qaza.css', './styles/day-view.css',
+  './styles/schedule.css', './styles/sheets.css', './styles/prayer.css',
+  './styles/toast.css', './styles/settings.css', './styles/stats.css',
+  './styles/habits-edit.css', './styles/mobile.css', './styles/effects.css'];
 
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(ASSETS); }));

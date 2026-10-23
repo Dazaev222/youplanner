@@ -1,0 +1,49 @@
+/* YouPlanner — стили. Палитра приложения задана переменными в :root. */
+
+/* --- Палитра --- */
+:root {
+  --bg: #FEFEFE;            /* основной фон страницы */
+  --text: #1c1c22;          /* контраст к --surface #D8EDF7 ≈ 14:1 */
+  --text-muted: #5c5c6e;
+  --surface: #D8EDF7;       /* вторичный фон: карточки, панели, строки таблицы */
+  --surface-alt: #EEF3FA;   /* вторичные поверхности: шапка таблицы, селекты, вторичные кнопки */
+  --border: #9AAFD4;
+  --accent: #5870C5;        /* кнопки, активные ссылки; белый текст на нём ≈ 4.5:1 */
+  --accent-soft: #E8EDF8;   /* светлая подложка акцента: подсветка, выбранное состояние */
+  --success: #1f9d63;
+  --danger: #c93a3a;        /* контраст к белому тексту ≈ 5.1:1 */
+  --two-min: #38bdf8;       /* уровень «2 минуты»: голубая граница поля */
+  --on-accent: #ffffff;     /* цвет текста на фоне --accent */
+  --on-danger: #ffffff;     /* цвет текста на фоне --danger */
+  --shadow: 0 8px 24px rgba(20, 20, 40, .12);
+}
+
+/* --- База --- */
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  margin: 0;
+  padding: 0;
+}
+
+body {
+  background-color: #F2F2F7;
+  min-height: 100dvh;
+  color: var(--text);
+  font-family: 'Inter', system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.45;
+  transition: background-color .15s, color .15s;
+}
+
+/* Clarity: у любого поля ввода текст плотный и тёмный. Приглушённые оттенки
+   здесь недопустимы — иначе цифры и время читаются хуже подписи. */
+input,
+select,
+textarea {
+  color: #1c1c22 !important;
+}
+

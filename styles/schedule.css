@@ -1,0 +1,99 @@
+/* --- Вкладка «Расписание» ------------------------------------------------- */
+
+/* display у элемента перебил бы атрибут hidden */
+/* Кнопка в шапке ПК: на телефоне её заменяет таб-бар. Пара к display нужна
+   своя: id-правило сильнее общего .btn[hidden] из блока каза, поэтому без
+   него кнопка оставалась бы нарисованной внутри вкладки расписания. */
+#schedule-btn {
+  display: inline-flex;
+}
+
+#schedule-btn[hidden] {
+  display: none;
+}
+
+#schedule-view {
+  margin-top: 20px;
+  padding: 22px 26px 26px;
+  border: none;
+  border-radius: 0;
+  background: transparent !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  box-shadow: none !important;
+}
+
+#schedule-view[hidden] {
+  display: none;
+}
+
+#schedule-switch {
+  display: flex;
+  gap: 0;
+  margin: 12px 0;
+  padding: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.3);
+  position: relative;
+}
+
+#schedule-list {
+  margin: 12px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+#schedule-list li {
+  display: flex;
+  align-items: baseline;
+  gap: 16px;
+  margin-bottom: 8px;
+  padding: 12px 14px;
+  border: none;
+  border-radius: 12px;
+  background: #FFFFFF !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+/* Строки редактора расписания: разметка приходит из renderScheduleEditView()
+   с инлайновой рамкой, поэтому карточка задана здесь с !important — иначе
+   инлайновый разделитель перебил бы её. Фон — белый, как у строк настроек. */
+#schedule-edit-list li {
+  margin-bottom: 8px;
+  border: none !important;
+  border-radius: 12px;
+  background: #FFFFFF !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.schedule-time {
+  flex: 0 0 auto;
+  min-width: 52px;
+  color: var(--text-muted);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+.schedule-text {
+  flex: 1 1 auto;
+  color: var(--text);
+  font-size: 15px;
+}
+
+@media (max-width: 700px) {
+  #schedule-view {
+    padding: 14px 14px 20px;
+    margin-top: 12px;
+  }
+
+  #schedule-view .qaza-head {
+    display: block;
+  }
+
+  #schedule-view .qaza-head h2 {
+    font-size: 17px;
+  }
+}
+
+

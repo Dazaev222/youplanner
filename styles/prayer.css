@@ -1,0 +1,255 @@
+/* Вкладка «Молитвы» ---------------------------------------------------- */
+/* Контейнеры прозрачные: серый фон страницы просвечивает. */
+#prayer-view,
+#prayer-settings-view {
+  margin-top: 20px;
+  padding: 22px 26px 26px;
+  border: none;
+  border-radius: 0;
+  background: transparent !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  box-shadow: none !important;
+  animation: qaza-view-in .22s ease-out;
+}
+
+/* Шапка каза после появления «Молитв»: кнопка слева, заголовок прижат вправо
+   и стоит вплотную к «← Назад». Автоотступ — единственное, что разводит
+   кнопку и заголовок, поэтому порядок в разметке остаётся естественным. */
+#qaza-view .qaza-head h2 {
+  margin-left: auto;
+}
+
+/* Большой круг: кольцо и время следующего намаза */
+#prayer-ring {
+  position: relative;
+  width: 216px;
+  height: 216px;
+  margin: 6px auto 0;
+}
+
+#prayer-ring svg {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.prayer-ring-track {
+  fill: none;
+  stroke: rgba(0, 98, 204, .16);
+  stroke-width: 12;
+}
+
+.prayer-ring-progress {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 12;
+  stroke-linecap: round;
+  transform: rotate(-90deg);
+  transform-origin: 50% 50%;
+  transition: stroke-dashoffset .3s ease-out;
+}
+
+.prayer-ring-center {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+}
+
+#prayer-next-name {
+  color: var(--text-muted);
+  font-size: 14px;
+}
+
+#prayer-next-time {
+  font-size: 36px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -.02em;
+  line-height: 1.1;
+}
+
+#prayer-next-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+/* Список времён: строки-карточки поверх градиента */
+#prayer-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 22px;
+}
+
+.prayer-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 14px;
+  border: none;
+  border-radius: 12px;
+  background: #FFFFFF !important;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+/* Текущий намаз: рамка и фон плюс счётчик у следующей строки — состояние
+   видно и без опоры на один цвет */
+.prayer-row.is-current {
+  border: 1px solid var(--accent);
+  background: var(--accent-soft);
+}
+
+/* Восход — не намаз: приглушён текст, но карточка — такая же белая */
+.prayer-row.is-sunrise {
+  color: var(--text-muted);
+}
+
+.prayer-row-right {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+}
+
+.prayer-row-time {
+  font-variant-numeric: tabular-nums;
+  font-size: 15px;
+}
+
+.prayer-countdown {
+  color: var(--accent);
+  font-size: 13px;
+}
+
+/* Первый запуск: два способа задать координаты */
+.prayer-welcome-lead {
+  margin: 16px 0 0;
+  color: var(--text-muted);
+}
+
+#prayer-welcome-fields {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.prayer-field {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.prayer-field span {
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+/* 16px — порог, ниже которого iOS зумит страницу при фокусе в поле */
+.prayer-field input {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid rgba(154, 175, 212, 0.6);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.75);
+  outline: none;
+  color: #1c1c22 !important;
+  font: inherit;
+  font-size: 16px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Поля на экранах Настроек и Сна: та же плотная подложка, что у ячеек
+   недели, но без собственного размытия — иначе blur наслоился бы на blur
+   карточки. Галочки и файловый ввод исключены: это не текстовые поля. */
+#settings-view input:not([type="checkbox"]):not([type="file"]),
+#sleep-view input:not([type="checkbox"]) {
+  border: 1px solid rgba(154, 175, 212, 0.6);
+  background: rgba(255, 255, 255, 0.75);
+  color: #1c1c22 !important;
+  font-weight: 500;
+}
+
+.prayer-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+#prayer-welcome-note {
+  margin: 14px 0 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+#prayer-welcome-note:empty {
+  display: none;
+}
+
+/* Настройки молитв: метод расчёта, мазхаб и координаты. Правила у двух групп
+   пилюль общие — как у пар .qaza-start-* и .qaza-add-* */
+#prayer-madhhab,
+#prayer-method {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.prayer-madhhab-option,
+.prayer-method-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  padding: 10px 16px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: var(--surface-alt);
+  cursor: pointer;
+}
+
+.prayer-madhhab-option.is-active,
+.prayer-method-option.is-active {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--text);
+}
+
+/* Радио скрыто визуально, но остаётся фокусируемым: кольцо фокуса рисуется
+   на подписи */
+.prayer-madhhab-radio,
+.prayer-method-radio {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+}
+
+.prayer-madhhab-radio:focus-visible + span,
+.prayer-method-radio:focus-visible + span {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 6px;
+}
+
+.prayer-settings-block {
+  margin-top: 22px;
+}
+
+#prayer-coords {
+  margin: 10px 0 0;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+

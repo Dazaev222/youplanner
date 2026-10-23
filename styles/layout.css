@@ -1,0 +1,51 @@
+/* --- Каркас страницы --- */
+#app {
+  min-width: 1024px;
+  max-width: 1180px;
+  margin: 0 auto;
+  padding: 0 24px 48px;
+  transition: background-color .15s, color .15s;
+}
+
+/* Запас под парящий таб-бар: последние карточки не уходят под стекло */
+#main {
+  padding-bottom: 140px !important;
+}
+
+/* --- Шапка --- */
+#header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+  padding: 20px 0 16px;
+  border-bottom: 1px solid var(--border);
+}
+
+#logo {
+  font-size: 20px;
+  font-weight: 600;
+  letter-spacing: -.01em;
+  white-space: nowrap;
+}
+
+#week-nav {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#week-label {
+  min-width: 240px;
+  text-align: center;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+#header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
