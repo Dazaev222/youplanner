@@ -1,0 +1,125 @@
+/* --- Раздел «Статистика» -------------------------------------------------- */
+/* Цифра строки хаба — данные, поэтому основной цвет, а не приглушённый.
+   Табличные цифры остаются: значения меняются при смене периода, и без
+   tabular-nums строка дёргалась бы. */
+.stats-row-value {
+  color: var(--text);
+  font-size: 15px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Пустое состояние экрана статистики: вместо цифр или графика одна строка
+   текста. Приглушена и мельче строк — это пояснение, а не значение, и
+   отступ у неё как у подписи в карточке (.qaza-summary) */
+.stats-empty-note {
+  margin: 16px 0 0;
+  color: #8E8E93;
+  font-size: 13px;
+}
+
+/* Сегмент-контрол периодов: тот же вид и то же правило подсветки, что
+   у переключателя «День / Неделя» (.view-switch-btn) */
+#stats-period,
+#stats-qaza-period,
+#stats-habits-period,
+#stats-habit-period,
+#stats-fast-period,
+#stats-sleep-period {
+  display: flex;
+  gap: 0;
+  margin: 12px 0;
+  padding: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.3);
+}
+
+/* График по дням: столбики рисует statsChartMarkup, высота — сколько каза
+   за день. Столбики растягиваются по ширине карточки, поэтому
+   preserveAspectRatio у svg снят, а форма остаётся прямоугольной. */
+.stats-chart {
+  margin-top: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Линия основания: столбики стоят на ней, и без неё график сливался бы
+   с последней строкой цифр */
+.stats-chart svg {
+  display: block;
+  width: 100%;
+  height: 120px;
+  border-bottom: 1px solid rgba(60, 60, 67, 0.15);
+}
+
+.stats-chart rect {
+  fill: var(--accent);
+}
+
+/* Календарь-сетка: колонка — неделя, строка — день недели. Клетки заданы
+   в пикселях разметкой, поэтому сетка не сжимается под узкий экран, а
+   прокручивается контейнером: ужатая сетка слилась бы в полосу */
+#stats-habit-grid {
+  margin-top: 12px;
+  overflow-x: auto;
+}
+
+#stats-habit-grid svg {
+  display: block;
+}
+
+/* День без записи — рамка, день с весом больше нуля — акцент. Переменные
+   существующие: палитра итерации не менялась */
+.stats-grid-day {
+  fill: var(--border);
+}
+
+.stats-grid-day.is-on {
+  fill: var(--accent);
+}
+
+/* Панель навигации статистики (заход 4, §11z). Правила стоят здесь, до
+   мобильного запроса: он только показывает панель, а выезд, замок фокуса
+   и запрет движения описаны тут же подряд — иначе мобильный запрос перебил
+   бы запрет движения одним лишь порядком правил. */
+#stats-menu-btn,
+#stats-menu {
+  display: none;
+}
+
+#stats-menu {
+  position: fixed;
+  top: 0;
+  left: 0;
+  bottom: 0;
+  width: 80%;
+  max-width: 320px;
+  padding: calc(20px + env(safe-area-inset-top, 0px)) 0 20px;
+  background: rgba(255, 255, 255, 0.45) !important;
+  -webkit-backdrop-filter: blur(16px) saturate(1.2);
+  backdrop-filter: blur(16px) saturate(1.2);
+  border-right: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 0 16px 16px 0;
+  box-shadow: 0 0 32px rgba(0, 0, 0, .18);
+  overflow-y: auto;
+  transform: translateX(-100%);
+  /* Закрытая панель уехала и в обходе Tab не участвует. visibility
+     снимается с задержкой, равной выезду: иначе пункты пропадали бы
+     раньше, чем панель доехала */
+  visibility: hidden;
+  transition: transform .25s ease-out, visibility 0s linear .25s;
+  z-index: 60;
+}
+
+#stats-menu.is-open {
+  transform: translateX(0);
+  visibility: visible;
+  transition: transform .25s ease-out, visibility 0s;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  #stats-menu,
+  #stats-menu.is-open {
+    transition: none;
+  }
+}
+

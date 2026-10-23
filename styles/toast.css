@@ -1,0 +1,36 @@
+/* --- Тост ---------------------------------------------------------------- */
+/* Плашка-подсказка поверх всех шторок.
+   Фон — из --text, текст — из --surface: плашка контрастна палитре и новых
+   цветов в неё не заводит (§9). Кликов тост не ловит: это подсказка, а не
+   кнопка, — и потому не мешает нажимать то, что под ним. Отступ считается
+   от верха клавиатуры, как у шторок: тост показывается при открытой форме, а
+   fixed на iOS остался бы за клавиатурой. */
+#toast {
+  position: fixed;
+  left: 50%;
+  bottom: calc(var(--keyboard-offset, 0px) + 96px);
+  z-index: 150;
+  max-width: calc(100vw - 32px);
+  padding: 12px 18px;
+  border-radius: 14px;
+  background: var(--text);
+  color: var(--surface);
+  font-size: 14px;
+  line-height: 1.35;
+  text-align: center;
+  box-shadow: var(--shadow);
+  transform: translateX(-50%);
+  pointer-events: none;
+  animation: toast-in .18s ease-out;
+}
+
+#toast[hidden] {
+  display: none;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+  }
+}
+

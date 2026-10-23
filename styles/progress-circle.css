@@ -1,0 +1,50 @@
+/* --- Круг прогресса --- */
+.progress-cell {
+  width: 88px;
+  text-align: center;
+  vertical-align: middle;
+}
+
+.progress-circle {
+  display: inline-block;
+  width: 64px;
+  height: 64px;
+  vertical-align: middle;
+  transition: transform .2s ease;
+}
+
+/* Дорожка и дуга одной толщины: дуга толще прежней, концы скруглены */
+.progress-track {
+  stroke: var(--border);
+  stroke-width: 6;
+}
+
+.progress-arc {
+  fill: none;
+  stroke-width: 6;
+  stroke-linecap: round;
+  transition: stroke-dashoffset .2s ease;
+}
+
+/* Круг приходит в движение вместе со строкой — но слабее, чтобы не спорить с ней */
+@media (hover: hover) {
+  .habit-row:hover .progress-circle {
+    transform: translateZ(10px);
+  }
+}
+
+.progress-text {
+  fill: var(--text);
+  font-size: 14px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Месячный процент — второй строкой внутри круга */
+.progress-month {
+  fill: var(--text-muted);
+  font-size: 10px;
+  font-weight: 400;
+  font-variant-numeric: tabular-nums;
+}
+

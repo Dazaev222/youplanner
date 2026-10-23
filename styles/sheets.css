@@ -1,0 +1,140 @@
+/* Шторка (попап уровня). На ПК — окошко по центру, на телефоне —
+   панель, прижатая к низу экрана (см. медиа-запрос). */
+.sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 110;
+}
+
+.sheet[hidden] {
+  display: none;
+}
+
+/* Фон только затемняется, без размытия: сквозь шторку должно читаться,
+   что под ней. */
+.sheet-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(0, 0, 0, .25);
+}
+
+.sheet-panel {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  width: 420px;
+  max-width: calc(100vw - 32px);
+  padding: 16px;
+  background: rgba(255, 255, 255, 0.75);
+  -webkit-backdrop-filter: blur(20px) saturate(1.3);
+  backdrop-filter: blur(20px) saturate(1.3);
+  border: 1px solid rgba(255, 255, 255, 0.35);
+  border-radius: 20px;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 8px 32px rgba(0, 0, 0, 0.08);
+  /* Панель не выше экрана: длинная панель прокручивается,
+     а не уезжает верхом за край. */
+  max-height: calc(100vh - 24px);
+  overflow-y: auto;
+}
+
+/* Шапка шторки: заголовок */
+.sheet-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+/* Типографика как у .qaza-head h2: у браузерного h2 она крупнее нужного */
+.sheet-head h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 600;
+  letter-spacing: -.01em;
+}
+
+
+/* --- Попап уровня выполнения (§1.3) --------------------------------------
+   Одна шторка на обе привычки со строками во всю ширину панели. */
+#level-sheet {
+  z-index: 1200;
+}
+
+/* iOS-style bottom sheet */
+#level-sheet .sheet-panel {
+  position: fixed !important;
+  bottom: 0;
+  left: 0;
+  width: 100%;
+  background: rgba(255, 255, 255, 0.85);
+  backdrop-filter: blur(30px);
+  -webkit-backdrop-filter: blur(30px);
+  border-radius: 20px 20px 0 0;
+  padding: 20px 16px env(safe-area-inset-bottom, 20px);
+  box-shadow: 0 -4px 32px rgba(0, 0, 0, 0.12);
+  border: none;
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.level-option {
+  display: block;
+  width: 100%;
+  min-height: 55px;
+  padding: 12px 16px;
+  border: 0;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.08);
+  background: transparent;
+  color: var(--accent);
+  font: inherit;
+  font-size: 17px;
+  text-align: center;
+  cursor: pointer;
+}
+
+.level-option:active {
+  background: var(--surface-alt);
+}
+
+/* Выбранный уровень — фоном: попап показывает, что уже стоит */
+.level-option.is-active {
+  background: var(--accent-soft);
+}
+
+/* «Полная версия» без числа — не готова: выполнять нечего (§2.3).
+   «2 минуты» доступны всегда, в том числе когда время не задано (§1.7). */
+.level-option:disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.level-option:disabled:active {
+  background: transparent;
+}
+
+.level-option + .level-option {
+  border-top: 1px solid var(--border);
+  border-radius: 0;
+}
+
+#level-sheet .btn {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 8px;
+}
+
+/* Кнопка «Отмена» — iOS-style pill */
+.sheet-cancel-btn {
+  margin: 10px 20px;
+  background: #FFFFFF;
+  border-radius: 12px;
+  min-height: 50px;
+  font-weight: 600;
+  border: none;
+  color: var(--accent);
+  font-size: 17px;
+  text-align: center;
+  cursor: pointer;
+}
+

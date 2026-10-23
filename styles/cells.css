@@ -1,0 +1,163 @@
+/* --- Ячейки дней --- */
+.cell {
+  text-align: center;
+  vertical-align: middle;
+}
+
+.cell-check {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+  vertical-align: middle;
+  transition: transform .15s ease;
+}
+
+.cell-x {
+  width: 20px;
+  height: 20px;
+  margin: 0 0 0 6px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  background-color: var(--surface);
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+  vertical-align: middle;
+  transition: background-color .15s, border-color .15s, color .15s, transform .15s ease;
+}
+
+.cell-x:hover {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+.cell-x.is-active {
+  background-color: var(--danger);
+  border-color: var(--danger);
+  color: var(--on-danger);
+}
+
+/* Поля внутри ячейки — той же формы, что пилюли вкладки каза: скругление,
+   полупрозрачная подложка, рамка. Подложка плотнее строки (0.75 против 0.5),
+   чтобы цифры читались на просвечивающем фоне, но своего blur у поля нет. */
+.cell-number,
+.cell-select {
+  padding: 4px 6px;
+  border: 1px solid rgba(154, 175, 212, 0.6);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.75);
+  outline: none;
+  color: #1c1c22 !important;
+  font: inherit;
+  font-size: 13px;
+  font-weight: 500;
+  transition: border-color .15s ease, transform .15s ease;
+}
+
+.cell-number {
+  width: 56px;
+  text-align: center;
+}
+
+.cell-select {
+  width: 100px;
+}
+
+/* Наведение на ячейку поднимает то, с чем в ней работают, а не саму ячейку:
+   подъём коробки разорвал бы контур карточки строки. */
+@media (hover: hover) {
+  .cell:hover .cell-number,
+  .cell:hover .cell-select {
+    transform: translateY(-1px);
+  }
+
+  /* Акцентную рамку при наведении получает только поле без уровня: цвет
+     уровня важнее подсказки, и перебивать его нельзя (§1.4) */
+  .cell:hover .cell-number:not(.is-on-time):not(.is-late):not(.is-two-min),
+  .cell:hover .cell-select:not(.is-on-time):not(.is-late):not(.is-two-min) {
+    border-color: var(--accent);
+  }
+
+  .cell:hover .cell-check {
+    transform: scale(1.08);
+  }
+
+  .cell:hover .cell-x {
+    transform: translateY(-1px);
+  }
+}
+
+.cell-number:focus-visible,
+.cell-select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+/* --- Уровень выполнения -------------------------------------------------
+   Цвет уровня несёт только граница поля отметки: фон и содержимое не
+   трогаются (§1.4). Время не задано и уровень не «2 минуты» — остаётся
+   обычная рамка --border. */
+.cell-number.is-on-time,
+.cell-select.is-on-time {
+  border-color: var(--success);
+}
+
+.cell-number.is-late,
+.cell-select.is-late {
+  border-color: var(--danger);
+}
+
+.cell-number.is-two-min,
+.cell-select.is-two-min {
+  border-color: var(--two-min);
+}
+
+/* Кнопка вызова попапа — маленькая, рядом с полем отметки (§1.2).
+   Точка в углу показывает, что уровень у записи уже выставлен. */
+.cell-level-btn {
+  position: relative;
+  width: 26px;
+  min-height: 26px;
+  margin-left: 3px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background-color: var(--surface-alt);
+  color: var(--text-muted);
+  line-height: 1;
+  cursor: pointer;
+  vertical-align: middle;
+}
+
+.cell-level-btn svg {
+  display: block;
+  margin: 0 auto;
+}
+
+.cell-level-btn:active {
+  background-color: var(--accent-soft);
+}
+
+/* Уровень выставлен — кнопка помечена, чтобы это было видно и без цвета поля */
+.cell-level-btn.is-set::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  right: 2px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background-color: var(--accent);
+}
+
+@media (hover: hover) {
+  .cell-level-btn:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+}
+

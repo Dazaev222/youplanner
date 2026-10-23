@@ -1,0 +1,120 @@
+/* --- Таблица привычек --- */
+/* Строка привычки — отдельная карточка, а не полоса общей сетки. Чтобы у строки
+   появился собственный радиус, нужен border-collapse: separate; он же даёт
+   border-spacing — зазор между карточками. Разметка и JS при этом не меняются. */
+#habits-table {
+  width: 100%;
+  margin-top: 20px;
+  border-collapse: separate;
+  border-spacing: 0 6px;
+  table-layout: fixed;
+}
+
+/* Сцена для 3D-подъёма строк. Перспектива стоит именно на tbody: у таблицы
+   её прямые дети — thead и tbody, а трансформируется строка, и до неё
+   перспектива с уровня таблицы не доходит. */
+#habits-tbody {
+  perspective: 1400px;
+}
+
+#habits-table th,
+#habits-table td {
+  padding: 10px 8px;
+}
+
+#habits-thead th {
+  background-color: rgba(255, 255, 255, 0.7);
+  color: #1c1c22;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: center;
+  white-space: nowrap;
+}
+
+/* Шапка — такая же карточка со скруглёнными краями, как строки */
+#habits-thead th:first-child {
+  border-top-left-radius: 12px;
+  border-bottom-left-radius: 12px;
+}
+
+#habits-thead th:last-child {
+  border-top-right-radius: 12px;
+  border-bottom-right-radius: 12px;
+}
+
+.habit-col {
+  width: 220px;
+}
+
+/* Первая колонка — текстом влево, в отличие от центрированных дней */
+#habits-table th.habit-col,
+#habits-table td:first-child {
+  padding-left: 16px;
+  text-align: left;
+}
+
+.day-col {
+  width: auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.progress-col {
+  width: 80px;
+}
+
+/* Контур карточки собирается из крайних ячеек строки: рамка сверху и снизу
+   у всех, слева — у первой, справа — у последней, там же и радиусы. */
+.habit-row td {
+  background-color: #FFFFFF !important;
+  border-top: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+  transition: border-color .18s ease;
+}
+
+/* Тень — на строке целиком, а не на ячейках: при border-collapse: separate
+   тень каждой td давала бы грязные полосы на стыках. */
+.habit-row {
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.02);
+}
+
+.habit-row td:first-child {
+  border-left: 1px solid var(--border);
+  border-top-left-radius: 12px;
+  border-bottom-left-radius: 12px;
+}
+
+.habit-row td:last-child {
+  border-right: 1px solid var(--border);
+  border-top-right-radius: 12px;
+  border-bottom-right-radius: 12px;
+}
+
+/* Строка поднимается целиком. Отдельная ячейка движение не повторяет: поднимаются
+   только элементы внутри неё, иначе на одном наведении анимировалось бы слишком много. */
+@media (hover: hover) {
+  .habit-row {
+    transition: transform .2s ease, box-shadow .2s ease;
+  }
+
+  .habit-row:hover {
+    transform: translateZ(16px);
+    box-shadow: var(--shadow);
+  }
+
+  .habit-row:hover td {
+    border-color: var(--accent);
+  }
+}
+
+.habit-name {
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
+.habit-unit {
+  margin-left: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+

@@ -1,0 +1,158 @@
+/* --- Экран «Привычки» ---------------------------------------------------- */
+/* Контейнер прозрачный: серый фон страницы просвечивает. */
+#habits-edit-view {
+  margin-top: 20px;
+  padding: 22px 26px 26px;
+  border: none;
+  border-radius: 0;
+  background: transparent !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  box-shadow: none !important;
+}
+
+#habits-edit-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+/* Строка привычки: заголовок всегда виден, поля раскрываются по тапу */
+.habit-row-edit {
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background-color: var(--surface-alt);
+  overflow: hidden;
+}
+
+.habit-row-head {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 16px;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+/* Имя занимает всё свободное место, тип прижат к шеврону справа */
+.habit-row-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.habit-row-type {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.habit-row-chevron {
+  color: var(--text-muted);
+  font-size: 20px;
+  line-height: 1;
+  transition: transform .15s;
+}
+
+.habit-row-edit.is-open .habit-row-chevron {
+  transform: rotate(90deg);
+}
+
+.habit-row-body {
+  display: none;
+  padding: 14px 16px 16px;
+  border-top: 1px solid var(--border);
+}
+
+.habit-row-body label {
+  display: block;
+  margin-bottom: 8px;
+}
+
+/* Скрытая обёртка иначе осталась бы видимой: у label задан display: block */
+.habit-row-body label[hidden] {
+  display: none;
+}
+
+.habit-row-body label > span {
+  display: block;
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.habit-row-body input,
+.habit-row-body select {
+  width: 100%;
+  min-height: 44px;
+  padding: 10px 12px;
+  border: 1px solid rgba(255, 255, 255, 0.6);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.4);
+  outline: none;
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
+}
+
+.habit-row-body input:focus-visible,
+.habit-row-body select:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
+.habit-row-body select:disabled {
+  color: var(--text-muted);
+  cursor: not-allowed;
+}
+
+.habit-row-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+/* В модалке пустая ошибка держит высоту, чтобы форма не прыгала;
+   в строке это лишняя полоса — текст появляется и сдвигает кнопки */
+.habit-row-body .form-error:empty {
+  display: none;
+}
+
+/* Кнопки экрана — под правило 44px; в строках ещё и на всю ширину */
+#habits-edit-view .btn {
+  min-height: 44px;
+  font-size: 14px;
+}
+
+.habit-row-body .btn {
+  width: 100%;
+}
+
+#habits-edit-add {
+  width: 100%;
+}
+
+/* В каза, молитвах, уразе и настройках шапка действий не нужна — и на ПК,
+   и на телефоне: из этих экранов выходят своей кнопкой «Назад» и таб-баром */
+body.view-qaza #header-actions,
+body.view-prayer #header-actions,
+body.view-fast #header-actions,
+body.view-settings #header-actions,
+body.view-stats #header-actions {
+  display: none;
+}
+
