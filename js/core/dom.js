@@ -33,3 +33,9 @@ export function showToast(message) {
     toastTimer = null;
   }, 3500);
 }
+
+// Показ и скрытие элемента по id
+export function setHidden(id, hidden) {
+  const element = document.getElementById(id);
+  if (element) element.hidden = hidden;
+}

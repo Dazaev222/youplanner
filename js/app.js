@@ -1,22 +1,23 @@
 import { bus } from './core/bus.js';
 import { addDays, getMonthDatesToToday, getWeekStart, parseISODate, toISODate } from './core/dates.js';
-import { cssEscape, escapeHtml, pad2, showToast } from './core/dom.js';
+import { cssEscape, escapeHtml, pad2, setHidden, showToast } from './core/dom.js';
 import { applyBackup, buildBackup, parseBackup } from './data/backup.js';
-import { FAST_HISTORY_MIN, FAST_MAX_INPUT, FAST_SOURCE_ADD, FAST_SOURCE_DONE, FAST_VERSION, addFast, fastRemainingLabel, loadFast, markFastDone, parseFastInput, setFast } from './data/fast.js';
+import { FAST_HISTORY_MIN, FAST_SOURCE_ADD, FAST_SOURCE_DONE, loadFast } from './data/fast.js';
 import { CHOICE_OPTIONS, HABIT_TYPES, addHabit, hasRecords, loadHabits, removeHabit, updateHabit } from './data/habits.js';
 import { migrateDropTasks } from './data/migrations.js';
-import { PRAYER_LABELS, PRAYER_MADHHABS, PRAYER_MADHHAB_LABELS, PRAYER_METHODS, PRAYER_METHOD_DEFAULT, PRAYER_METHOD_LABELS, PRAYER_ORDER, PRAYER_SHADOW, PRAYER_WINDOWS, loadPrayer, prayerDateISO, prayerMinutes, prayerRound, prayerTimes, savePrayer } from './data/prayer.js';
 import { NAMAZ_LABELS, NAMAZ_ORDER, QAZA_DAILY_GOAL, QAZA_HABIT_ID, addMissedQaza, getQazaPlan, kazaDayFor, loadQaza, loadQazaLog, markQazaDone, normalizeQazaCursor, qazaLogDoneByDay, qazaTotalRemaining, saveQaza, undoQazaDone } from './data/qaza.js';
 import { LEVEL_LATE, LEVEL_ON_TIME, LEVEL_TWO_MIN, QURAN_HABIT_ID, SPORT_VALUES, SPORT_VALUE_LABELS, calcProgress, defaultLevel, getEntry, getRecord, habitMarkDate, hasLevelPopup, invalidateRecordsCache, isChoiceLevelHabit, isLevelHabit, loadRecords, writeHabitEntry } from './data/records.js';
 import { SCHEDULE_TYPES, loadSchedule, saveSchedule } from './data/schedule.js';
-import { actualWakeTime, loadSleep, saveSleep, sleepAnchors, sleepAverageMinutes, sleepCycleLabel, sleepCycleTimes, sleepDurationMinutes, sleepFallMinutes, sleepFormatDuration, sleepTimeLabel, sleepTimeMinutes } from './data/sleep.js';
+import { loadSleep, sleepAverageMinutes, sleepFormatDuration, sleepTimeLabel, sleepTimeMinutes } from './data/sleep.js';
 import { STATS_PERIOD_BOXES, habitBestStreak, habitCurrentStreak, habitMarked, habitMarkedDays, habitsAveragePercent, loadStatsPeriod, qazaDoneOn, qazaStreak, saveStatsPeriod, statsPeriodDates } from './data/stats.js';
 import { STORAGE_KEYS } from './data/storage.js';
 import { SYNC_STATUS_MS } from './data/sync.js';
 import { APP_BUILD, APP_VERSION, CIRCLE_CENTER, CIRCLE_LENGTH, CIRCLE_RADIUS, CIRCLE_SIZE, MONTHS_GENITIVE, MONTHS_NOMINATIVE, MONTHS_SHORT } from './data/ui.js';
 import { clearSyncPending, syncPending } from './sync/state.js';
-import {  } from './sync/sync.js';
 import { cloudReachable, cloudReady, flushPendingSync, markCloudReady, scheduleSync, settleHabitsAfterSync, syncFromCloud, syncToCloud } from './sync/sync.js';
+import { onFastAdd, onFastDone, onFastEdit, onFastInitCancel, onFastInitSave, renderFastView, resetFastForm } from './ui/fast-view.js';
+import { onPrayerGeo, onPrayerMadhhabChange, onPrayerManualSave, onPrayerMethodChange, onPrayerRefresh, onPrayerShowAll, renderPrayerSettings, renderPrayerView, resetPrayerShowAll, startPrayerClock } from './ui/prayer-view.js';
+import { onSleepFieldChange, renderSleepView } from './ui/sleep-view.js';
 import { appState } from './ui/state.js';
 /* YouPlanner — слой данных.
    Модульная сборка утрачена (§3 Spec.md), поэтому весь скрипт — один файл,
@@ -345,10 +346,8 @@ export function init() {
 
   // Раз в минуту обновляются счётчик и окно намаза. Таймер один на приложение
   // и идёт всегда: вкладка может быть закрыта, а при её открытии экран всё
-  // равно собирается заново. Старый таймер снимаем: повторный init не должен
-  // оставлять второй интервал.
-  if (prayerTimer) clearInterval(prayerTimer);
-  prayerTimer = setInterval(prayerTick, 60000);
+  // равно собирается заново. Перезапуск таймера — в самом модуле молитв.
+  startPrayerClock();
 
   // Пустой сервер заполняем своей копией, иначе забираем то, что там новее.
   // Только после этого разрешаем отправку: loadQaza() выше уже зовёт
@@ -1594,12 +1593,6 @@ export let qazaState = null;
 // и не сохраняется: это ещё не решение, а подготовка к нажатию «Добавить».
 export let qazaAddPick = null;
 
-// Показ и скрытие элемента по id
-export function setHidden(id, hidden) {
-  const element = document.getElementById(id);
-  if (element) element.hidden = hidden;
-}
-
 /* --- Панель навигации статистики (заход 4) ------------------------------- */
 
 // Панель открыта — на панели класс is-open: по нему едет transform,
@@ -1781,7 +1774,7 @@ export function switchAppView(name) {
 
   if (name === 'prayer') {
     // Список открывается свёрнутым: «Показать все» — разовый взгляд
-    prayerShowAll = false;
+    resetPrayerShowAll();
     renderPrayerView();
   }
 
@@ -1792,7 +1785,7 @@ export function switchAppView(name) {
   if (name === 'fast') {
     // Незакрытая форма не переживает уход с экрана: возвращаться к наполовину
     // заполненному полю незачем, а первый запуск снова покажет форму сам
-    fastInitMode = null;
+    resetFastForm();
     renderFastView();
   }
 
@@ -2247,400 +2240,33 @@ export function renderStatsHabitView() {
 
 /* ---------- Экран «Молитвы» ---------------------------------------------- */
 
-// Раскрыт ли полный список. Живёт только в интерфейсе и сбрасывается при
-// входе на вкладку: «Показать все» — разовый взгляд, а не настройка.
-export let prayerShowAll = false;
-// Сутки, на которые нарисован экран. Смена значения — сигнал пересобрать
-// день целиком, а не только счётчик.
-export let prayerRenderedDay = null;
-export let prayerTimer = null;
 
-// Намаз, окно которого идёт сейчас. Восход окна не имеет — он не намаз,
-// а граница утреннего.
-export function prayerCurrent(times, nowMin) {
-  for (let i = 0; i < PRAYER_WINDOWS.length; i++) {
-    const from = times[PRAYER_WINDOWS[i][0]];
-    const endKey = PRAYER_WINDOWS[i][1];
-    const to = endKey ? times[endKey] : 1440;
-    if (from === null || from === undefined) continue;
-    if (to === null || to === undefined) continue;
-    if (nowMin >= from && nowMin < to) return PRAYER_WINDOWS[i][0];
-  }
-  return null;
-}
 
-// Ближайшее событие: сперва сегодняшние, потом завтрашний Фаджр. Минуты
-// завтрашних идут со сдвигом на сутки — так разница до них берётся вычитанием,
-// а не отдельной веткой.
-export function prayerNext(times, tomorrow, nowMin) {
-  for (let i = 0; i < PRAYER_ORDER.length; i++) {
-    const min = times[PRAYER_ORDER[i]];
-    if (min === null || min === undefined) continue;
-    if (min > nowMin) return { key: PRAYER_ORDER[i], min: min, tomorrow: false };
-  }
 
-  const fajr = tomorrow ? tomorrow.fajr : null;
-  if (fajr === null || fajr === undefined) return null;
-  return { key: 'fajr', min: fajr + 1440, tomorrow: true };
-}
 
-// Событие после следующего — вторая строка свёрнутого списка
-export function prayerAfter(times, tomorrow, next) {
-  if (!next) return null;
 
-  if (next.tomorrow) {
-    const sunrise = tomorrow ? tomorrow.sunrise : null;
-    if (sunrise === null || sunrise === undefined) return null;
-    return { key: 'sunrise', min: sunrise + 1440, tomorrow: true };
-  }
 
-  const key = PRAYER_ORDER[PRAYER_ORDER.indexOf(next.key) + 1];
-  if (!key || times[key] === null || times[key] === undefined) return null;
-  return { key: key, min: times[key], tomorrow: false };
-}
 
-// Всё, что нужно экрану: времена сегодня и завтра, текущий намаз, следующий
-// и строки свёрнутого списка. Завтрашние времена нужны не для красоты:
-// после Иши следующее событие наступает уже завтра, и круг обязан его показать.
-export function prayerViewState() {
-  const saved = loadPrayer();
-  if (!saved) return null;
 
-  const now = new Date();
-  const times = prayerTimes(prayerDateISO(now), saved.lat, saved.lng,
-    saved.madhhab, saved.method);
-  if (!times) return null;
 
-  const tomorrow = prayerTimes(
-    prayerDateISO(new Date(now.getTime() + 86400000)),
-    saved.lat, saved.lng, saved.madhhab, saved.method) || {};
 
-  const nowMin = prayerMinutes(now);
-  const current = prayerCurrent(times, nowMin);
-  const next = prayerNext(times, tomorrow, nowMin);
-  const after = prayerAfter(times, tomorrow, next);
 
-  // Идёт окно намаза — показываем текущий и следующий; окна нет (например,
-  // между Восходом и Зухром) — следующий и после следующего.
-  const shown = [];
-  if (current) {
-    shown.push({ key: current, min: times[current], tomorrow: false });
-    if (next) shown.push(next);
-  } else {
-    if (next) shown.push(next);
-    if (after) shown.push(after);
-  }
 
-  return { times: times, now: nowMin, current: current, next: next, shown: shown };
-}
 
-// Минуты → «ЧЧ:ММ». Завтрашние минуты приходят со сдвигом на сутки.
-export function prayerClock(minutes) {
-  if (minutes === null || minutes === undefined || !isFinite(minutes)) return '--:--';
-  const total = Math.round(minutes) % 1440;
-  return pad2(Math.floor(total / 60)) + ':' + pad2(total % 60);
-}
 
-// Счётчик до начала намаза
-export function prayerCountdown(minutes) {
-  const total = Math.max(0, Math.round(minutes));
-  const hours = Math.floor(total / 60);
-  const mins = total % 60;
-  if (hours && mins) return 'через ' + hours + ' ч ' + mins + ' мин';
-  if (hours) return 'через ' + hours + ' ч';
-  return 'через ' + mins + ' мин';
-}
 
-// Строки списка: свёрнуто — две, развёрнуто — все шесть по порядку
-export function prayerRows(view) {
-  if (!prayerShowAll) return view.shown;
 
-  const rows = [];
-  PRAYER_ORDER.forEach(function (key) {
-    const min = view.times[key];
-    if (min === null || min === undefined) return;
-    rows.push({ key: key, min: min, tomorrow: false });
-  });
-  return rows;
-}
 
-export function renderPrayerList(view) {
-  const list = document.getElementById('prayer-list');
-  if (!list) return;
 
-  list.innerHTML = prayerRows(view).map(function (entry) {
-    const classes = ['prayer-row'];
-    if (entry.key === 'sunrise') classes.push('is-sunrise');
 
-    const isCurrent = view.current === entry.key && !entry.tomorrow;
-    if (isCurrent) classes.push('is-current');
 
-    // Счётчик стоит у следующего намаза и только у него: у текущего он
-    // читался бы как «до конца намаза», а это неправда
-    const isNext = !!view.next && view.next.key === entry.key &&
-      view.next.tomorrow === entry.tomorrow && !isCurrent;
-    const countdown = isNext
-      ? '<span class="prayer-countdown">' +
-        escapeHtml(prayerCountdown(view.next.min - view.now)) + '</span>'
-      : '';
 
-    return '<div class="' + classes.join(' ') + '" data-prayer="' +
-      escapeHtml(entry.key) + '">' +
-      '<span class="prayer-row-name">' + escapeHtml(PRAYER_LABELS[entry.key]) + '</span>' +
-      '<span class="prayer-row-right">' + countdown +
-      '<span class="prayer-row-time">' + escapeHtml(prayerClock(entry.min)) +
-      '</span></span></div>';
-  }).join('');
-}
 
-// Кольцо показывает долю пути от прошлого события до следующего: по ней
-// видно, много ли осталось, не заводя второй шкалы.
-export function renderPrayerRing(view) {
-  const ring = document.getElementById('prayer-ring-progress');
-  if (!ring) return;
 
-  const length = 2 * Math.PI * 88;
-  ring.setAttribute('stroke-dasharray', String(length));
 
-  if (!view.next) {
-    ring.setAttribute('stroke-dashoffset', String(length));
-    return;
-  }
 
-  let from = 0;
-  PRAYER_ORDER.forEach(function (key) {
-    const min = view.times[key];
-    if (min !== null && min !== undefined && min <= view.now) {
-      from = Math.max(from, min);
-    }
-  });
 
-  const span = view.next.min - from;
-  const done = span > 0 ? Math.min(1, Math.max(0, (view.now - from) / span)) : 0;
-  ring.setAttribute('stroke-dashoffset', String(length * (1 - done)));
-}
 
-export function renderPrayerTimes() {
-  const view = prayerViewState();
-  if (!view) return;
-
-  const name = document.getElementById('prayer-next-name');
-  const time = document.getElementById('prayer-next-time');
-  if (name) name.textContent = view.next ? PRAYER_LABELS[view.next.key] : '';
-  if (time) time.textContent = view.next ? prayerClock(view.next.min) : '--:--';
-  setHidden('prayer-next-hint', !(view.next && view.next.tomorrow));
-
-  renderPrayerRing(view);
-  renderPrayerList(view);
-
-  const showAll = document.getElementById('prayer-show-all');
-  if (showAll) showAll.textContent = prayerShowAll ? 'Свернуть' : 'Показать все';
-}
-
-// Пока координат нет, вместо времён показывается приветственный экран
-export function renderPrayerView() {
-  const saved = loadPrayer();
-  setHidden('prayer-welcome', !!saved);
-  setHidden('prayer-times', !saved);
-
-  prayerRenderedDay = prayerDateISO(new Date());
-  if (!saved) return;
-
-  renderPrayerTimes();
-}
-
-export function renderPrayerSettings() {
-  const saved = loadPrayer();
-
-  const coords = document.getElementById('prayer-coords');
-  if (coords) {
-    coords.textContent = saved
-      ? 'Широта ' + saved.lat + ' · Долгота ' + saved.lng
-      : 'Координат нет — времена намазов не считаются.';
-  }
-
-  renderPrayerMadhhab(saved ? saved.madhhab : 'shafi');
-  renderPrayerMethod(saved ? saved.method : PRAYER_METHOD_DEFAULT);
-}
-
-export function renderPrayerMethod(method) {
-  const box = document.getElementById('prayer-method');
-  if (!box) return;
-
-  box.innerHTML = PRAYER_METHODS.map(function (key) {
-    const active = key === method;
-    return '<label class="prayer-method-option' + (active ? ' is-active' : '') + '">' +
-      '<input type="radio" class="prayer-method-radio" name="prayer-method" value="' +
-      escapeHtml(key) + '"' + (active ? ' checked' : '') + '>' +
-      '<span>' + escapeHtml(PRAYER_METHOD_LABELS[key]) + '</span></label>';
-  }).join('');
-}
-
-export function markPrayerMethod(method) {
-  document.querySelectorAll('#prayer-method .prayer-method-option')
-    .forEach(function (option) {
-      const input = option.querySelector('input');
-      option.classList.toggle('is-active', !!input && input.value === method);
-    });
-}
-
-export function renderPrayerMadhhab(madhhab) {
-  const box = document.getElementById('prayer-madhhab');
-  if (!box) return;
-
-  box.innerHTML = PRAYER_MADHHABS.map(function (key) {
-    const active = key === madhhab;
-    return '<label class="prayer-madhhab-option' + (active ? ' is-active' : '') + '">' +
-      '<input type="radio" class="prayer-madhhab-radio" name="prayer-madhhab" value="' +
-      escapeHtml(key) + '"' + (active ? ' checked' : '') + '>' +
-      '<span>' + escapeHtml(PRAYER_MADHHAB_LABELS[key]) + '</span></label>';
-  }).join('');
-}
-
-// Подсветка выбранной пилюли без пересборки разметки: пересборка внутри
-// события change уносит элемент, по которому только что нажали
-export function markPrayerMadhhab(madhhab) {
-  document.querySelectorAll('#prayer-madhhab .prayer-madhhab-option')
-    .forEach(function (option) {
-      const input = option.querySelector('input');
-      option.classList.toggle('is-active', !!input && input.value === madhhab);
-    });
-}
-
-// Раз в минуту: счётчик до следующего намаза и смена суток. В полночь
-// пересобирается весь день — времена-то у него свои.
-export function prayerTick() {
-  if (prayerDateISO(new Date()) !== prayerRenderedDay) {
-    renderPrayerView();
-    return;
-  }
-  renderPrayerTimes();
-}
-
-// После смены координат или мазхаба перерисовываются оба экрана: они читают
-// один и тот же ключ
-export function afterPrayerChange() {
-  renderPrayerView();
-  renderPrayerSettings();
-}
-
-// Разбор координаты. Запятая вместо точки — обычная опечатка мобильной
-// клавиатуры, поэтому принимается наравне с точкой.
-export function prayerParseCoord(value, limit) {
-  const raw = value === null || value === undefined ? '' : String(value);
-  const text = raw.trim().replace(',', '.');
-  if (!text) return null;
-
-  const num = Number(text);
-  if (!isFinite(num) || num < -limit || num > limit) return null;
-  return prayerRound(num);
-}
-
-// Геолокация — единственный способ, который может отказать не по вине
-// пользователя, поэтому отказ объясняется словами, а не молчанием.
-// Экран без своей строки для пояснений (настройки) говорит тостом.
-export function requestPrayerLocation(noteId, onDone) {
-  const note = noteId ? document.getElementById(noteId) : null;
-  const say = function (message) {
-    if (note) { note.textContent = message; return; }
-    if (message) showToast(message);
-  };
-
-  if (!navigator.geolocation) {
-    say('Геолокация недоступна. Введите координаты вручную.');
-    return;
-  }
-
-  say('Определяем местоположение…');
-  navigator.geolocation.getCurrentPosition(function (position) {
-    say('');
-    onDone(prayerRound(position.coords.latitude),
-      prayerRound(position.coords.longitude));
-  }, function () {
-    say('Не удалось определить местоположение. Введите координаты вручную.');
-  }, { timeout: 10000, maximumAge: 600000 });
-}
-
-// Сохраняет координаты, не трогая выбранные мазхаб и метод расчёта.
-// Возвращает boolean результата записи: перерисовка — забота вызывающих.
-export function applyPrayerCoords(lat, lng) {
-  const saved = loadPrayer();
-  // savePrayer при невалидных координатах возвращает undefined — приводим
-  // результат к строгому boolean, как у успешной/неуспешной записи.
-  return savePrayer({
-    lat: lat,
-    lng: lng,
-    madhhab: saved ? saved.madhhab : 'shafi',
-    method: saved ? saved.method : PRAYER_METHOD_DEFAULT,
-  }) === true;
-}
-
-export function onPrayerGeo() {
-  requestPrayerLocation('prayer-welcome-note', function (lat, lng) {
-    if (!applyPrayerCoords(lat, lng)) return;
-    afterPrayerChange();
-  });
-}
-
-export function onPrayerRefresh() {
-  requestPrayerLocation(null, function (lat, lng) {
-    if (!applyPrayerCoords(lat, lng)) return;
-    afterPrayerChange();
-    showToast('Координаты обновлены');
-  });
-}
-
-export function onPrayerManualSave() {
-  const latEl = document.getElementById('prayer-lat');
-  const lngEl = document.getElementById('prayer-lng');
-  const note = document.getElementById('prayer-welcome-note');
-
-  // Широта — тот же порог, что у prayerTimes (89.8). Иначе ввод
-  // 89.9 принимался бы полем и молча отбрасывался savePrayer
-  // (§11aa, B4).
-  const lat = prayerParseCoord(latEl ? latEl.value : '', 89.8);
-  const lng = prayerParseCoord(lngEl ? lngEl.value : '', 180);
-
-  if (lat === null || lng === null) {
-    if (note) note.textContent = 'Широта — число от −89.8 до 89.8, долгота — от −180 до 180.';
-    return;
-  }
-
-  if (note) note.textContent = '';
-  if (!applyPrayerCoords(lat, lng)) return;
-  afterPrayerChange();
-}
-
-export function onPrayerMadhhabChange(event) {
-  const value = event.target && event.target.value;
-  if (!PRAYER_SHADOW[value]) return;
-
-  const saved = loadPrayer();
-  if (!saved) return;
-  if (!savePrayer({ lat: saved.lat, lng: saved.lng, madhhab: value, method: saved.method })) return;
-
-  // Настройки не пересобираются целиком — только подсветка: экран молитв
-  // мог быть открыт, и он перерисовывается под новый мазхаб
-  markPrayerMadhhab(value);
-  renderPrayerView();
-}
-
-export function onPrayerMethodChange(event) {
-  const value = event.target && event.target.value;
-  if (PRAYER_METHODS.indexOf(value) < 0) return;
-
-  const saved = loadPrayer();
-  if (!saved) return;
-  if (!savePrayer({ lat: saved.lat, lng: saved.lng, madhhab: saved.madhhab, method: value })) return;
-
-  markPrayerMethod(value);
-  renderPrayerView();
-}
-
-export function onPrayerShowAll() {
-  prayerShowAll = !prayerShowAll;
-  renderPrayerTimes();
-}
 
 export function renderQazaView() {
   if (!qazaState) return;
@@ -2906,382 +2532,24 @@ export function updateQazaCells() {
 
 /* --- Вкладка «Ураза» ----------------------------------------------------- */
 
-// Форма открыта кнопкой обычного экрана: 'add' или 'edit'. Первый запуск
-// сюда не пишется — он выводится из отсутствия ключа. Иначе «ключ стёрли»
-// и «форму ещё не закрыли» стали бы одним состоянием.
-export let fastInitMode = null;
 
-// Экран раздела: форма ввода или обычный экран. Признак первого запуска —
-// только loadFast() === null. Остаток 0 — существующий счётчик, и экран
-// у него обычный: возмещать нечего, но добавлять и править есть что.
-export function renderFastView() {
-  const fast = loadFast();
-  const mode = fastInitMode || (fast === null ? 'start' : null);
 
-  setHidden('fast-init', mode === null);
-  setHidden('fast-main', mode !== null || fast === null);
 
-  if (mode !== null) {
-    // Заголовок и «Отмена» зависят от случая: на первом запуске обычного
-    // экрана ещё нет, и отменять нечего
-    const title = document.querySelector('#fast-init .qaza-subtitle');
-    if (title) {
-      title.textContent = mode === 'add' ? 'Сколько дней добавить?'
-        : mode === 'edit' ? 'Сколько дней осталось?'
-          : 'Сколько дней нужно возместить?';
-    }
-    setHidden('fast-init-cancel', mode === 'start');
 
-    // Сообщение об ошибке снимается при каждом открытии формы заново
-    const note = document.getElementById('fast-init-note');
-    if (note) note.textContent = '';
-    return;
-  }
 
-  const label = document.getElementById('fast-remaining');
-  if (label) label.textContent = fastRemainingLabel(fast.remaining);
 
-  // При нулевом остатке «Возместить» гаснет: возмещённых постов не бывает
-  // больше, чем дней к возмещению
-  const done = document.getElementById('fast-done');
-  if (done) done.disabled = fast.remaining <= 0;
-}
 
-// Открыть форму кнопкой обычного экрана
-export function openFastForm(mode) {
-  fastInitMode = mode;
-
-  const field = document.getElementById('fast-init-value');
-  if (field) field.value = '';
-  renderFastView();
-  if (field) field.focus();
-}
-
-export function onFastAdd() {
-  openFastForm('add');
-}
-
-export function onFastEdit() {
-  openFastForm('edit');
-}
-
-export function onFastInitCancel() {
-  fastInitMode = null;
-  renderFastView();
-}
-
-// «Возместить 1 день». Кнопка при нулевом остатке погашена, но обработчик
-// проверяет остаток сам: погашенная кнопка — подсказка, а не защита,
-// и остаток не должен уйти в минус нажатием из консоли или скрипта.
-export function onFastDone() {
-  const fast = loadFast();
-  if (!fast || fast.remaining <= 0) return;
-
-  if (!markFastDone(fast)) return;
-  renderFastView();
-}
-
-// «Сохранить» формы. Один обработчик на три случая: режим решает, что делать
-// с введённым числом. Неверный ввод оставляет форму открытой — исправлять
-// его здесь же, а не в обычном экране.
-export function onFastInitSave() {
-  const field = document.getElementById('fast-init-value');
-  const note = document.getElementById('fast-init-note');
-  const fast = loadFast();
-
-  const mode = fastInitMode || (fast === null ? 'start' : null);
-  if (mode === null) return;
-
-  // Первый запуск и «Изменить счётчик» задают остаток целиком (≥ 0),
-  // «Добавить уразу» — только прибавку (> 0, ноль не принимается)
-  const value = parseFastInput(field ? field.value : '', mode === 'add' ? 'add' : 'counter');
-  if (value === null) {
-    if (note) {
-      note.textContent = mode === 'add'
-        ? 'Введите целое число больше нуля, не больше ' + FAST_MAX_INPUT + '.'
-        : 'Введите целое число от 0 до ' + FAST_MAX_INPUT + '.';
-    }
-    return;
-  }
-
-  if (mode === 'add') {
-    if (!addFast(fast, value)) return;
-  } else {
-    // Первого ключа ещё нет — заводим его здесь же
-    if (!setFast(fast || { version: FAST_VERSION, remaining: 0, history: [] }, value)) return;
-  }
-
-  if (note) note.textContent = '';
-  if (field) field.value = '';
-
-  fastInitMode = null;
-  renderFastView();
-}
 
 /* --- Раздел «Цикл сна» --------------------------------------------------- */
 
-// Значение поля экрана. Поля читаются как есть: набор, который видит человек
-export function sleepFieldValue(id) {
-  const field = document.getElementById(id);
-  return field ? field.value : '';
-}
 
-// Состояние галочки «встану по рекомендации». Снятая галочка и отсутствие
-// элемента — одно и то же: без экрана решения нет, и по умолчанию идёт цель
-export function sleepFollowRec() {
-  const box = document.getElementById('sleep-follow-rec');
-  return !!box && box.checked === true;
-}
 
-// Синхронизация поля фактического подъёма: видимость и подсказка. Вызывается
-// из renderSleepView и onSleepFieldChange. Галочка «встал по плану» отмечена —
-// поле скрыто, подсказка очищена. Галочка снята, поле пустое — подсказка
-// «Введите время, во сколько встали». Галочка снята, поле заполнено, но
-// время не разбирается — подсказка «Введите время в формате ЧЧ:ММ».
-// Иначе — подсказка очищена
-export function syncRealWakeField() {
-  const onPlanBox = document.getElementById('sleep-on-plan');
-  const field = document.getElementById('sleep-real-wake-field');
-  const note = document.getElementById('sleep-real-wake-note');
-  const input = document.getElementById('sleep-real-wake');
-  if (!onPlanBox || !field || !note || !input) return;
 
-  if (onPlanBox.checked) {
-    field.hidden = true;
-    note.textContent = '';
-    return;
-  }
 
-  field.hidden = false;
-  if (!input.value) {
-    note.textContent = 'Введите время, во сколько встали';
-  } else if (sleepTimeMinutes(input.value) === null) {
-    note.textContent = 'Введите время в формате ЧЧ:ММ';
-  } else {
-    note.textContent = '';
-  }
-}
 
-// Решение по текущим полям: что уйдёт в историю и сколько это минут. Одно
-// место, где из трёх полей и галочки собирается ответ; им пользуются и
-// отрисовка, и запись, поэтому разойтись они не могут. Пустое или неверное
-// любое из полей — null
-export function sleepDecision() {
-  const bed = sleepFieldValue('sleep-bed');
-  const wake = sleepFieldValue('sleep-wake');
-  const fall = sleepFallMinutes(sleepFieldValue('sleep-fall'));
-  if (fall === null) return null;
 
-  const followRec = sleepFollowRec();
-  const actualWake = actualWakeTime(bed, fall, wake, followRec);
-  if (actualWake === null) return null;
 
-  const sleepMin = sleepDurationMinutes(bed, fall, actualWake);
-  if (sleepMin === null) return null;
 
-  // Фактический подъём: галочка «встал по плану» снята — поле времени
-  // обязательно, иначе запись в хранилище не идёт
-  const onPlanBox = document.getElementById('sleep-on-plan');
-  const realWakeField = document.getElementById('sleep-real-wake');
-  const onPlan = !!onPlanBox && onPlanBox.checked;
-  let realWake = null;
-  let ready = true;
-  if (!onPlan) {
-    const realWakeValue = realWakeField ? realWakeField.value : '';
-    if (realWakeValue) {
-      const parsed = sleepTimeMinutes(realWakeValue);
-      if (parsed !== null) {
-        realWake = realWakeValue;
-      } else {
-        ready = false;
-      }
-    } else {
-      ready = false;
-    }
-  }
-
-  const realSleepMin = realWake !== null
-    ? sleepDurationMinutes(bed, fall, realWake)
-    : null;
-
-  const excludedBox = document.getElementById('sleep-excluded');
-  const excluded = !!excludedBox && excludedBox.checked === true;
-
-  return {
-    bed: bed,
-    fall: fall,
-    wake: wake,
-    followRec: followRec,
-    actualWake: actualWake,
-    sleepMin: sleepMin,
-    realWake: realWake,
-    realSleepMin: realSleepMin,
-    excluded: excluded,
-    ready: ready,
-  };
-}
-
-// Вход на экран: три поля и галочка заполняются сохранённым, затем считается
-// итог. Записи нет — поля остаются пустыми, галочка снята, и итог тоже пуст.
-// Галочка ставится сравнением actualWake с wake: отдельного поля у неё нет,
-// а «встаю по рекомендации» — это ровно случай, когда времена разошлись.
-// Совпадение (будильник ровно на конце цикла) галочку не вернёт, но разницы
-// там нет: оба режима дают одно и то же время
-export function renderSleepView() {
-  const sleep = loadSleep();
-  const follow = document.getElementById('sleep-follow-rec');
-  if (follow) follow.checked = !!sleep && sleep.actualWake !== sleep.wake;
-  if (sleep) {
-    const bed = document.getElementById('sleep-bed');
-    const fall = document.getElementById('sleep-fall');
-    const wake = document.getElementById('sleep-wake');
-    if (bed) bed.value = sleep.bed;
-    if (fall) fall.value = String(sleep.fall);
-    if (wake) wake.value = sleep.wake;
-  } else {
-    const onPlan = document.getElementById('sleep-on-plan');
-    if (onPlan) onPlan.checked = true;
-    const realWake = document.getElementById('sleep-real-wake');
-    if (realWake) realWake.value = '';
-    const excluded = document.getElementById('sleep-excluded');
-    if (excluded) excluded.checked = false;
-  }
-  if (sleep) {
-    const onPlan = document.getElementById('sleep-on-plan');
-    if (onPlan) onPlan.checked = sleep.realWake === null;
-    const realWake = document.getElementById('sleep-real-wake');
-    if (realWake) realWake.value = sleep.realWake || '';
-    const excluded = document.getElementById('sleep-excluded');
-    if (excluded) excluded.checked = sleep.excluded === true;
-  }
-  syncRealWakeField();
-  renderSleepResult();
-}
-
-// Итог по трём полям и галочке. Пустое или неверное любое из полей —
-// результата нет вовсе: половина расчёта хуже, чем его отсутствие
-export function renderSleepResult() {
-  const box = document.getElementById('sleep-result');
-  if (!box) return;
-
-  const decision = sleepDecision();
-  const result = decision === null
-    ? null
-    : sleepCycleTimes(decision.bed, decision.fall, decision.wake);
-
-  if (!decision || !result) {
-    box.innerHTML = '';
-    return;
-  }
-  box.innerHTML = sleepResultMarkup(decision, result);
-}
-
-// Разметка итога: крупный будильник, время для истории, длительность сна,
-// пояснение, список циклов и полоска. Крупным у пары вариантов идёт первый —
-// тот, что раньше: подсвечены в списке оба, а решает человек. Время для
-// истории считается от галочки и с крупным может не совпасть: там ближайший
-// конец цикла, здесь — то, что человек выбрал
-export function sleepResultMarkup(decision, result) {
-  const pick = result.recommended[0];
-  const parts = [];
-
-  parts.push('<p class="sleep-alarm">Будильник: ' + escapeHtml(pick.time) + '</p>');
-  let actualText;
-  if (decision.realWake) {
-    actualText = 'В историю: ' + decision.realWake + ' (по факту)';
-  } else if (decision.followRec) {
-    actualText = 'В историю: ' + decision.actualWake + ' (по рекомендации)';
-  } else if (decision.ready === true) {
-    actualText = 'В историю: ' + decision.actualWake + ' (по цели)';
-  } else {
-    actualText = 'В историю: —';
-  }
-  parts.push('<p class="sleep-actual">' + escapeHtml(actualText) + '</p>');
-  parts.push('<p class="sleep-duration">Сон: ' +
-    escapeHtml(sleepFormatDuration(decision.realSleepMin ?? decision.sleepMin)) + '</p>');
-
-  let detail = sleepCycleLabel(pick.cycles) + ', ' + sleepFormatDuration(pick.sleepMinutes);
-  if (result.recommended.length === 2) {
-    detail += ' · встать раньше — ' + result.recommended[0].time +
-      ', встать позже — ' + result.recommended[1].time;
-  }
-  parts.push('<p class="sleep-detail">' + escapeHtml(detail) + '</p>');
-
-  parts.push('<div class="sleep-cycles">');
-  for (let i = 0; i < result.cycles.length; i++) {
-    const cycle = result.cycles[i];
-    const recommended = result.recommended.indexOf(cycle) !== -1;
-    parts.push('<p' + (recommended ? ' class="is-recommended"' : '') + '>' +
-      escapeHtml(sleepCycleLabel(cycle.cycles) + ' — ' + cycle.time) + '</p>');
-  }
-  parts.push('</div>');
-
-  parts.push(sleepBarMarkup(decision.bed, decision.fall, decision.wake, result.cycles));
-  return parts.join('');
-}
-
-// Полоска: по горизонтали — от отхода до конца последнего цикла. Засечки
-// нарисованы узкими прямоугольниками, а не линиями: viewBox растягивается
-// по ширине карточки неравномерно (preserveAspectRatio="none"), и толщина
-// штриха у линии поехала бы вместе с растяжением. Метка подъёма — акцентная
-// и заметно шире засечки; за последним циклом она прижимается к краю
-export function sleepBarMarkup(bed, fall, wake, cycles) {
-  const anchors = sleepAnchors(bed, fall, wake);
-  if (!anchors || !cycles.length) return '';
-
-  const span = anchors.asleepMinutes + cycles[cycles.length - 1].sleepMinutes -
-    anchors.bedMinutes;
-  if (span <= 0) return '';
-
-  function at(minutes) {
-    const percent = ((minutes - anchors.bedMinutes) / span) * 100;
-    return Math.max(0, Math.min(100, percent));
-  }
-
-  const parts = [];
-  parts.push('<div class="sleep-bar">');
-  parts.push('<svg viewBox="0 0 100 40" preserveAspectRatio="none" aria-hidden="true">');
-  parts.push('<rect class="sleep-bar-track" x="0" y="17" width="100" height="6"></rect>');
-  for (let i = 0; i < cycles.length; i++) {
-    const tick = (at(anchors.asleepMinutes + cycles[i].sleepMinutes) - 0.3).toFixed(2);
-    parts.push('<rect class="sleep-bar-tick" x="' + tick +
-      '" y="11" width="0.6" height="18"></rect>');
-  }
-  const mark = (at(anchors.wakeMinutes) - 0.5).toFixed(2);
-  parts.push('<rect class="sleep-bar-wake" x="' + mark +
-    '" y="5" width="1" height="30"></rect>');
-  parts.push('</svg>');
-  parts.push('</div>');
-  return parts.join('');
-}
-
-// Правка любого поля или галочки: сначала пересчёт, потом запись. Галочка
-// идёт сюда же — она меняет то же решение, а формы на экране нет, отправлять
-// нечего. Сохраняется то, что в полях сейчас, — неполный набор saveSleep
-// отбросит сам. Слушаются оба события полей: колесо времени на телефоне
-// присылает только change
-export function onSleepFieldChange() {
-  syncRealWakeField();
-  const decision = sleepDecision();
-  if (!decision || !decision.ready) return;
-
-  if (!saveSleep({
-    bed: decision.bed,
-    fall: decision.fall,
-    wake: decision.wake,
-    actualWake: decision.actualWake,
-    sleepMin: decision.sleepMin,
-    realWake: decision.realWake,
-    realSleepMin: decision.realSleepMin,
-    excluded: decision.excluded,
-  })) {
-    renderSleepView();
-    syncRealWakeField();
-    return;
-  }
-
-  renderSleepResult();
-}
 
 /* --- Модальное окно ------------------------------------------------------ */
 
@@ -3847,3 +3115,4 @@ window.addEventListener('orientationchange', function () {
   scheduleLiquidIndicators();
 });
   
+
