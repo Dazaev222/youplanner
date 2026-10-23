@@ -5978,10 +5978,37 @@ function syncFromCloud() {
     });
 }
 
+// Единовременно идёт один обмен. Флаг syncing ниже защищает только
+// синхронные участки и не держится во время await fetch: параллельные
+// вызовы (debounce-таймер + уход со вкладки + ручная кнопка) конкурировали
+// за узел бэкапов GET→PUT, теряя записи истории, и могли записать SYNC_TS
+// задним числом. Вызов во время идущего обмена ставится в очередь и
+// выполняется сразу после его конца: правка, случившаяся уже после
+// сериализации тела PUT, доедет повторным обменом, а не будет ждать
+// следующей правки.
+let syncExchange = null;
+let syncQueued = false;
+
+function syncToCloud() {
+  if (syncExchange) {
+    syncQueued = true;
+    return syncExchange;
+  }
+  function settled() {
+    syncExchange = null;
+    if (syncQueued) {
+      syncQueued = false;
+      syncToCloud();
+    }
+  }
+  syncExchange = syncToCloudNow().then(settled, settled);
+  return syncExchange;
+}
+
 // Отправляет локальные данные наверх. Ключ времени пишется ПОСЛЕ успешного
 // PUT: если отправка не дошла, локальная копия и в реальности не новее
 // серверной, и завышенный таймстамп помешал бы принять следующий снимок.
-function syncToCloud() {
+function syncToCloudNow() {
   const ts = Date.now();
 
   // Сначала копия, потом запись: сбой копирования данные всё равно отправит.
