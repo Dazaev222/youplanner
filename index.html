@@ -653,6 +653,9 @@
 <div id="toast" role="status" hidden></div>
 
   <script src="js/core/bus.js"></script>
+  <script src="js/core/storage.js"></script>
+  <script src="js/core/dates.js"></script>
+  <script src="js/core/dom.js"></script>
   <script src="js/data/storage.js"></script>
   <script src="js/data/schedule.js"></script>
   <script src="js/data/habits.js"></script>
@@ -765,18 +768,6 @@ function loadHabits() {
   }
 }
 
-// Безопасная запись в localStorage: при переполнении квоты setItem бросает
-// QuotaExceededError — ловим его, показываем тост и возвращаем false,
-// чтобы вызывающий код знал, что данные не сохранены.
-function safeSetItem(key, value) {
-  try {
-    localStorage.setItem(key, value);
-    return true;
-  } catch (e) {
-    bus.emit('storage:error');
-    return false;
-  }
-}
 
 function saveHabits(habits) {
   if (!safeSetItem(STORAGE_KEYS.habits, JSON.stringify(habits))) return false;
@@ -1187,63 +1178,10 @@ function sleepAverageMinutes(minutes) {
   return Math.round(sum / clean.length) % SLEEP_MAX_MINUTES;
 }
 
-/* ---------- Работа с датами (локальное время, без UTC) ---------- */
 
-// Date → 'YYYY-MM-DD' по локальным компонентам. UTC-сериализация запрещена
-// (даёт сдвиг на день), поэтому дата собирается из getFullYear/getMonth/getDate.
-function toISODate(d) {
-  const year = d.getFullYear();
-  const month = String(d.getMonth() + 1).padStart(2, '0');
-  const day = String(d.getDate()).padStart(2, '0');
-  return year + '-' + month + '-' + day;
-}
 
-// 'YYYY-MM-DD' → Date в локальной зоне
-function parseISODate(s) {
-  const parts = String(s).split('-');
-  const year = parseInt(parts[0], 10);
-  const month = parseInt(parts[1], 10) - 1;
-  const day = parseInt(parts[2], 10);
-  return new Date(year, month, day);
-}
 
-// Новая дата, сдвинутая на n дней (n может быть отрицательным)
-function addDays(d, n) {
-  return new Date(
-    d.getFullYear(),
-    d.getMonth(),
-    d.getDate() + n,
-    d.getHours(),
-    d.getMinutes(),
-    d.getSeconds(),
-    d.getMilliseconds()
-  );
-}
 
-// Понедельник недели этой даты, время 00:00
-function getWeekStart(d) {
-  const copy = new Date(d.getFullYear(), d.getMonth(), d.getDate(), 0, 0, 0, 0);
-  const day = (copy.getDay() + 6) % 7; // 0 — понедельник, 6 — воскресенье
-  return addDays(copy, -day);
-}
-
-// Даты месяца с 1-го числа по сегодня включительно — знаменатель месячного
-// прогресса. Для месяца, который уже закончился, — все его дни;
-// для месяца, который ещё не начался, — пустой массив.
-function getMonthDatesToToday(year, month) {
-  const now = new Date();
-  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const first = new Date(year, month, 1);
-  const lastDay = new Date(year, month + 1, 0);
-  const end = lastDay < today ? lastDay : today;
-  if (end < first) return [];
-
-  const dates = [];
-  for (let day = 1; day <= end.getDate(); day++) {
-    dates.push(toISODate(new Date(year, month, day)));
-  }
-  return dates;
-}
 
 /* ---------- Каза-намазы: состояние очереди ---------- */
 
@@ -3229,28 +3167,8 @@ let scheduleEditType = 'weekday';
 
 /* --- Вспомогательные функции (не пересекаются с именами data.js) --------- */
 
-// Экранирование текста перед вставкой в innerHTML
-function escapeHtml(value) {
-  return String(value === null || value === undefined ? '' : value)
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;');
-}
 
-// Двузначное число: 7 -> '07'
-function pad2(value) {
-  return String(value).padStart(2, '0');
-}
 
-// Безопасное значение habitId для CSS-селектора
-function cssEscape(value) {
-  if (typeof CSS !== 'undefined' && typeof CSS.escape === 'function') {
-    return CSS.escape(String(value));
-  }
-  return String(value).replace(/["\\]/g, '\\$&');
-}
 
 // Привычка из текущего состояния по id
 function findHabit(habitId) {
@@ -4546,24 +4464,8 @@ function goToday() {
   renderTable();
 }
 
-/* --- Тост ---------------------------------------------------------------- */
 
-// Плашка-подсказка поверх шторок. 3,5 с: два коротких предложения прочитать
-// можно, а заслонить следующий шаг она не успевает. Повторный вызов перезапускает
-// отсчёт, а не копит таймеры: последнее слово важнее прежнего.
-let toastTimer = null;
 
-function showToast(message) {
-  const toast = document.getElementById('toast');
-  if (!toast) return;
-  toast.textContent = message;
-  toast.hidden = false;
-  if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(function () {
-    toast.hidden = true;
-    toastTimer = null;
-  }, 3500);
-}
 
 
 function renderScheduleView() {
