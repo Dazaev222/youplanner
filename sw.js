@@ -1,5 +1,7 @@
-const CACHE = 'youplanner-v4';
+const CACHE = 'youplanner-v5';
 const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon.svg',
+  './js/core/bus.js', './js/core/dates.js', './js/core/storage.js',
+  './js/core/dom.js',
   './styles/tokens.css', './styles/layout.css', './styles/buttons.css',
   './styles/table.css', './styles/cells.css', './styles/progress-circle.css',
   './styles/modal.css', './styles/qaza.css', './styles/day-view.css',
