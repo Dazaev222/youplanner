@@ -4294,6 +4294,8 @@ function removeHabit(id) {
 
 // Процент выполнения привычки за набор дат. Может быть больше 100.
 // База — все дни периода, включая пустые: непроставленный день даёт 0.
+// Знаменатель обрезается до первой записи: пользователь видит прогресс за
+// тот период, когда реально вёл привычку, а не за весь календарь.
 function calcProgress(habit, dates) {
   if (!dates || dates.length === 0) return 0;
 
@@ -4303,13 +4305,35 @@ function calcProgress(habit, dates) {
   // «Отдых» — запланированный пропуск: вес не набирает, но и серию не рвёт.
   const weights = { 'yes': 1, 'да': 1, 'two-min': 0.5, 'частично': 0.5,
     'no': 0, 'нет': 0, 'rest': 0, 'отдых': 0 };
-  const base = dates.length;
+
+  // Находим самую раннюю дату с записью по этой привычке
+  let minDate = null;
+  for (let i = 0; i < dates.length; i++) {
+    if (recordValue(dates[i], habit.id) !== undefined) {
+      minDate = dates[i];
+      break; // даты идут от младшего к старшему
+    }
+  }
+
+  // Нет записей — 0%
+  if (minDate === null) return 0;
+
+  // Обрезаем даты до первой записи (даты уже отсортированы)
+  let filteredDates = dates;
+  if (minDate > dates[0]) {
+    const firstIdx = dates.indexOf(minDate);
+    filteredDates = dates.slice(firstIdx);
+  }
+
+  const base = filteredDates.length;
+  if (base <= 0) return 0;
+
   let sum = 0;
 
-  for (let i = 0; i < dates.length; i++) {
+  for (let i = 0; i < filteredDates.length; i++) {
     // У Корана в прогресс идут введённые страницы, а не число отметок:
     // пустое поле даёт 0, две страницы — 2 (§2.6).
-    const value = recordValue(dates[i], habit.id);
+    const value = recordValue(filteredDates[i], habit.id);
     if (value === undefined) continue;
 
     if (habit.type === 'boolean') {
