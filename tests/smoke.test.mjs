@@ -71,6 +71,62 @@ test('каждый именованный import находит реальный
   }
 });
 
+test('нет неявных зависимостей: чужое имя обязано быть в import', () => {
+  // Конкатенация для песочницы прямет дыры связывания: имя, не вставленное
+  // в import, разрешится в конкатенации глобально — а в браузере модуль
+  // упадёт с ReferenceError. Правило: если файл использует имя,
+  // экспортированное другим файлом, оно обязано стоять в его import-строке.
+  const files = getModuleOrder();
+  const ownerOf = new Map();
+  for (const file of files) {
+    const text = readFileSync(join(process.cwd(), file), 'utf8');
+    for (const m of text.matchAll(/^export\s+(?:const|let|function)\s+([A-Za-z_$][\w$]*)/gm)) {
+      ownerOf.set(m[1], file);
+    }
+  }
+  const KEYWORDS = new Set(('const let function var if else for while do return switch ' +
+    'case break continue new typeof instanceof in of this null true false undefined try ' +
+    'catch finally throw import export from as default class extends super delete void ' +
+    'yield async await static get set document window localStorage navigator console ' +
+    'performance fetch JSON Math Object Array String Number Boolean Date Promise Set Map ' +
+    'RegExp Error isNaN isFinite parseInt parseFloat encodeURIComponent ' +
+    'requestAnimationFrame MutationObserver ResizeObserver CSS Blob URL FileReader alert ' +
+    'confirm').split(' '));
+  for (const file of files) {
+    const text = readFileSync(join(process.cwd(), file), 'utf8');
+    const imported = new Set();
+    for (const m of text.matchAll(/^import\s+\{([^}]*)\}\s+from/gm)) {
+      m[1].split(',').map((s) => s.trim()).filter(Boolean)
+        .forEach((s) => imported.add(s.split(/\s+as\s+/)[0]));
+    }
+    const declared = new Set([...text.matchAll(
+      /^(?:export\s+)?(?:const|let|function)\s+([A-Za-z_$][\w$]*)/gm)].map((m) => m[1]));
+    // код без строк и комментариев
+    let code = '';
+    let quote = null;
+    for (let i = 0; i < text.length; i++) {
+      const ch = text[i];
+      if (quote) {
+        if (ch === '\\') i++;
+        else if (ch === quote) quote = null;
+        continue;
+      }
+      if (ch === "'" || ch === '"') { quote = ch; continue; }
+      if (ch === '/' && text[i + 1] === '/') { while (i < text.length && text[i] !== '\n') i++; continue; }
+      if (ch === '/' && text[i + 1] === '*') { i += 2; while (i < text.length && !(text[i] === '*' && text[i + 1] === '/')) i++; i++; continue; }
+      code += ch;
+    }
+    const missing = new Set();
+    for (const m of code.matchAll(/[A-Za-z_$][\w$]*/g)) {
+      const name = m[0];
+      if (KEYWORDS.has(name) || declared.has(name) || imported.has(name)) continue;
+      if (ownerOf.has(name)) missing.add(`${name} (из ${ownerOf.get(name)})`);
+    }
+    assert.deepEqual([...missing].sort(), [],
+      `${file} использует чужие экспорты без import — в браузере это ReferenceError`);
+  }
+});
+
 test('весь код приложения синтаксически валиден', () => {
   // new Function только парсит тело, но не выполняет его.
   assert.doesNotThrow(() => new Function(js));
