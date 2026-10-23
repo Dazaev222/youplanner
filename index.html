@@ -6271,7 +6271,7 @@ function parseBackup(text) {
         if (!Number.isInteger(data.sleep.realSleepMin) ||
             data.sleep.realSleepMin < 0 ||
             data.sleep.realSleepMin >= SLEEP_MAX_MINUTES) return null;
-        if (sleepDurationMinutes(data.sleep.fall, data.sleep.realWake) !==
+        if (sleepDurationMinutes(data.sleep.bed, data.sleep.fall, data.sleep.realWake) !==
             data.sleep.realSleepMin) return null;
       }
     }

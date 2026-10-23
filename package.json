@@ -4,7 +4,7 @@
   "version": "1.0.0",
   "description": "YouPlanner — трекер привычек (PWA, один index.html)",
   "scripts": {
-    "test": "node --test tests/smoke.test.mjs"
+    "test": "node --test \"tests/*.test.mjs\""
   },
   "devDependencies": {
     "playwright": "^1.64.1"
