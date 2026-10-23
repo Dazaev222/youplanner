@@ -55,5 +55,13 @@ export function loadApp({ fetchImpl } = {}) {
 
   const context = vm.createContext(sandbox);
   vm.runInContext(getAppJs(), context, { filename: 'youplanner-app.js' });
-  return { sandbox, context };
+  return {
+    sandbox,
+    context,
+    // выполнить код в том же контексте (доступ к глобальным лексическим
+    // const — например bus или syncPending — возможен только изнутри)
+    run(code) {
+      return vm.runInContext(code, context);
+    },
+  };
 }
