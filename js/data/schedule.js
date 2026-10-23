@@ -80,3 +80,29 @@ const DEFAULT_SCHEDULE = {
     { time: '21:00', text: 'Отбой' },
   ],
 };
+
+// Возвращает расписание как оно лежит в хранилище. Ключа нет, пустая строка,
+// битый JSON, не-объект или неполные четыре типа дня — всё читается как
+// расписание по умолчанию: DEFAULT_SCHEDULE остаётся отсылкой, пока человек
+// не отредактирует его через Настройки. Копия, а не ссылка: правки
+// из редактора не должны мутировать сам константный список.
+function loadSchedule() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.schedule);
+    if (!raw) return JSON.parse(JSON.stringify(DEFAULT_SCHEDULE));
+    const parsed = JSON.parse(raw);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return JSON.parse(JSON.stringify(DEFAULT_SCHEDULE));
+    if (!Array.isArray(parsed.weekday) || !Array.isArray(parsed.weekend) ||
+        !Array.isArray(parsed.fasting) || !Array.isArray(parsed.physical)) return JSON.parse(JSON.stringify(DEFAULT_SCHEDULE));
+    return parsed;
+  } catch (e) {
+    return JSON.parse(JSON.stringify(DEFAULT_SCHEDULE));
+  }
+}
+// Запись расписания. Как saveHabits: safeSetItem с тостом на переполнение,
+// при успехе — отложенная отправка и boolean для вызывающего кода.
+function saveSchedule(schedule) {
+  if (!safeSetItem(STORAGE_KEYS.schedule, JSON.stringify(schedule))) return false;
+  bus.emit('data:changed');
+  return true;
+}
