@@ -1,11 +1,15 @@
-const CACHE = 'youplanner-v3';
+const CACHE = 'youplanner-v4';
 const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon.svg',
   './styles/tokens.css', './styles/layout.css', './styles/buttons.css',
   './styles/table.css', './styles/cells.css', './styles/progress-circle.css',
   './styles/modal.css', './styles/qaza.css', './styles/day-view.css',
   './styles/schedule.css', './styles/sheets.css', './styles/prayer.css',
   './styles/toast.css', './styles/settings.css', './styles/stats.css',
-  './styles/habits-edit.css', './styles/mobile.css', './styles/effects.css'];
+  './styles/habits-edit.css', './styles/mobile.css', './styles/effects.css',
+  './js/data/storage.js', './js/data/schedule.js', './js/data/habits.js',
+  './js/data/qaza.js', './js/data/prayer.js', './js/data/fast.js',
+  './js/data/sleep.js', './js/data/stats.js', './js/data/sync.js',
+  './js/data/backup.js', './js/data/ui.js'];
 
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(ASSETS); }));

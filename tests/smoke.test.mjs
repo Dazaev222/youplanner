@@ -1,38 +1,66 @@
 // Дымовые тесты YouPlanner. Только стандартная библиотека Node — ставить
-// ничего не нужно: `npm test` (или `node --test tests/smoke.test.mjs`).
+// ничего не нужно: `npm test` (или `node --test tests/*.test.mjs`).
 //
 // Зачем: ревью 2026-10-16 нашло, что приложение падало при запуске —
 // switchAppView() обращался к #task-add-btn удалённой вкладки задач,
 // из-за чего не стартовали навигация, таймер молитв и синхронизация.
 // Такие поломки ловятся сверкой «каждый id из JS есть в разметке» —
 // она и есть ядро этого файла.
+//
+// С Фазы 2 декомпозиции код приложения — это несколько <script src>
+// (js/data/*.js) плюс инлайн-скрипт. Проверки работают с конкатенацией
+// всех источников в порядке подключения — ровно то, что исполняет браузер.
+// Порядок и состав источников — tests/helpers/sources.mjs.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { readIndexHtml, getScriptSources, getAppJs } from './helpers/sources.mjs';
 
-const root = join(dirname(fileURLToPath(import.meta.url)), '..');
-const html = readFileSync(join(root, 'index.html'), 'utf8');
-
-const scriptMatch = html.match(/<script>([\s\S]*)<\/script>/);
-const js = scriptMatch ? scriptMatch[1] : '';
-// Статичная разметка — всё до скрипта: id, которые JS создаёт сам
-// через innerHTML-шаблоны, сюда не попадают и в сверку не идут.
-const markup = html.slice(0, html.indexOf('<script>'));
+const html = readIndexHtml();
+const js = getAppJs();
+// Статичная разметка — всё до первого тега <script: id, которые JS создаёт
+// сам через innerHTML-шаблоны, сюда не попадают и в сверку не идут.
+const markup = html.slice(0, html.indexOf('<script'));
 const markupIds = new Set(
   [...markup.matchAll(/ id="([^"]+)"/g)].map((m) => m[1]),
 );
 
 test('в index.html есть встроенный скрипт', () => {
-  assert.ok(scriptMatch, 'не найден блок <script>…</script>');
-  assert.ok(js.trim().length > 0, 'скрипт пуст');
+  const inline = getScriptSources().find((s) => s.type === 'inline');
+  assert.ok(inline, 'не найден блок <script>…</script>');
+  assert.ok(inline.code.trim().length > 0, 'инлайн-скрипт пуст');
 });
 
-test('скрипт синтаксически валиден', () => {
+test('все подключённые файлы скриптов существуют и непустые', () => {
+  const sources = getScriptSources();
+  const files = sources.filter((s) => s.type === 'file');
+  assert.ok(files.length > 0, 'нет ни одного <script src> — данные не подключены');
+  for (const source of files) {
+    assert.ok(source.code.trim().length > 0, `${source.path} пуст`);
+    // каждый файл — отдельный <script> и обязан парситься сам по себе
+    assert.doesNotThrow(() => new Function(source.code),
+      `${source.path}: синтаксическая ошибка`);
+  }
+});
+
+test('весь код приложения синтаксически валиден', () => {
   // new Function только парсит тело, но не выполняет его.
   assert.doesNotThrow(() => new Function(js));
+});
+
+test('нет дублей верхнеуровневых объявлений между скриптами', () => {
+  // Повторное const/let/function на глобальном уровне — SyntaxError при
+  // загрузке второго скрипта. Классическая ловушка разбиения на файлы,
+  // поэтому охраняется тестом, а не надеждой.
+  const names = new Map();
+  for (const m of js.matchAll(/^(?:const|let)\s+([A-Za-z_$][\w$]*)/gm)) {
+    assert.ok(!names.has(m[1]), `дубль объявления: ${m[1]}`);
+    names.set(m[1], 'var');
+  }
+  for (const m of js.matchAll(/^function\s+([A-Za-z_$][\w$]*)/gm)) {
+    assert.ok(!names.has(m[1]), `дубль объявления: function ${m[1]}`);
+    names.set(m[1], 'function');
+  }
 });
 
 test('в статичной разметке нет дублей id', () => {
