@@ -22,6 +22,7 @@ import { appState, isMainDayView, isMobileView, ui } from './ui/state.js';
 import { onScheduleAddSubmit, onScheduleEditListClick, renderScheduleEditView, renderScheduleView } from './ui/schedule-view.js';
 import { markStatsPeriod, setStatsValue, statsChartMarkup, statsHabitGridMarkup, statsSummaryMarkup } from './ui/stats-helpers.js';
 import { ensureQazaState, getQazaState, onQazaAddPick, onQazaAddSubmit, onQazaDone, onQazaStartChange, onQazaUndo, qazaCellMarkup, renderQazaView, setQazaState } from './ui/qaza-view.js';
+import { applyScreen } from './ui/router.js';
 /* YouPlanner — точка сборки интерфейса (app.js).
    Модульная сборка восстановлена (фазы 3.2–3.4): домены данных — js/data,
    синхронизация — js/sync, вьюхи — js/ui, общие утилиты — js/core.
@@ -1543,13 +1544,37 @@ export let sleepReturnView = 'main';
 export let currentView = 'main';
 
 // Переключение разделов. Единая точка входа для таб-бара на телефоне,
-// кнопки «Каза-намазы» и «Назад» на ПК.
+// кнопки «Каза-намазы» и «Назад» на ПК. Видимость контейнеров, подсветка
+// вкладок и классы тела — applyScreen из js/ui/router.js; здесь —
+// запоминание точки возврата и перерисовка при входе.
+const ROUTE_RENDER = {
+  'main': renderMainView,
+  'qaza': function () { ensureQazaState(); renderQazaView(); },
+  'edit-habits': function () { appState.habits = loadHabits(); renderHabitsEditList(); },
+  'settings': renderSettingsView,
+  'stats': renderStatsView,
+  'stats-qaza': renderStatsQazaView,
+  // Вход в список обнуляет выбранную привычку: карточка открывается только
+  // тапом по строке, а не остатком прошлого захода
+  'stats-habits': function () { statsHabitId = null; renderStatsHabitsView(); },
+  'stats-habit': renderStatsHabitView,
+  'stats-fast': renderStatsFastView,
+  'stats-sleep': renderStatsSleepView,
+  'sleep': renderSleepView,
+  'schedule': renderScheduleView,
+  // Список времён открывается свёрнутым: «Показать все» — разовый взгляд
+  'prayer': function () { resetPrayerShowAll(); renderPrayerView(); },
+  'prayer-settings': renderPrayerSettings,
+  // Незакрытая форма не переживает уход с экрана: возвращаться к наполовину
+  // заполненному полю незачем, а первый запуск снова покажет форму сам
+  'fast': function () { resetFastForm(); renderFastView(); },
+};
+
 export function switchAppView(name) {
-  const weekNav = document.getElementById('week-nav'); if (weekNav) weekNav.hidden = (name !== 'main');
-  // Панель статистики принадлежит главной: любой переход её закрывает
-  closeStatsMenu();
+  // Панель статистики принадлежит главной: любой переход её закрывает.
   // Попап уровня — тоже: программный переход (из консоли, теста или будущего
   // кода) без этого оставил бы его висеть поверх нового экрана
+  closeStatsMenu();
   closeLevelSheet();
 
   // Вход в раздел запоминает, откуда вошли, — туда «Назад» из хаба и вернёт
@@ -1559,128 +1584,9 @@ export function switchAppView(name) {
   // гамбургера, — и «Назад» должен вернуть в тот, откуда вошли
   if (name === 'sleep' && currentView !== 'sleep') sleepReturnView = currentView;
 
-  document.getElementById('main').hidden = name !== 'main';
-  document.getElementById('settings-view').hidden = name !== 'settings';
-  document.getElementById('habits-edit-view').hidden = name !== 'edit-habits';
-  document.getElementById('qaza-view').hidden = name !== 'qaza';
-  document.getElementById('prayer-view').hidden = name !== 'prayer';
-  document.getElementById('prayer-settings-view').hidden = name !== 'prayer-settings';
-  document.getElementById('fast-view').hidden = name !== 'fast';
-  document.getElementById('stats-view').hidden = name !== 'stats';
-  document.getElementById('stats-qaza-view').hidden = name !== 'stats-qaza';
-  document.getElementById('stats-habits-view').hidden = name !== 'stats-habits';
-  document.getElementById('stats-habit-view').hidden = name !== 'stats-habit';
-  document.getElementById('stats-fast-view').hidden = name !== 'stats-fast';
-  document.getElementById('stats-sleep-view').hidden = name !== 'stats-sleep';
-  document.getElementById('sleep-view').hidden = name !== 'sleep';
-  document.getElementById('schedule-view').hidden = name !== 'schedule';
-  document.getElementById('schedule-edit-view').hidden = name !== 'schedule-edit';
-  document.getElementById('mobile-day-tabs').hidden = name !== 'main' || !isMobileView();
-  document.getElementById('tab-bar').hidden = !isMobileView();
-  document.getElementById('week-nav').hidden = name !== 'main';
-  document.getElementById('qaza-btn').hidden = name !== 'main';
-  document.getElementById('schedule-btn').hidden = name !== 'main';
-  document.getElementById('settings-btn').hidden = name !== 'main';
-  // Кнопка статистики открывает панель с экранами раздела: на других
-  // экранах ей нечего делать
-  document.getElementById('stats-menu-btn').hidden = name !== 'main';
-
-  // Вложенные экраны подсвечивают вкладку, из которой открыты: «Привычки»,
-  // настройки молитв, статистика и «Цикл сна» — «Настройки», «Молитвы»
-  // и «Ураза» — «Каза». У сна вкладки нет своей: вход в него из гамбургера,
-  // а он принадлежит главной, и подсвечивать там нечего
-  const tabView = name === 'edit-habits' || name === 'prayer-settings' ||
-    name === 'sleep' || name === 'stats' || name === 'stats-qaza' ||
-    name === 'stats-habits' || name === 'stats-habit' ||
-    name === 'stats-fast' || name === 'stats-sleep' ? 'settings'
-    : name === 'prayer' || name === 'fast' ? 'qaza'
-      : name;
-  document.querySelectorAll('#tab-bar .tab-item').forEach(function (item) {
-    item.classList.toggle('is-active', item.getAttribute('data-view') === tabView);
-  });
-
-  // Классы на body гасят шапку действий в каза, молитвах, уразе, настройках
-  // и статистике. У статистики свой класс, а не view-settings: гасят они одно
-  // и то же, но имя читается по экрану
-  const isSettings = name === 'settings' || name === 'edit-habits' ||
-    name === 'prayer-settings' || name === 'sleep';
-  document.body.classList.toggle('view-qaza', name === 'qaza');
-  document.body.classList.toggle('view-prayer', name === 'prayer');
-  document.body.classList.toggle('view-fast', name === 'fast');
-  document.body.classList.toggle('view-settings', isSettings);
-  document.body.classList.toggle('view-stats', name === 'stats' || name === 'stats-qaza' ||
-    name === 'stats-habits' || name === 'stats-habit' ||
-    name === 'stats-fast' || name === 'stats-sleep');
-
-  if (name === 'qaza') {
-    ensureQazaState();
-    renderQazaView();
-  }
-
-  if (name === 'main') {
-    renderMainView();
-  }
-
-  if (name === 'edit-habits') {
-    appState.habits = loadHabits();
-    renderHabitsEditList();
-  }
-
-  if (name === 'settings') {
-    renderSettingsView();
-  }
-
-  if (name === 'stats') {
-    renderStatsView();
-  }
-
-  if (name === 'stats-qaza') {
-    renderStatsQazaView();
-  }
-
-  if (name === 'stats-habits') {
-    // Вход в список обнуляет выбранную привычку: карточка открывается только
-    // тапом по строке, а не остатком прошлого захода
-    statsHabitId = null;
-    renderStatsHabitsView();
-  }
-
-  if (name === 'stats-habit') {
-    renderStatsHabitView();
-  }
-
-  if (name === 'stats-fast') {
-    renderStatsFastView();
-  }
-
-  if (name === 'stats-sleep') {
-    renderStatsSleepView();
-  }
-
-  if (name === 'sleep') {
-    renderSleepView();
-  }
-
-  if (name === 'schedule') {
-    renderScheduleView();
-  }
-
-  if (name === 'prayer') {
-    // Список открывается свёрнутым: «Показать все» — разовый взгляд
-    resetPrayerShowAll();
-    renderPrayerView();
-  }
-
-  if (name === 'prayer-settings') {
-    renderPrayerSettings();
-  }
-
-  if (name === 'fast') {
-    // Незакрытая форма не переживает уход с экрана: возвращаться к наполовину
-    // заполненному полю незачем, а первый запуск снова покажет форму сам
-    resetFastForm();
-    renderFastView();
-  }
+  applyScreen(name);
+  const render = ROUTE_RENDER[name];
+  if (render) render();
 
   window.scrollTo(0, 0);
   currentView = name;

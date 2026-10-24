@@ -1,4 +1,4 @@
-const CACHE = 'youplanner-v10';
+const CACHE = 'youplanner-v11';
 const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon.svg',
   './styles/tokens.css', './styles/layout.css', './styles/buttons.css',
   './styles/table.css', './styles/cells.css', './styles/progress-circle.css',
@@ -14,6 +14,7 @@ const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './ic
   ''./js/ui/qaza-view.js'',
   ''./js/ui/schedule-view.js'',
   ''./js/ui/stats-helpers.js'',
+  './js/ui/router.js',
   './js/app.js',
   './js/core/bus.js', './js/core/dates.js', './js/core/storage.js', './js/core/dom.js',
   './js/data/storage.js', './js/data/schedule.js', './js/data/habits.js',
