@@ -99,20 +99,72 @@
   outline-offset: 2px;
 }
 
-/* Поле отправки: пилюля ввода и круглая кнопка рядом */
+/* Поле отправки — колонка: сверху плашка прикреплённого PDF (когда есть),
+   снизу ряд «скрепка + поле + отправить» */
 #assistant-form {
   display: flex;
+  flex-direction: column;
   gap: 8px;
   margin-top: 12px;
 }
 
-#assistant-form .input {
+.assistant-input-row {
+  display: flex;
+  gap: 8px;
+}
+
+.assistant-input-row .input {
   flex: 1 1 auto;
   min-width: 0;
 }
 
 #assistant-send {
   flex: 0 0 auto;
+}
+
+/* Скрепка — квадратная кнопка в рост поля: label прячет file-input,
+   клик открывает системный выбор файла */
+.assistant-pdf-btn {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  min-height: 34px;
+  font-size: 16px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.assistant-pdf-btn:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Плашка прикреплённого PDF — сама кнопка сброса: клик убирает текст
+   из запросов */
+.assistant-pdf-indicator {
+  align-self: flex-start;
+  max-width: 100%;
+  padding: 6px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background-color: var(--surface-alt);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+@media (hover: hover) {
+  .assistant-pdf-indicator:hover {
+    border-color: var(--danger);
+    color: var(--danger);
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {
