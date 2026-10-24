@@ -26,14 +26,21 @@ export function readAssistantApiKey() {
   }
 }
 
-// Подпись под шапкой чата: где ключ, туда и смотрим. Обновляется на входе
-// на вкладку и после сохранения ключа.
+// Вход на вкладку — и есть проверка ключа: ключа нет — открывается модалка
+// ввода, ключ есть — модалка погашена и чат готов. Подпись под шапкой
+// отражает то же состояние. Обновляется на входе и после сохранения ключа.
 export function renderAssistantView() {
   const hint = document.getElementById('assistant-hint');
+  const hasKey = Boolean(readAssistantApiKey());
   if (hint) {
-    hint.textContent = readAssistantApiKey()
+    hint.textContent = hasKey
       ? 'Ключ сохранён на устройстве. Пока в тестовом режиме: ответы — заглушка.'
-      : 'Ключ не задан: при первом вопросе откроется форма ввода. Ответы пока — заглушка.';
+      : 'Ключ не задан: введите его, чтобы задавать вопросы. Ответы пока — заглушка.';
+  }
+  if (hasKey) {
+    closeAssistantKeyModal();
+  } else {
+    openAssistantKeyModal();
   }
 }
 

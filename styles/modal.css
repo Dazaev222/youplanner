@@ -8,8 +8,10 @@
   justify-content: center;
 }
 
-/* Обязательное правило: иначе display:flex перебивает атрибут hidden */
-#habit-modal[hidden] {
+/* Обязательное правило: иначе display:flex перебивает атрибут hidden.
+   Пара нужна каждой модалке с классом .modal — без неё окно видно всегда. */
+#habit-modal[hidden],
+#assistant-key-modal[hidden] {
   display: none;
 }
 
