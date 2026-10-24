@@ -1,15 +1,15 @@
 import { bus } from './core/bus.js';
-import { addDays, getMonthDatesToToday, getWeekStart, parseISODate, toISODate } from './core/dates.js';
-import { cssEscape, escapeHtml, pad2, setHidden, showToast } from './core/dom.js';
+import { addDays, getMonthDatesToToday, getWeekStart, toISODate } from './core/dates.js';
+import { cssEscape, escapeHtml, pad2, showToast } from './core/dom.js';
 import { applyBackup, buildBackup, parseBackup } from './data/backup.js';
 import { FAST_HISTORY_MIN, FAST_SOURCE_ADD, FAST_SOURCE_DONE, loadFast } from './data/fast.js';
 import { CHOICE_OPTIONS, HABIT_TYPES, addHabit, hasRecords, loadHabits, removeHabit, updateHabit } from './data/habits.js';
 import { migrateDropTasks } from './data/migrations.js';
-import { NAMAZ_LABELS, NAMAZ_ORDER, QAZA_DAILY_GOAL, QAZA_HABIT_ID, addMissedQaza, getQazaPlan, kazaDayFor, loadQaza, loadQazaLog, markQazaDone, normalizeQazaCursor, qazaLogDoneByDay, qazaTotalRemaining, saveQaza, undoQazaDone } from './data/qaza.js';
+import { QAZA_HABIT_ID, loadQaza, loadQazaLog, qazaLogDoneByDay, qazaTotalRemaining } from './data/qaza.js';
 import { LEVEL_LATE, LEVEL_ON_TIME, LEVEL_TWO_MIN, QURAN_HABIT_ID, SPORT_VALUES, SPORT_VALUE_LABELS, calcProgress, defaultLevel, getEntry, getRecord, habitMarkDate, hasLevelPopup, invalidateRecordsCache, isChoiceLevelHabit, isLevelHabit, loadRecords, writeHabitEntry } from './data/records.js';
-import { SCHEDULE_TYPES, loadSchedule, saveSchedule } from './data/schedule.js';
+import { SCHEDULE_TYPES } from './data/schedule.js';
 import { loadSleep, sleepAverageMinutes, sleepFormatDuration, sleepTimeLabel, sleepTimeMinutes } from './data/sleep.js';
-import { STATS_PERIOD_BOXES, habitBestStreak, habitCurrentStreak, habitMarked, habitMarkedDays, habitsAveragePercent, loadStatsPeriod, qazaDoneOn, qazaStreak, saveStatsPeriod, statsPeriodDates } from './data/stats.js';
+import { STATS_PERIOD_BOXES, habitBestStreak, habitCurrentStreak, habitMarkedDays, habitsAveragePercent, loadStatsPeriod, qazaDoneOn, qazaStreak, saveStatsPeriod, statsPeriodDates } from './data/stats.js';
 import { STORAGE_KEYS } from './data/storage.js';
 import { SYNC_STATUS_MS } from './data/sync.js';
 import { APP_BUILD, APP_VERSION, CIRCLE_CENTER, CIRCLE_LENGTH, CIRCLE_RADIUS, CIRCLE_SIZE, MONTHS_GENITIVE, MONTHS_NOMINATIVE, MONTHS_SHORT } from './data/ui.js';
@@ -18,7 +18,10 @@ import { cloudReachable, cloudReady, flushPendingSync, markCloudReady, scheduleS
 import { onFastAdd, onFastDone, onFastEdit, onFastInitCancel, onFastInitSave, renderFastView, resetFastForm } from './ui/fast-view.js';
 import { onPrayerGeo, onPrayerMadhhabChange, onPrayerManualSave, onPrayerMethodChange, onPrayerRefresh, onPrayerShowAll, renderPrayerSettings, renderPrayerView, resetPrayerShowAll, startPrayerClock } from './ui/prayer-view.js';
 import { onSleepFieldChange, renderSleepView } from './ui/sleep-view.js';
-import { appState } from './ui/state.js';
+import { appState, isMainDayView, isMobileView, ui } from './ui/state.js';
+import { onScheduleAddSubmit, onScheduleEditListClick, renderScheduleEditView, renderScheduleView } from './ui/schedule-view.js';
+import { markStatsPeriod, setStatsValue, statsChartMarkup, statsHabitGridMarkup, statsSummaryMarkup } from './ui/stats-helpers.js';
+import { ensureQazaState, getQazaState, onQazaAddPick, onQazaAddSubmit, onQazaDone, onQazaStartChange, onQazaUndo, qazaCellMarkup, renderQazaView, setQazaState } from './ui/qaza-view.js';
 /* YouPlanner — слой данных.
    Модульная сборка утрачена (§3 Spec.md), поэтому весь скрипт — один файл,
    а функции объявлены в глобальной области. Никаких внешних загрузок
@@ -114,18 +117,6 @@ export function onBackupRead(text) {
 
 // Мобильная вёрстка: -1 не выбрана, 0 Пн–Чт, 1 Пт–Вс
 export let mobileDayPage = -1;
-
-// Режим главного экрана на телефоне: 'day' — карточки за сегодня,
-// 'week' — привычная таблица недели. Выбор переживает перезапуск.
-export let mainView = localStorage.getItem('youplanner.mainView') || 'day';
-
-// Тип дня в разделе „Расписание“. На этом этапе не сохраняется между запусками —
-// хранение добавится вместе с редактированием через Настройки.
-export let scheduleType = 'weekday';
-
-// Тип дня в редакторе расписания (schedule-edit): самостоятельная переменная,
-// чтобы выбор в просмотре и в редакторе не перескакивал друг за другом.
-export let scheduleEditType = 'weekday';
 
 /* --- Константы ----------------------------------------------------------- */
 
@@ -332,7 +323,7 @@ export function init() {
 
   // Начальные данные каза записываются при первом запуске, а не при открытии
   // вкладки: так состояние очереди существует до первого показа
-  qazaState = loadQaza();
+  setQazaState(loadQaza());
 
   renderHeader();
   renderMainView();
@@ -781,7 +772,7 @@ export function bindEvents() {
       if (!btn) return;
       const value = btn.getAttribute('data-schedule');
       if (SCHEDULE_TYPES.indexOf(value) === -1) return;
-      scheduleType = value;
+      ui.scheduleType = value;
       renderScheduleView();
     });
   }
@@ -891,8 +882,8 @@ export function bindEvents() {
     switchBox.addEventListener('click', function (event) {
       const btn = event.target.closest('.view-switch-btn');
       if (!btn) return;
-      mainView = btn.getAttribute('data-view');
-      localStorage.setItem('youplanner.mainView', mainView);
+      ui.mainView = btn.getAttribute('data-view');
+      localStorage.setItem('youplanner.mainView', ui.mainView);
       renderMainView();
     });
   }
@@ -958,7 +949,7 @@ export function bindEvents() {
     scheduleEditSwitch.addEventListener('click', function (event) {
       const btn = event.target.closest('.view-switch-btn');
       if (!btn) return;
-      scheduleEditType = btn.getAttribute('data-schedule-type');
+      ui.scheduleEditType = btn.getAttribute('data-schedule-type');
 
       scheduleEditSwitch.querySelectorAll('.view-switch-btn').forEach(function(b) { b.classList.remove('is-active'); });
       btn.classList.add('is-active');
@@ -1005,11 +996,6 @@ export function renderHeader() {
 
 /* --- Мобильная вёрстка --------------------------------------------------- */
 
-// Порог тот же, что у медиа-запроса в стилях: ширина узкого телефона
-export function isMobileView() {
-  return window.matchMedia('(max-width: 700px)').matches;
-}
-
 // Индексы дней недели (0 — понедельник), попадающие в текущий вид.
 // На ПК это вся неделя, на телефоне — выбранная половина.
 export function getVisibleDays() {
@@ -1039,11 +1025,6 @@ export function updateMobileTabs() {
 
 /* --- Режим «День» -------------------------------------------------------- */
 
-// Карточки дня — мобильный режим: на ПК и в режиме «Неделя» его нет
-export function isMainDayView() {
-  return isMobileView() && mainView === 'day';
-}
-
 // Единая точка перерисовки главного экрана: выбирает между карточками дня
 // и таблицей недели и приводит видимость блоков в соответствие режиму
 export function renderMainView() {
@@ -1051,7 +1032,7 @@ export function renderMainView() {
   if (switchBox) {
     switchBox.hidden = !isMobileView();
     switchBox.querySelectorAll('.view-switch-btn').forEach(function (btn) {
-      btn.classList.toggle('is-active', btn.getAttribute('data-view') === mainView);
+      btn.classList.toggle('is-active', btn.getAttribute('data-view') === ui.mainView);
     });
   }
 
@@ -1392,95 +1373,11 @@ export function goToday() {
   renderTable();
 }
 
-export function renderScheduleView() {
-  markScheduleType();
-
-  const list = document.getElementById('schedule-list');
-  if (!list) return;
-
-  const scheduleData = loadSchedule();
-  const items = scheduleData[scheduleType] || [];
-  let html = '';
-  for (let i = 0; i < items.length; i++) {
-    html += '<li>' +
-      '<span class="schedule-time">' + escapeHtml(items[i].time) + '</span>' +
-      '<span class="schedule-text">' + escapeHtml(items[i].text) + '</span>' +
-      '</li>';
-  }
-  list.innerHTML = html;
-}
 
 /* --- Редактор расписания (Настройки → Редактировать расписание) ------------ */
 
-// Список + кнопка удаления на каждый пункт. Сортировка по времени даёт один
-// порядок в DOM и в массиве: data-index кнопки указывает ровно на ту запись,
-// которую видно. Изменение порядка переживает запись в хранилище — расписание
-// дальше живёт отсортированным.
-export function renderScheduleEditView() {
-  const list = document.getElementById('schedule-edit-list');
-  if (!list) return;
 
-  const schedule = loadSchedule();
-  const items = schedule[scheduleEditType] || [];
 
-  items.sort((a, b) => a.time.localeCompare(b.time));
-
-  let html = '';
-  for (let i = 0; i < items.length; i++) {
-    html += '<li style="display: flex; justify-content: space-between; align-items: center; padding: 12px 16px; border-bottom: 1px solid var(--border);">' +
-      '<div><span class="schedule-time" style="font-weight: 600; margin-right: 12px; font-variant-numeric: tabular-nums;">' + escapeHtml(items[i].time) + '</span>' +
-      '<span class="schedule-text">' + escapeHtml(items[i].text) + '</span></div>' +
-      '<button type="button" class="btn btn-danger delete-schedule-item" data-index="' + i + '" aria-label="Удалить">✕</button>' +
-      '</li>';
-  }
-  list.innerHTML = html;
-}
-
-// Форма «Добавить». saveSchedule решает судьбу отправки и перерисовки:
-// запись не удалась — поля не чистим и экран не трогаем.
-export function onScheduleAddSubmit(event) {
-  event.preventDefault();
-  const timeInput = document.getElementById('schedule-add-time');
-  const textInput = document.getElementById('schedule-add-text');
-  if (!timeInput || !textInput) return;
-
-  const time = timeInput.value;
-  const text = textInput.value.trim();
-  if (!time || !text) return;
-
-  const schedule = loadSchedule();
-  if (!schedule[scheduleEditType]) schedule[scheduleEditType] = [];
-
-  schedule[scheduleEditType].push({ time: time, text: text });
-
-  if (!saveSchedule(schedule)) return;
-
-  timeInput.value = '';
-  textInput.value = '';
-  renderScheduleEditView();
-}
-
-// Удаление пункта — делегировано на ul, поэтому перерисовки не теряют
-// обработчик. Индекс согласован с DOM: render рисует уже отсортированный
-// массив, поэтому и здесь сортируем до splice.
-export function onScheduleEditListClick(event) {
-  const btn = event.target.closest('.delete-schedule-item');
-  if (!btn) return;
-
-  const index = parseInt(btn.getAttribute('data-index'), 10);
-  if (isNaN(index)) return;
-
-  const schedule = loadSchedule();
-  const items = schedule[scheduleEditType];
-  if (!items || index < 0 || index >= items.length) return;
-
-  items.sort((a, b) => a.time.localeCompare(b.time));
-  items.splice(index, 1);
-
-  if (!saveSchedule(schedule)) return;
-
-  renderScheduleEditView();
-}
 
 /* --- Попап уровня выполнения (§1.3) --------------------------------------- */
 
@@ -1586,12 +1483,7 @@ export function syncLevelCells(habitId, date) {
 
 /* --- Вкладка «Каза-намазы» ----------------------------------------------- */
 
-// Состояние очереди каза. Заполняется в init(), дальше меняется только вкладкой.
-export let qazaState = null;
 
-// Намаз, выбранный в блоке ручного добавления. Живёт только в интерфейсе
-// и не сохраняется: это ещё не решение, а подготовка к нажатию «Добавить».
-export let qazaAddPick = null;
 
 /* --- Панель навигации статистики (заход 4) ------------------------------- */
 
@@ -1720,7 +1612,7 @@ export function switchAppView(name) {
     name === 'stats-fast' || name === 'stats-sleep');
 
   if (name === 'qaza') {
-    if (!qazaState) qazaState = loadQaza();
+    ensureQazaState();
     renderQazaView();
   }
 
@@ -1804,7 +1696,7 @@ export function renderSettingsView() {
 
 /* ---------- Экран «Статистика» ------------------------------------------- */
 
-// Выбранный период живёт на устройстве, а не в данных человека: как mainView,
+// Выбранный период живёт на устройстве, а не в данных человека: как ui.mainView,
 // это отметка последнего просмотра, а не запись. Категория у каждой своя,
 // поэтому общей переменной нет — её читает loadStatsPeriod(category)
 
@@ -1825,65 +1717,10 @@ export function renderStatsCategory(category) {
   }
 }
 
-// Строка цифр: подпись слева, значение справа — тем же .settings-row,
-// что и список хаба. data-stat нужен проверкам, разметку не украшает.
-export function statsSummaryMarkup(rows) {
-  return rows.map(function (row) {
-    return '<p class="settings-row" data-stat="' + escapeHtml(row[0]) + '">' +
-      '<span>' + escapeHtml(row[1]) + '</span>' +
-      '<span class="stats-row-value">' + escapeHtml(row[2]) + '</span></p>';
-  }).join('');
-}
 
-// Столбики по дням: высота — значение дня. Строка SVG собирается вручную
-// через innerHTML, как circleMarkup; библиотек нет (§4). Подпись — второй
-// параметр: у каза и у привычек она своя, а рисование одно и то же.
-export function statsChartMarkup(values, label) {
-  let max = 0;
-  for (let i = 0; i < values.length; i++) {
-    if (values[i] > max) max = values[i];
-  }
-  if (max <= 0) return '';
 
-  // 94, а не 100: самый высокий столбик не должен упираться в верх графика
-  let bars = '';
-  for (let i = 0; i < values.length; i++) {
-    if (values[i] <= 0) continue;
-    // Минимум 2 единицы: день с одним каза иначе был бы не виден
-    const height = Math.max(2, Math.round(values[i] / max * 94));
-    bars += '<rect x="' + i + '" y="' + (100 - height) + '" width="0.7" height="' +
-      height + '"></rect>';
-  }
 
-  return '<svg viewBox="0 0 ' + values.length + ' 100" preserveAspectRatio="none" ' +
-    'role="img" aria-label="' + escapeHtml(label || 'Каза по дням') + '">' + bars + '</svg>';
-}
 
-export function markScheduleType() {
-  const box = document.getElementById('schedule-switch');
-  if (!box) return;
-  box.querySelectorAll('.view-switch-btn').forEach(function (btn) {
-    btn.classList.toggle('is-active',
-      btn.getAttribute('data-schedule') === scheduleType);
-  });
-}
-
-// Подсветка выбранного периода. Период читается для категории этого блока:
-// у каждой свой. Разметка кнопок статична, поэтому пересобирать её не нужно —
-// как у переключателя «День / Неделя»
-export function markStatsPeriod(boxId) {
-  const box = document.getElementById(boxId);
-  if (!box) return;
-  const period = loadStatsPeriod(STATS_PERIOD_BOXES[boxId]);
-  box.querySelectorAll('.view-switch-btn').forEach(function (btn) {
-    btn.classList.toggle('is-active', btn.getAttribute('data-period') === period);
-  });
-}
-
-export function setStatsValue(selector, value) {
-  const el = document.querySelector(selector);
-  if (el) el.textContent = value;
-}
 
 // Хаб: четыре строки. Цифры считаются по хранилищу, а не по appState:
 // раздел открывается из Настроек, где состояние таблицы могло устареть.
@@ -1893,9 +1730,9 @@ export function renderStatsView() {
   const today = new Date();
   const dates = statsPeriodDates(loadStatsPeriod('hub'), today);
 
-  if (!qazaState) qazaState = loadQaza();
+  ensureQazaState();
   setStatsValue('#stats-list [data-stat="qaza"] .stats-row-value',
-    qazaTotalRemaining(qazaState));
+    qazaTotalRemaining(getQazaState()));
 
   // Сон — средняя длительность записи за период хаба. Дни берутся уже
   // собранные: период у строки тот же, что у остальных цифр. Записи
@@ -1952,7 +1789,7 @@ export function renderStatsQazaView() {
     done += count;
   }
 
-  if (!qazaState) qazaState = loadQaza();
+  ensureQazaState();
   const average = done / dates.length;
 
   const summary = document.getElementById('stats-qaza-summary');
@@ -1961,7 +1798,7 @@ export function renderStatsQazaView() {
       ['done', 'Выполнено за период', String(done)],
       ['average', 'Средний темп в день', average.toFixed(1).replace('.', ',')],
       ['streak', 'Текущая серия, дней', String(qazaStreak(records, today))],
-      ['total', 'Общий остаток', String(qazaTotalRemaining(qazaState))],
+      ['total', 'Общий остаток', String(qazaTotalRemaining(getQazaState()))],
     ]);
   }
 
@@ -2140,33 +1977,6 @@ export function renderStatsSleepView() {
 // строка списка ставит своё значение перед показом карточки
 export let statsHabitId = null;
 
-// Календарь-сетка: колонка — неделя (понедельник сверху), строка — день недели.
-// Клетки одинаковые и заданы в пикселях, поэтому ширина сетки растёт вместе
-// с числом недель, а не подгоняется под экран: на телефоне её прокручивает
-// контейнер. Новых переменных палитры нет — цвета берёт §9
-export function statsHabitGridMarkup(habit, dates) {
-  if (!dates || dates.length === 0) return '';
-
-  const CELL = 10;
-  const GAP = 2;
-  const STEP = CELL + GAP;
-
-  // Сдвиг первого дня от понедельника: 0 — понедельник, 6 — воскресенье
-  const offset = (parseISODate(dates[0]).getDay() + 6) % 7;
-  const weeks = Math.ceil((offset + dates.length) / 7);
-
-  let cells = '';
-  for (let i = 0; i < dates.length; i++) {
-    const slot = offset + i;
-    cells += '<rect class="stats-grid-day' +
-      (habitMarked(habit, dates[i]) ? ' is-on' : '') +
-      '" x="' + Math.floor(slot / 7) * STEP + '" y="' + slot % 7 * STEP +
-      '" width="' + CELL + '" height="' + CELL + '" rx="2"></rect>';
-  }
-
-  return '<svg width="' + (weeks * STEP - GAP) + '" height="' + (7 * STEP - GAP) +
-    '" role="img" aria-label="Отметки по дням">' + cells + '</svg>';
-}
 
 // Список привычек. Процент за период — calcProgress, и это же делает «0%»
 // при полном отсутствии записей: пустой день даёт ноль, ветка «—» не нужна
@@ -2268,252 +2078,17 @@ export function renderStatsHabitView() {
 
 
 
-export function renderQazaView() {
-  if (!qazaState) return;
 
-  const total = qazaTotalRemaining(qazaState);
 
-  const summary = document.getElementById('qaza-summary');
-  if (summary) {
-    summary.textContent = 'Осталось всего: ' + total +
-      ' · Цель: ' + QAZA_DAILY_GOAL + ' намаза в день';
-  }
 
-  // Когда очередь исчерпана, выбирать стартовый намаз не из чего
-  setHidden('qaza-start-block', total === 0);
 
-  renderQazaRemaining();
-  renderQazaStart();
-  renderQazaPlan();
-  renderQazaAdd();
-}
 
-// Выбор намаза для ручного добавления: пять радио в виде пилюль, как в блоке
-// «Откуда продолжаем?». По умолчанию не выбрано ничего — программа не берётся
-// угадывать, какой именно намаз человек забыл.
-export function renderQazaAdd() {
-  const box = document.getElementById('qaza-add');
-  const button = document.getElementById('qaza-add-btn');
 
-  // Подтверждать нечего, пока намаз не выбран
-  if (button) button.disabled = qazaAddPick === null;
-  if (!box) return;
 
-  let html = '';
-  for (let i = 0; i < NAMAZ_ORDER.length; i++) {
-    const isPicked = i === qazaAddPick;
 
-    html += '<label class="qaza-add-option' + (isPicked ? ' is-picked' : '') + '">' +
-      '<input type="radio" class="qaza-add-radio" name="qaza-add" value="' + i + '"' +
-      (isPicked ? ' checked' : '') + '>' +
-      '<span class="qaza-add-name">' + escapeHtml(NAMAZ_LABELS[NAMAZ_ORDER[i]]) + '</span>' +
-      (isPicked ? '<span class="qaza-add-mark">выбран</span>' : '') +
-      '</label>';
-  }
 
-  box.innerHTML = html;
-}
 
-// Выбор намаза в блоке добавления: только подсветка, состояние очереди не трогается.
-// Обработчик делегирован на #qaza-add, потому что список перерисовывается.
-export function onQazaAddPick(event) {
-  const target = event && event.target;
-  if (!target || !target.classList || !target.classList.contains('qaza-add-radio')) return;
 
-  const index = parseInt(target.value, 10);
-  if (!Number.isInteger(index) || index < 0 || index >= NAMAZ_ORDER.length) return;
-
-  qazaAddPick = index;
-  renderQazaAdd();
-  restoreQazaRadioFocus('qaza-add', 'qaza-add-radio');
-}
-
-// Подтверждение добавления: остаток выбранного намаза растёт на единицу,
-// счётчик дня и курсор очереди остаются на месте.
-export function onQazaAddSubmit() {
-  if (qazaAddPick === null) return;
-
-  // Ручное добавление тоже идёт в день каза: ночью до Фаджра это вчера (§5)
-  if (!addMissedQaza(qazaState, NAMAZ_ORDER[qazaAddPick], kazaDayFor(new Date()))) return;
-
-  // После добавления выбор сбрасывается: повторное нажатие не должно
-  // записать тот же намаз второй раз
-  qazaAddPick = null;
-  afterQazaChange();
-}
-
-// Выбор стартового намаза: пять радио. Текущий помечен рамкой и словом «сейчас»,
-// чтобы выбор не передавался только цветом.
-export function renderQazaStart() {
-  const box = document.getElementById('qaza-start');
-  if (!box) return;
-
-  let html = '';
-  for (let i = 0; i < NAMAZ_ORDER.length; i++) {
-    const isCursor = i === qazaState.cursor;
-
-    html += '<label class="qaza-start-option' + (isCursor ? ' is-cursor' : '') + '">' +
-      '<input type="radio" class="qaza-start-radio" name="qaza-start" value="' + i + '"' +
-      (isCursor ? ' checked' : '') + '>' +
-      '<span class="qaza-start-name">' + escapeHtml(NAMAZ_LABELS[NAMAZ_ORDER[i]]) + '</span>' +
-      (isCursor ? '<span class="qaza-start-mark">сейчас</span>' : '') +
-      '</label>';
-  }
-
-  box.innerHTML = html;
-}
-
-// Смена стартового намаза: курсор переставляется и план пересчитывается.
-// Обработчик делегирован на #qaza-start, потому что список перерисовывается.
-export function onQazaStartChange(event) {
-  const target = event && event.target;
-  if (!target || !target.classList || !target.classList.contains('qaza-start-radio')) return;
-
-  const index = parseInt(target.value, 10);
-  if (!Number.isInteger(index) || index < 0 || index >= NAMAZ_ORDER.length) return;
-
-  qazaState.cursor = index;
-
-  // Курсор обязан указывать на намаз с остатком > 0
-  normalizeQazaCursor(qazaState);
-
-  if (!saveQaza(qazaState)) return;
-  renderQazaView();
-  restoreQazaRadioFocus('qaza-start', 'qaza-start-radio');
-}
-
-// Перерисовка списка радио уносит фокус вместе со старыми узлами, и обход
-// стрелками обрывается. Возвращаем фокус на выбранный вариант.
-// На мышиный клик это не влияет: :focus-visible тогда не срабатывает.
-export function restoreQazaRadioFocus(boxId, radioClass) {
-  const box = document.getElementById(boxId);
-  if (!box) return;
-
-  const checked = box.querySelector('.' + radioClass + ':checked');
-  if (checked) checked.focus({ preventScroll: true });
-}
-
-// Список пяти намазов с остатками. Текущий помечен рамкой и словом «сейчас»,
-// чтобы информация не передавалась только цветом.
-export function renderQazaRemaining() {
-  const box = document.getElementById('qaza-remaining');
-  if (!box) return;
-
-  let html = '';
-  for (let i = 0; i < NAMAZ_ORDER.length; i++) {
-    const key = NAMAZ_ORDER[i];
-    const isCursor = i === qazaState.cursor;
-    const isEmpty = qazaState.remaining[key] === 0;
-
-    html += '<div class="qaza-row' + (isCursor ? ' is-cursor' : '') +
-      (isEmpty ? ' is-empty' : '') + '">' +
-      '<span class="qaza-row-name">' + escapeHtml(NAMAZ_LABELS[key]) + '</span>' +
-      (isCursor ? '<span class="qaza-row-mark">сейчас</span>' : '') +
-      '<span class="qaza-count">' + escapeHtml(qazaState.remaining[key]) + '</span>' +
-      '</div>';
-  }
-
-  box.innerHTML = html;
-}
-
-// План на сегодня. Кнопка «Выполнено» есть только у первого пункта:
-// очередь строго последовательная, перепрыгнуть её нельзя.
-export function renderQazaPlan() {
-  const box = document.getElementById('qaza-plan');
-  const note = document.getElementById('qaza-note');
-  const undo = document.getElementById('qaza-undo');
-  const startLabel = document.getElementById('qaza-plan-start');
-  if (!box) return;
-
-  // День каза, а не календарный: запись, зачтённая ночью во вчера, отменяется
-  // оттуда же, куда легла (§7)
-  const today = kazaDayFor(new Date());
-  const plan = getQazaPlan(qazaState);
-
-  if (undo) {
-    const last = qazaState.history[qazaState.history.length - 1];
-    undo.disabled = !last || last.date !== today;
-  }
-
-  if (plan.length === 0) {
-    box.innerHTML = '';
-    if (startLabel) {
-      startLabel.hidden = true;
-      startLabel.textContent = '';
-    }
-    if (note) {
-      note.hidden = false;
-      note.textContent = 'Все каза выполнены. Остатков не осталось.';
-    }
-    return;
-  }
-
-  if (note) {
-    note.hidden = true;
-    note.textContent = '';
-  }
-
-  // Всегда видно, откуда программа отсчитывает план
-  if (startLabel) {
-    startLabel.hidden = false;
-    startLabel.textContent = 'Начать с: ' + NAMAZ_LABELS[NAMAZ_ORDER[qazaState.cursor]];
-  }
-
-  let html = '';
-  for (let i = 0; i < plan.length; i++) {
-    const key = NAMAZ_ORDER[plan[i]];
-    const isCurrent = i === 0;
-
-    html += '<div class="qaza-plan-item' + (isCurrent ? ' is-current' : '') + '">' +
-      '<span class="qaza-plan-name">' + escapeHtml(NAMAZ_LABELS[key]) + '</span>' +
-      (isCurrent
-        ? '<button type="button" id="qaza-done" class="btn btn-primary">Выполнено</button>'
-        : '<span class="qaza-plan-next">дальше</span>') +
-      '</div>';
-  }
-
-  box.innerHTML = html;
-}
-
-// Нажатие «Выполнено». Обработчик делегирован на #qaza-plan, потому что
-// содержимое плана перерисовывается целиком.
-// День берётся не календарный, а день каза (§5): ночью до Фаджра выполнение
-// уходит во вчерашний день, и об этом говорит тост — иначе отметка в таблице
-// встала бы не туда, где её ищут (§6).
-export function onQazaDone(event) {
-  const target = event && event.target;
-  if (!target || typeof target.closest !== 'function') return;
-  if (!target.closest('#qaza-done')) return;
-
-  const day = kazaDayFor(new Date());
-  if (!markQazaDone(qazaState, day)) return;
-  afterQazaChange();
-
-  if (day !== toISODate(new Date())) showToast('Каза зачтена во вчерашний день');
-}
-
-// Отмена работает с тем днём, к которому отнесена верхняя запись (§7):
-// запись, зачтённая вчера, снимается там же, где и легла.
-export function onQazaUndo() {
-  if (!undoQazaDone(qazaState, kazaDayFor(new Date()))) return;
-  afterQazaChange();
-}
-
-// Общая часть после изменения очереди: перерисовать вкладку, ячейки каза
-// и прогресс-круг строки h6 в таблице
-export function afterQazaChange() {
-  renderQazaView();
-  updateQazaCells();
-  updateRowCircle(QAZA_HABIT_ID);
-}
-
-// Разметка ячейки каза: число выполненных за день либо прочерк
-export function qazaCellMarkup(date) {
-  const value = getRecord(date, QAZA_HABIT_ID);
-  const isEmpty = typeof value !== 'number';
-  return '<span class="cell-qaza' + (isEmpty ? ' is-empty' : '') + '">' +
-    escapeHtml(isEmpty ? '—' : String(value)) + '</span>';
-}
 
 // Обновление ячеек каза во всех днях отображаемой недели
 export function updateQazaCells() {
@@ -2931,9 +2506,15 @@ export function validateHabitForm(data, excludeId) {
    граф импортов останется однонаправленным. */
 
 bus.on('data:changed', scheduleSync);
+// Изменение очереди каза (было телом afterQazaChange): вкладку перерисовывает
+// сам модуль, а ячейки таблицы и круг строки h6 — этот подписчик
+bus.on('qaza:changed', function () {
+  updateQazaCells();
+  updateRowCircle(QAZA_HABIT_ID);
+});
 bus.on('data:replaced', function () {
   appState.habits = loadHabits();
-  qazaState = loadQaza();
+  setQazaState(loadQaza());
   renderMainView();
   renderQazaView();
   renderPrayerView();
@@ -2943,7 +2524,7 @@ bus.on('sync:applied', function () {
   // сначала состояние (его раньше обновлял сам слой синхронизации),
   // затем перерисовка — экраны читают appState и qazaState
   appState.habits = loadHabits();
-  qazaState = loadQaza(true);
+  setQazaState(loadQaza(true));
   renderMainView();
   renderQazaView();
   renderPrayerView();
@@ -3115,4 +2696,5 @@ window.addEventListener('orientationchange', function () {
   scheduleLiquidIndicators();
 });
   
+
 

@@ -7,3 +7,26 @@ export const appState = {
   habits: [],      // Habit[]
   weekStart: null, // Date — понедельник отображаемой недели
 };
+
+// Порог тот же, что у медиа-запроса в стилях: ширина узкого телефона
+export function isMobileView() {
+  return window.matchMedia('(max-width: 700px)').matches;
+}
+
+// Переключаемые значения, общие для нескольких модулей интерфейса.
+// Объект — по той же причине, что appState: перекрёстные модули меняют
+// свойства, переприсваивать импортированный let нельзя.
+export const ui = {
+  // Режим главного экрана на телефоне: 'day' — карточки за сегодня,
+  // 'week' — таблица недели. Выбор переживает перезапуск.
+  mainView: localStorage.getItem('youplanner.mainView') || 'day',
+  // Типы дня в просмотре и редакторе расписания — отдельные значения,
+  // чтобы выбор в одном не перескакивал в другом
+  scheduleType: 'weekday',
+  scheduleEditType: 'weekday',
+};
+
+// Карточки дня — мобильный режим: на ПК и в режиме «Неделя» его нет
+export function isMainDayView() {
+  return isMobileView() && ui.mainView === 'day';
+}
