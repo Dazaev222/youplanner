@@ -279,11 +279,21 @@
       <button type="button" class="assistant-chip" data-chip="Как дела с каза?">Как дела с каза?</button>
     </div>
     <form id="assistant-form" novalidate>
-      <input type="text" id="assistant-input" class="input"
-             placeholder="Спросите что-нибудь…" autocomplete="off"
-             aria-label="Сообщение ассистенту">
-      <button type="submit" id="assistant-send" class="btn btn-primary"
-              aria-label="Отправить">➤</button>
+      <button type="button" id="assistant-pdf-indicator"
+              class="assistant-pdf-indicator" hidden data-assistant-pdf-clear
+              aria-label="Убрать текст PDF из чата"></button>
+      <div class="assistant-input-row">
+        <label id="assistant-pdf-btn" class="btn btn-secondary assistant-pdf-btn"
+               for="assistant-pdf-input" role="button" tabindex="0"
+               aria-label="Прикрепить PDF-файл">📎
+          <input type="file" id="assistant-pdf-input" accept="application/pdf,.pdf" hidden>
+        </label>
+        <input type="text" id="assistant-input" class="input"
+               placeholder="Спросите что-нибудь…" autocomplete="off"
+               aria-label="Сообщение ассистенту">
+        <button type="submit" id="assistant-send" class="btn btn-primary"
+                aria-label="Отправить">➤</button>
+      </div>
     </form>
   </section>
 
@@ -303,6 +313,12 @@
         <div class="form-fields">
           <input id="assistant-key-input" type="password" placeholder="API-ключ"
                  autocomplete="off" aria-label="API-ключ">
+        </div>
+        <h3>Модель</h3>
+        <div class="form-fields">
+          <select id="assistant-model-select" class="input" aria-label="Модель ассистента">
+            <!-- варианты ставит assistant-view.js из каталога NeuralDeep -->
+          </select>
         </div>
         <p id="assistant-key-error" class="form-error" role="alert"></p>
         <div class="form-actions">

@@ -14,13 +14,19 @@ import { showToast } from '../core/dom.js';
 // Ключ = доступ ассистента к neuraldeep.ru. Имя ключа — часть каркаса:
 // следующему заходу менять его нельзя без миграции.
 export const ASSISTANT_API_KEY = 'youplanner.api_key';
+const ASSISTANT_MODEL_KEY = 'youplanner.assistant_model';
 export const ASSISTANT_HISTORY_KEY = 'youplanner.assistant_history';
-// OpenAI-совместимый эндпоинт neuraldeep.ru; модель — одна строка,
-// меняется здесь, если владелец переключит тариф. qwen3.6-35b-a3b —
-// единственная базовая модель «все тарифы · в РФ» (llms.txt NeuralDeep):
-// gpt-oss-120b живёт только на Starter/Pro вне РФ и даёт 404 мимо неё.
+// OpenAI-совместимый эндпоинт neuraldeep.ru. Список моделей — каталог
+// NeuralDeep (llms.txt); модель выбирается в модалке настроек и хранится
+// на устройстве (ASSISTANT_MODEL_KEY). Первая в списке — дефолт: она же
+// единственная базовая «все тарифы · в РФ».
 const ASSISTANT_API_URL = 'https://api.neuraldeep.ru/v1/chat/completions';
-const ASSISTANT_MODEL = 'qwen3.6-35b-a3b';
+export const ASSISTANT_MODELS = [
+  { id: 'qwen3.6-35b-a3b', label: 'Qwen 3.6 — базовая (все тарифы)' },
+  { id: 'qwen3.8-27b', label: 'Qwen 3.8 — Starter/Pro, зрение' },
+  { id: 'gpt-oss-120b', label: 'GPT-OSS 120B — Starter/Pro, вне РФ' },
+];
+const ASSISTANT_DEFAULT_MODEL = ASSISTANT_MODELS[0].id;
 const REQUEST_TIMEOUT_MS = 30000;
 const HISTORY_KEEP = 50;   // сколько реплик хранить на устройстве
 const HISTORY_SEND = 20;   // сколько последних реплик уходит в запрос
@@ -32,6 +38,37 @@ export function readAssistantApiKey() {
   } catch (e) {
     return null;
   }
+}
+
+// Выбранная модель. Сохранённая вне списка (устаревший кэш после правки
+// каталога) откатывается на дефолт — запрос с чужим именем модели даёт 404.
+export function readAssistantModel() {
+  try {
+    const saved = localStorage.getItem(ASSISTANT_MODEL_KEY);
+    if (saved && ASSISTANT_MODELS.some(function (m) { return m.id === saved; })) {
+      return saved;
+    }
+  } catch (e) {
+    // хранилище недоступно — работает дефолт
+  }
+  return ASSISTANT_DEFAULT_MODEL;
+}
+
+export function onAssistantModelChange() {
+  const select = document.getElementById('assistant-model-select');
+  if (!select) return;
+  const value = readAssistantModel();
+  const wanted = select.value;
+  if (!ASSISTANT_MODELS.some(function (m) { return m.id === wanted; })) {
+    select.value = value;   // чужое значение селекта не сохраняем
+    return;
+  }
+  try {
+    localStorage.setItem(ASSISTANT_MODEL_KEY, wanted);
+  } catch (e) {
+    // модель — расходник: пережить недоступное хранилище можно
+  }
+  if (wanted !== value) showToast('Модель: ' + wanted);
 }
 
 function readHistory() {
@@ -132,9 +169,17 @@ function buildContext() {
 
 function buildMessages() {
   const context = buildContext();
-  const system = 'Ты — ИИ-ассистент трекера привычек YouPlanner. Отвечай кратко '
+  let system = 'Ты — ИИ-ассистент трекера привычек YouPlanner. Отвечай кратко '
     + 'и по-русски, опираясь на данные пользователя. Если данных нет — так и скажи.\n'
     + (context ? 'Данные пользователя:\n' + context : 'Данных пока нет.');
+  // PDF прикрепляется к каждому запросу, пока файл не сброшен: модель отвечает
+  // по документу, а история диалога остаётся лёгкой — текст в неё не пишется.
+  if (pdfContext) {
+    system = 'Вот текст из PDF-файла «' + pdfContext.name + '» (' + pdfContext.pages
+      + ' стр.):\n' + pdfContext.text
+      + '\n\nОтветь на вопрос пользователя, опираясь на этот текст. '
+      + 'Если ответа в тексте нет — так и скажи.\n\n' + system;
+  }
   return [{ role: 'system', content: system }].concat(
     readHistory().slice(-HISTORY_SEND)
   );
@@ -144,8 +189,119 @@ function buildMessages() {
 // Успех — строка ответа, любая ошибка — отвергнутый промис с готовым текстом
 // для пузыря чата. 401/403 помечены в тексте, чтобы поднять модалку ключа.
 
-function friendlyError(status) {
-  if (status === 401 || status === 403) {
+// --- PDF-контекст ------------------------------------------------------------
+// Текст из PDF живёт в переменной модуля: не в localStorage (переполнение
+// хранилища и лишний вес кэша ни к чему), перезагрузка страницы его сбрасывает.
+// Прикрепляется к каждому запросу, пока файл не сброшен; в историю диалога
+// не попадает — только в системный промпт.
+const PDF_MAX_PAGES = 30;        // страницы читаются последовательно, до лимита
+const PDF_MAX_CHARS = 50000;     // ~15–20k токенов: не упирается в контекст API
+const PDFJS_BASE = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/';
+
+let pdfContext = null;   // { name, pages, text } | null
+let pdfParsing = false;
+let pdfWorkerUrl = '';   // blob-URL воркера pdf.js, создаётся при первом PDF
+
+export function assistantPdfState() {
+  return { name: pdfContext && pdfContext.name, parsing: pdfParsing };
+}
+
+export function onAssistantPdfPick() {
+  const fileInput = document.getElementById('assistant-pdf-input');
+  const file = fileInput && fileInput.files && fileInput.files[0];
+  if (!file) return;
+  if (pdfParsing) return;   // параллельный разбор не запускаем
+  parsePdf(file);
+  fileInput.value = '';     // повторный выбор того же файла снова срабатывает
+}
+
+function setPdfIndicator(text) {
+  const el = document.getElementById('assistant-pdf-indicator');
+  if (!el) return;
+  el.textContent = text || '';
+  el.hidden = !text;
+}
+
+function resetPdfContext() {
+  pdfContext = null;
+  setPdfIndicator('');
+}// Ранний выход при переполнении: страница читается целиком, но в буфер
+// попадает только остаток лимита — память не копит лишнее.
+function appendPageText(buffer, pageText) {
+  const room = PDF_MAX_CHARS - buffer.length;
+  if (room <= 0) return false;
+  buffer.push(pageText.length > room ? pageText.slice(0, room) : pageText);
+  return buffer.length < PDF_MAX_CHARS;
+}
+
+async function parsePdf(file) {
+  pdfParsing = true;
+  setPdfIndicator('Читаю ' + file.name + '…');
+  try {
+    // Динамический import: pdf.js нужен только при выборе файла, старт
+    // PWA и офлайн-режим он не утяжеляет.
+    const pdfjs = await import(PDFJS_BASE + 'pdf.min.mjs');
+    // Воркер с CDN-URL не стартует: cross-origin Worker запрещён, и pdf.js
+    // молча висит на getDocument. Код воркера оборачивается в blob URL —
+    // он same-origin, и разбор страниц идёт вне UI-потока как положено.
+    if (!pdfWorkerUrl) {
+      const resp = await fetch(PDFJS_BASE + 'pdf.worker.min.mjs');
+      if (!resp.ok) throw new Error('не удалось загрузить pdf.js воркер');
+      const code = await resp.text();
+      pdfWorkerUrl = URL.createObjectURL(
+        new Blob([code], { type: 'text/javascript' }));
+    }
+    pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+    const data = await file.arrayBuffer();
+    const doc = await pdfjs.getDocument({ data: data }).promise;
+    const buffer = [];
+    let pages = 0;
+    for (let i = 1; i <= Math.min(doc.numPages, PDF_MAX_PAGES); i++) {
+      const page = await doc.getPage(i);
+      const content = await page.getTextContent();
+      const pageText = content.items.map(function (item) { return item.str; })
+        .join(' ').replace(/\s+/g, ' ').trim();
+      pages = i;
+      if (!appendPageText(buffer, pageText)) {
+        page.cleanup();
+        break;
+      }
+      page.cleanup();   // освобождает ресурсы страницы сразу: Safari на
+                        // iPhone не держит в памяти весь документ
+    }
+    const text = buffer.join('\n').trim();
+    const truncated = pages < doc.numPages || text.length >= PDF_MAX_CHARS;
+    await doc.destroy();
+    if (!text) {
+      resetPdfContext();
+      showToast('В PDF не найдено текста — возможно, это сканы');
+      return;
+    }
+    pdfContext = {
+      name: file.name,
+      pages: pages,
+      text: truncated ? text.replace(/\s+\S*$/, '') + ' …[текст обрезан]' : text,
+    };
+    setPdfIndicator('✕ ' + pdfContext.name + ' · ' + pages + ' стр. — нажмите, чтобы убрать');
+    showToast('PDF прочитан: ' + pages + ' стр.');
+  } catch (e) {
+    console.error('[assistant] разбор PDF не удался:', e);
+    resetPdfContext();
+    showToast('Не удалось прочитать PDF: ' + (e && e.message ? e.message : 'ошибка'));
+  } finally {
+    pdfParsing = false;
+  }
+}
+
+export function onAssistantPdfClear() {
+  if (pdfParsing) return;
+  if (pdfContext) {
+    resetPdfContext();
+    showToast('Текст PDF убран из чата');
+  }
+}
+
+function friendlyError(status) {  if (status === 401 || status === 403) {
     return 'Ключ не принят сервисом (ошибка ' + status
       + '). Проверьте ключ через шестерёнку в шапке.';
   }
@@ -180,7 +336,7 @@ async function requestAssistantReply() {
         'Content-Type': 'application/json',
       },
       body: JSON.stringify({
-        model: ASSISTANT_MODEL,
+        model: readAssistantModel(),
         messages: buildMessages(),
       }),
       signal: timeoutSignal(REQUEST_TIMEOUT_MS),
@@ -252,10 +408,23 @@ export function openAssistantKeyModal() {
   const modal = document.getElementById('assistant-key-modal');
   const input = document.getElementById('assistant-key-input');
   const error = document.getElementById('assistant-key-error');
+  const select = document.getElementById('assistant-model-select');
   if (!modal) return;
   if (error) error.textContent = '';
   if (input) {
     input.value = readAssistantApiKey() || '';
+  }
+  if (select) {
+    if (!select.options.length) {
+      // варианты ставятся один раз: каталог моделей в коде, не в разметке
+      for (const m of ASSISTANT_MODELS) {
+        const opt = document.createElement('option');
+        opt.value = m.id;
+        opt.textContent = m.label;
+        select.appendChild(opt);
+      }
+    }
+    select.value = readAssistantModel();
   }
   modal.hidden = false;
   if (input) input.focus();

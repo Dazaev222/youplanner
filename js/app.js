@@ -17,7 +17,8 @@ import { onFastAdd, onFastDone, onFastEdit, onFastInitCancel, onFastInitSave, re
 import {
   closeAssistantKeyModal, onAssistantChipClick, onAssistantClear,
   onAssistantFormSubmit, onAssistantKeyCancel, onAssistantKeyKeydown,
-  onAssistantKeySave, openAssistantKeyModal, renderAssistantView,
+  onAssistantKeySave, onAssistantModelChange, onAssistantPdfClear,
+  onAssistantPdfPick, openAssistantKeyModal, renderAssistantView,
 } from './ui/assistant-view.js';
 import { closeModal, onFormSubmit, onHabitListClick, onHabitsEditChange, onHabitsEditClick, openModal, renderHabitsEditList, setFormError, updateFormFields } from './ui/habits-edit.js';
 import { closeLevelSheet, onLevelPick } from './ui/level-sheet.js';
@@ -562,6 +563,23 @@ export function bindEvents() {
 
   // Escape закрывает модалку ключа — тот же жест, что крестик и фон
   document.addEventListener('keydown', onAssistantKeyKeydown);
+
+  // Выбор модели в настройках ассистента: сохраняется сразу, кнопка
+  // «Сохранить» относится только к ключу
+  const assistantModelSelect = document.getElementById('assistant-model-select');
+  if (assistantModelSelect) {
+    assistantModelSelect.addEventListener('change', onAssistantModelChange);
+  }
+
+  // PDF: скрепка открывает выбор файла, плашка с именем файла — сброс
+  const assistantPdfInput = document.getElementById('assistant-pdf-input');
+  if (assistantPdfInput) {
+    assistantPdfInput.addEventListener('change', onAssistantPdfPick);
+  }
+  const assistantPdfIndicator = document.getElementById('assistant-pdf-indicator');
+  if (assistantPdfIndicator) {
+    assistantPdfIndicator.addEventListener('click', onAssistantPdfClear);
+  }
 
   // Нижний таб-бар: тот же переключатель разделов, что и у кнопок шапки
   const tabItems = document.querySelectorAll('#tab-bar .tab-item');
