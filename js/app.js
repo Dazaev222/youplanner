@@ -22,10 +22,11 @@ import { appState, isMainDayView, isMobileView, ui } from './ui/state.js';
 import { onScheduleAddSubmit, onScheduleEditListClick, renderScheduleEditView, renderScheduleView } from './ui/schedule-view.js';
 import { markStatsPeriod, setStatsValue, statsChartMarkup, statsHabitGridMarkup, statsSummaryMarkup } from './ui/stats-helpers.js';
 import { ensureQazaState, getQazaState, onQazaAddPick, onQazaAddSubmit, onQazaDone, onQazaStartChange, onQazaUndo, qazaCellMarkup, renderQazaView, setQazaState } from './ui/qaza-view.js';
-/* YouPlanner — слой данных.
-   Модульная сборка утрачена (§3 Spec.md), поэтому весь скрипт — один файл,
-   а функции объявлены в глобальной области. Никаких внешних загрузок
-   и обёрток-IIFE. */
+/* YouPlanner — точка сборки интерфейса (app.js).
+   Модульная сборка восстановлена (фазы 3.2–3.4): домены данных — js/data,
+   синхронизация — js/sync, вьюхи — js/ui, общие утилиты — js/core.
+   Здесь остались главный экран с таблицей, экраны привычек и статистики,
+   рендеры уровня приложения, init/bindEvents и проводка шины событий. */
 
 /* --- Статус ручной синхронизации в Настройках ------------------------------ */
 

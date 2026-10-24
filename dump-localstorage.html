@@ -1,0 +1,98 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<title>Дамп localStorage YouPlanner</title>
+<style>
+  body { font-family: monospace; font-size: 13px; padding: 20px; background: #1a1a2e; color: #e0e0e0; }
+  textarea { width: 100%; height: 600px; background: #0d0d1a; color: #00ff88; border: 1px solid #333; padding: 12px; font-family: monospace; font-size: 12px; resize: vertical; }
+  pre { background: #0d0d1a; padding: 16px; border-radius: 8px; white-space: pre-wrap; }
+</style>
+</head>
+<body>
+<h1>Дамп localStorage YouPlanner</h1>
+<p>Откройте эту страницу в <b>любом браузере</b> (не в DevTools) — она автоматически прочитает localStorage и покажет содержимое. Скопируйте текст из поля ниже и отправьте.</p>
+<button onclick="copy()" style="padding:10px 20px; background:#5870C5; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:14px;">Копировать</button>
+<p style="color:#888; margin-top:12px;">Также скопируйте содержимое текстового поля нажав Ctrl+A, Ctrl+C</p>
+<textarea id="dump" readonly></textarea>
+<script>
+// Прочитать localStorage и вывести всё
+const STORAGE_KEYS = {
+  migrations: 'youplanner.migrations',
+  habits: 'youplanner.habits',
+  records: 'youplanner.records',
+  schedule: 'youplanner.schedule',
+};
+const QAZA_STORAGE_KEY = 'youplanner.qaza';
+const PRAYER_KEY = 'youplanner.prayer';
+const FAST_KEY = 'youplanner.fast';
+const QAZA_LOG_KEY = 'youplanner.qazaLog';
+const SLEEP_KEY = 'youplanner.sleep';
+
+let out = '=== localStorage YouPlanner ===\n\n';
+
+const keys = Object.values(STORAGE_KEYS).concat([
+  QAZA_STORAGE_KEY, PRAYER_KEY, FAST_KEY, QAZA_LOG_KEY, SLEEP_KEY
+]);
+
+keys.forEach(key => {
+  const raw = localStorage.getItem(key);
+  out += `--- ${key} ---\n`;
+  if (raw) {
+    // Пытаемся красиво вывести
+    try {
+      const parsed = JSON.parse(raw);
+      if (key === STORAGE_KEYS.records) {
+        // records — большой объект, покажем статистику
+        const dates = Object.keys(parsed);
+        out += `  Записей дней: ${dates.length}\n`;
+        out += `  Даты от: ${dates.length ? dates.sort()[0] : 'нет записей'}\n`;
+        out += `  Даты до: ${dates.length ? dates.sort().reverse()[0] : 'нет записей'}\n\n`;
+        out += '  --- Детали по дням (первые 50) ---\n';
+        dates.sort().slice(0, 50).forEach(date => {
+          const dayRec = parsed[date];
+          if (dayRec) {
+            const entries = Object.entries(dayRec)
+              .map(([k, v]) => {
+                const valStr = typeof v === 'object' ? JSON.stringify(v) : v;
+                return `${k}=${valStr}`;
+              }).join(', ');
+            out += `  ${date}: { ${entries} }\n`;
+          }
+        });
+        if (dates.length > 50) out += `  ... и ещё ${dates.length - 50} дней\n`;
+      } else {
+        out += JSON.stringify(parsed, null, 2);
+      }
+    } catch(e) {
+      out += raw;
+    }
+  } else {
+    out += '  (пусто)';
+  }
+  out += '\n\n';
+});
+
+// Все ключи localStorage, чтобы найти что-то пропущенное
+out += '=== Все ключи localStorage ===\n';
+for (let i = 0; i < localStorage.length; i++) {
+  const k = localStorage.key(i);
+  const v = localStorage.getItem(k);
+  const size = (v ? v.length : 0);
+  out += `  ${k} (${size} байт)\n`;
+}
+
+document.getElementById('dump').value = out;
+
+function copy() {
+  navigator.clipboard.writeText(out).then(() => {
+    alert('Скопировано!');
+  }).catch(() => {
+    document.getElementById('dump').select();
+    document.execCommand('copy');
+    alert('Скопировано!');
+  });
+}
+</script>
+</body>
+</html>
