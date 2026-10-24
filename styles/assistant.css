@@ -1,21 +1,55 @@
 /* --- Вкладка «ИИ-Ассистент» ---------------------------------------------- */
-/* Чат в стиле приложения: пузыри пользователя — акцентные пилюли справа,
-   ответы ассистента — белые карточки слева. Поле ввода и чипы быстрых
-   команд стоят в потоке под лентой: лента растёт, страница прокручивается. */
+/* Экран — flex-колонка на всю высоту окна: шапка и поле ввода закреплены,
+   прокручивается только лента сообщений. Пузыри — iOS/TickTick: акцентная
+   пилюля пользователя справа, белая карточка ассистента слева. */
 
+/* Каркас: ПК-высота = окно минус глобальная шапка приложения (~66px),
+   паддинг #app снизу и воздух. На телефоне экран перекрывает страницу
+   целиком — см. mobile.css (fixed над таб-баром) */
+#assistant-view {
+  display: flex;
+  flex-direction: column;
+  height: calc(100dvh - 150px);
+  min-height: 480px;
+}
+
+/* Шапка чата: всегда на виду. Sticky страхует случай, когда колонка выше
+   окна (короткий экран, огромный системный шрифт) — заголовок и кнопки
+   не уезжают за край */
+.assistant-head {
+  flex-shrink: 0;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  background: var(--bg);
+  border-bottom: 1px solid var(--separator);
+  padding-bottom: 10px;
+  margin-bottom: 4px;
+}
+
+.assistant-head-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* Лента: единственный скроллируемый слой экрана */
 #assistant-chat {
+  flex-grow: 1;
+  flex-shrink: 1;
+  overflow-y: auto;
+  min-height: 0;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  margin-top: 16px;
+  padding: 12px 2px 16px;
+  scrollbar-width: thin;
 }
 
 .assistant-msg {
   max-width: 78%;
   padding: 10px 14px;
-  border-radius: var(--radius-md);
-  font-size: 14px;
-  line-height: 1.45;
+  font-size: 15px;
+  line-height: 1.4;
   overflow-wrap: anywhere;
   white-space: pre-wrap;
   animation: assistant-msg-in .18s ease-out;
@@ -28,48 +62,67 @@
   }
 }
 
-/* Сообщение пользователя: акцентная пилюля справа */
+/* Сообщение пользователя: акцентная пилюля справа, «хвост» в углу */
 .assistant-msg-user {
   align-self: flex-end;
-  border-bottom-right-radius: var(--radius-sm);
+  border-radius: var(--radius-lg) var(--radius-lg) 4px var(--radius-lg);
   background: var(--accent);
   color: var(--on-accent);
 }
 
-/* Ответ ассистента: белая карточка слева, как строки настроек */
+/* Ответ ассистента: белая карточка слева с мягкой тенью, как строки
+   настроек. Хвост — в левом нижнем углу */
 .assistant-msg-bot {
   align-self: flex-start;
-  border-bottom-left-radius: var(--radius-sm);
+  border-radius: var(--radius-lg) var(--radius-lg) var(--radius-lg) 4px;
   background: var(--surface-card);
-  border: 1px solid var(--border-soft);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  color: var(--text);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
 }
 
-/* Действия шапки чата (очистка + ключ) держатся группой у правого края */
-.assistant-head-actions {
-  display: flex;
-  gap: 8px;
-}
-
-/* Задержка ответа — часть каркаса: пока ассистент «думает» */
+/* Задержка ответа: пока ассистент «думает» */
 .assistant-msg-bot.is-typing {
   color: var(--text-muted);
 }
 
-/* Ошибка хода к API: красный текст, рамка пузыря не трогается */
+/* Ошибка хода к API: красный текст, вид пузыря не трогается */
 .assistant-msg-bot.is-error {
   color: var(--danger);
 }
 
-/* Быстрые команды над полем ввода */
+/* --- Нижняя зона: подпись, чипы, поле ввода -------------------------------- */
+.assistant-dock {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--separator);
+  background: var(--bg);
+}
+
+#assistant-hint {
+  margin: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Чипы быстрых команд: одна строка с горизонтальной прокруткой — как
+   строки быстрых ответов iOS. Скроллбар не занимает высоту */
 #assistant-chips {
   display: flex;
-  flex-wrap: wrap;
   gap: 8px;
-  margin-top: 16px;
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+
+#assistant-chips::-webkit-scrollbar {
+  display: none;
 }
 
 .assistant-chip {
+  flex: 0 0 auto;
   min-height: 44px;
   padding: 8px 14px;
   border: 1px solid var(--border-soft);
@@ -105,7 +158,6 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  margin-top: 12px;
 }
 
 .assistant-input-row {
@@ -120,6 +172,19 @@
 
 #assistant-send {
   flex: 0 0 auto;
+}
+
+/* Пока идёт запрос, ввод заблокирован (анти-спам): приглушение по скиллу */
+#assistant-input:disabled,
+#assistant-send:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.assistant-pdf-btn.is-disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  pointer-events: none;
 }
 
 /* Скрепка — квадратная кнопка в рост поля: label прячет file-input,

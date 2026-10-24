@@ -27,10 +27,16 @@ export const ASSISTANT_MODELS = [
   { id: 'gpt-oss-120b', label: 'GPT-OSS 120B — Starter/Pro, вне РФ' },
 ];
 const ASSISTANT_DEFAULT_MODEL = ASSISTANT_MODELS[0].id;
-const REQUEST_TIMEOUT_MS = 30000;
+// 60 секунд: длинные ответы reasoning-моделей (qwen/gpt-oss думают вслух)
+// не успевали в 30, и запрос рвался по таймауту на «Нет связи»
+const REQUEST_TIMEOUT_MS = 60000;
 const HISTORY_KEEP = 50;   // сколько реплик хранить на устройстве
 const HISTORY_SEND = 20;   // сколько последних реплик уходит в запрос
-const CONTEXT_MAX_CHARS = 6000;
+// Потолок снимка данных трекера в системном промпте. 15 000 символов —
+// разумный максимум: «Сводка недели» с богатой историей раньше упиралась
+// в меньший лимит, а вместе с PDF-текстом и историей остаётся запас
+// до контекста API (256k токенов у qwen)
+const CONTEXT_MAX_CHARS = 15000;
 
 export function readAssistantApiKey() {
   try {
@@ -227,11 +233,16 @@ function resetPdfContext() {
   setPdfIndicator('');
 }// Ранний выход при переполнении: страница читается целиком, но в буфер
 // попадает только остаток лимита — память не копит лишнее.
-function appendPageText(buffer, pageText) {
-  const room = PDF_MAX_CHARS - buffer.length;
+// Счётчик charsUsed считает СИМВОЛЫ: раньше лимит сравнивался с числом
+// страниц (buffer.length), никогда не срабатывал, и текст мог уехать в
+// запрос далеко за лимитом.
+function appendPageText(buffer, pageText, charsUsed) {
+  const room = PDF_MAX_CHARS - charsUsed.value;
   if (room <= 0) return false;
-  buffer.push(pageText.length > room ? pageText.slice(0, room) : pageText);
-  return buffer.length < PDF_MAX_CHARS;
+  const piece = pageText.length > room ? pageText.slice(0, room) : pageText;
+  buffer.push(piece);
+  charsUsed.value += piece.length;
+  return charsUsed.value < PDF_MAX_CHARS;
 }
 
 async function parsePdf(file) {
@@ -255,6 +266,7 @@ async function parsePdf(file) {
     const data = await file.arrayBuffer();
     const doc = await pdfjs.getDocument({ data: data }).promise;
     const buffer = [];
+    const charsUsed = { value: 0 };
     let pages = 0;
     for (let i = 1; i <= Math.min(doc.numPages, PDF_MAX_PAGES); i++) {
       const page = await doc.getPage(i);
@@ -262,7 +274,7 @@ async function parsePdf(file) {
       const pageText = content.items.map(function (item) { return item.str; })
         .join(' ').replace(/\s+/g, ' ').trim();
       pages = i;
-      if (!appendPageText(buffer, pageText)) {
+      if (!appendPageText(buffer, pageText, charsUsed)) {
         page.cleanup();
         break;
       }
@@ -270,6 +282,11 @@ async function parsePdf(file) {
                         // iPhone не держит в памяти весь документ
     }
     const text = buffer.join('\n').trim();
+    // Диагностика «читает только обложку»: видно, сколько страниц в файле
+    // и сколько реально прочитано и вошло в лимит. До destroy(): у убитого
+    // документа numPages уже не прочитать
+    console.log('[assistant] PDF ' + file.name + ': страниц в файле ' + doc.numPages
+      + ', прочитано ' + pages + ', символов ' + text.length);
     const truncated = pages < doc.numPages || text.length >= PDF_MAX_CHARS;
     await doc.destroy();
     if (!text) {
@@ -503,9 +520,23 @@ function appendUserMessage(text) {
 
 // Точка входа и для формы, и для чипов: у чипа текст сообщения лежит
 // в data-chip, у формы — в поле ввода.
+// Пока идёт запрос к API, новый не отпускается: кнопки гасятся (анти-спам,
+// иначе быстрые повторные вопросы ловили 429), а Enter игнорится флагом.
+let assistantBusy = false;
+
+function setAssistantBusy(busy) {
+  assistantBusy = busy;
+  const input = document.getElementById('assistant-input');
+  const send = document.getElementById('assistant-send');
+  const pdfBtn = document.getElementById('assistant-pdf-btn');
+  if (input) input.disabled = busy;
+  if (send) send.disabled = busy;
+  if (pdfBtn) pdfBtn.classList.toggle('is-disabled', busy);
+}
+
 export function onAssistantSubmit(text) {
   const message = String(text || '').trim();
-  if (!message) return;
+  if (!message || assistantBusy) return;
   appendUserMessage(message);
   pushHistory('user', message);
   if (!readAssistantApiKey()) {
@@ -518,24 +549,34 @@ export function onAssistantSubmit(text) {
 async function runAssistantReply() {
   const typing = appendMessage('bot', 'Печатает…');
   if (typing) typing.classList.add('is-typing');
-  let reply;
+  setAssistantBusy(true);
+  let reply = null;
+  let error = null;
   try {
     reply = await requestAssistantReply();
   } catch (e) {
     // Ошибка не пишется в историю: это не реплика ассистента
+    error = e;
+  } finally {
+    // finally: индикатор гасится при любом исходе — успех, 401, 500,
+    // таймаут или неожиданное исключение. Раньше подвисал «Печатает…»,
+    // если сбой случался между catch и снятием класса
     if (typing) {
       typing.classList.remove('is-typing');
-      typing.classList.add('is-error');
-      typing.textContent = e.message;
+      if (error) {
+        typing.classList.add('is-error');
+        typing.textContent = error.message;
+      } else {
+        typing.textContent = reply;
+      }
     }
-    if (String(e.message).indexOf('Ключ не принят') === 0) {
+    setAssistantBusy(false);
+  }
+  if (error) {
+    if (String(error.message).indexOf('Ключ не принят') === 0) {
       openAssistantKeyModal();
     }
     return;
-  }
-  if (typing) {
-    typing.classList.remove('is-typing');
-    typing.textContent = reply;
   }
   pushHistory('assistant', reply);
 }
