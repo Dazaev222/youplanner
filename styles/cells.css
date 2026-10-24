@@ -19,9 +19,9 @@
   height: 20px;
   margin: 0 0 0 6px;
   padding: 0;
-  border: 1px solid var(--border-soft);
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  background-color: var(--surface);
+  background-color: var(--surface-muted);
   color: var(--text-muted);
   font-size: 12px;
   line-height: 1;
@@ -43,14 +43,14 @@
   color: var(--on-danger);
 }
 
-/* Поля внутри ячейки — той же формы, что пилюли вкладки каза: скругление,
-   плотная белая подложка, спокойная рамка. */
+/* Поля внутри ячейки — плотная серая заливка без рамок: iOS-style поле.
+   Никаких цветных обводок и свечений. */
 .cell-number,
 .cell-select {
   padding: 4px 6px;
-  border: 1px solid var(--border-soft);
+  border: 1px solid transparent;
   border-radius: var(--radius-md);
-  background: var(--surface-card);
+  background-color: var(--surface-muted);
   outline: none;
   color: var(--text);
   font: inherit;
@@ -76,13 +76,6 @@
     transform: translateY(-1px);
   }
 
-  /* Акцентную рамку при наведении получает только поле без уровня: цвет
-     уровня важнее подсказки, и перебивать его нельзя (§1.4) */
-  .cell:hover .cell-number:not(.is-on-time):not(.is-late):not(.is-two-min),
-  .cell:hover .cell-select:not(.is-on-time):not(.is-late):not(.is-two-min) {
-    border-color: var(--accent);
-  }
-
   .cell:hover .cell-check {
     transform: scale(1.08);
   }
@@ -92,30 +85,18 @@
   }
 }
 
+/* Фокус: нейтральная серая рамка и кольцо, без синих свечений */
 .cell-number:focus-visible,
 .cell-select:focus-visible {
-  outline: 2px solid var(--accent);
+  outline: 2px solid var(--text-tertiary);
   outline-offset: 1px;
+  border-color: var(--text-tertiary);
 }
 
-/* --- Уровень выполнения -------------------------------------------------
-   Цвет уровня несёт только граница поля отметки: фон и содержимое не
-   трогаются (§1.4). Время не задано и уровень не «2 минуты» — остаётся
-   обычная рамка --border. */
-.cell-number.is-on-time,
-.cell-select.is-on-time {
-  border-color: var(--success);
-}
-
-.cell-number.is-late,
-.cell-select.is-late {
-  border-color: var(--danger);
-}
-
-.cell-number.is-two-min,
-.cell-select.is-two-min {
-  border-color: var(--two-min);
-}
+/* --- Уровень выполнения ---------------------------------------------------
+   Рамка поля цвет уровня больше не несёт: по решению владельца поля отметки
+   нейтральные (серая заливка, без цветных обводок). Уровень читается в попапе
+   «Как выполнено?» и по точке на кнопке уровня (.cell-level-btn.is-set). */
 
 /* Кнопка вызова попапа — маленькая, рядом с полем отметки (§1.2).
    Точка в углу показывает, что уровень у записи уже выставлен. */
@@ -125,9 +106,9 @@
   min-height: 26px;
   margin-left: 3px;
   padding: 0;
-  border: 1px solid var(--border-soft);
+  border: 1px solid transparent;
   border-radius: var(--radius-sm);
-  background-color: var(--surface-alt);
+  background-color: var(--surface-muted);
   color: var(--text-muted);
   line-height: 1;
   cursor: pointer;
