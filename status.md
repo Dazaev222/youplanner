@@ -69,6 +69,28 @@
 
 ## Заходы
 
+- 2026-10-25 — фича «Фон приложения» (§11ae, решения по 7 ответам владельца):
+  1. UI: раздел в Настройках — «Загрузить фото», миниатюра и статус
+     с размером, «Сбросить фон» (confirm), ползунок затемнения 0–100%
+     (живая правка на input, сохранение на change).
+  2. Обработка: createImageBitmap c imageOrientation from-image → canvas
+     до длинной стороны экрана (без апскейла) → WebP 0.8 / JPEG 0.7 / 0.55,
+     потолок 800 КБ. Авто-скрим: средняя luma по canvas 16×16,
+     dim = 55 + (1−luma)·40 (55–95%), ползунок стартует с авто-значения.
+  3. Хранение: Blob в IndexedDB (js/core/db.js, база youplanner/prefs),
+     затемнение в youplanner.app_bg. В STORAGE_KEYS/синк/бэкапы не входят:
+     локальная косметика устройства. Замена/сброс отзывают objectURL.
+  4. Слои: #app-bg-layer (cover) + #app-bg-scrim, position fixed,
+     z-index −1, включаются body.has-app-bg (без фона скрим не серит
+     белый лист). background-attachment: fixed не используется (лаги iOS).
+     Карточки/таб-бар/шапка/модалки/ассистент остались плотными.
+  5. Харнес песочницы и smoke-тест научены `export async function`
+     (первый случай в проекте; было 24 падения).
+  Тесты: npm test 34/34; background.test.js 17/17 (IDB, слой, reload,
+  слайдер, авто-скрим тёмное/светлое, сброс); e2e 47/47; офлайн 14/14.
+  Vision-аудит: контраст на тёмном фото ≥7:1 на карточках, на светлом
+  текст читается, фон присутствует. SW v23 (styles/background.css).
+
 - 2026-10-24 (заход 2) — офлайн-PDF, Liquid Glass-гамбургер, гигиена чата:
   1. pdf.js 4.10.38 перенесён с CDN в js/vendor/ (обе копии в прекэше SW
      v22): PDF читается без сети — подтверждено Playwright-режимом Offline
@@ -276,7 +298,9 @@
 
 youplanner.habits, records, qaza, sync.ts, mainView, stats.period,
 prayer, migrations, youplanner.qaza.fast, youplanner.qaza.log,
-youplanner.sleep.
+youplanner.sleep, youplanner.api_key, youplanner.assistant_model,
+youplanner.assistant_history (ключи ассистента — только устройство),
+youplanner.app_bg (затемнение фона; фото фона — Blob в IndexedDB).
 
 ## Тесты
 

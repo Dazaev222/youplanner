@@ -61,7 +61,7 @@ test('каждый именованный import находит реальный
       assert.ok(existsSync(targetAbs), `${file}: import ${m[2]} не разрешается`);
       const targetText = readFileSync(targetAbs, 'utf8');
       const exported = new Set(
-        [...targetText.matchAll(/^export\s+(?:const|let|function)\s+([A-Za-z_$][\w$]*)/gm)]
+        [...targetText.matchAll(/^export\s+(?:const|let|function|async\s+function|class)\s+([A-Za-z_$][\w$]*)/gm)]
           .map((x) => x[1]));
       for (const name of names) {
         assert.ok(exported.has(name),

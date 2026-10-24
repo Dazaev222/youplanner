@@ -48,12 +48,15 @@ export function getModuleOrder() {
   return order;
 }
 
-// Модульный файл как классический код: без import-строк и export-префиксов
+// Модульный файл как классический код: без import-строк и export-префиксов.
+// async-экспорты (export async function) — тоже модульный синтаксис:
+// регулярка ниже снимает и их, иначе песочница падает на 'Unexpected
+// token export'
 export function stripModuleSyntax(text) {
   return text
     .replace(IMPORT_RE, '')
     .replace(SIDE_EFFECT_IMPORT_RE, '')
-    .replace(/^export\s+(?=const\b|let\b|function\b|class\b)/gm, '');
+    .replace(/^export\s+(?=const\b|let\b|function\b|class\b|async\s+function\b)/gm, '');
 }
 
 export function getScriptSources() {
