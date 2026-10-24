@@ -45,9 +45,20 @@
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
+/* Действия шапки чата (очистка + ключ) держатся группой у правого края */
+.assistant-head-actions {
+  display: flex;
+  gap: 8px;
+}
+
 /* Задержка ответа — часть каркаса: пока ассистент «думает» */
 .assistant-msg-bot.is-typing {
   color: var(--text-muted);
+}
+
+/* Ошибка хода к API: красный текст, рамка пузыря не трогается */
+.assistant-msg-bot.is-error {
+  color: var(--danger);
 }
 
 /* Быстрые команды над полем ввода */

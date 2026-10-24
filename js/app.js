@@ -15,9 +15,9 @@ import { clearSyncPending, syncPending } from './sync/state.js';
 import { flushPendingSync, markCloudReady, scheduleSync, settleHabitsAfterSync, syncFromCloud, syncToCloud } from './sync/sync.js';
 import { onFastAdd, onFastDone, onFastEdit, onFastInitCancel, onFastInitSave, renderFastView, resetFastForm } from './ui/fast-view.js';
 import {
-  closeAssistantKeyModal, onAssistantChipClick, onAssistantFormSubmit,
-  onAssistantKeyCancel, onAssistantKeySave, openAssistantKeyModal,
-  renderAssistantView,
+  closeAssistantKeyModal, onAssistantChipClick, onAssistantClear,
+  onAssistantFormSubmit, onAssistantKeyCancel, onAssistantKeySave,
+  openAssistantKeyModal, renderAssistantView,
 } from './ui/assistant-view.js';
 import { closeModal, onFormSubmit, onHabitListClick, onHabitsEditChange, onHabitsEditClick, openModal, renderHabitsEditList, setFormError, updateFormFields } from './ui/habits-edit.js';
 import { closeLevelSheet, onLevelPick } from './ui/level-sheet.js';
@@ -538,6 +538,9 @@ export function bindEvents() {
 
   const assistantSettings = document.getElementById('assistant-settings');
   if (assistantSettings) assistantSettings.addEventListener('click', openAssistantKeyModal);
+
+  const assistantClear = document.getElementById('assistant-clear');
+  if (assistantClear) assistantClear.addEventListener('click', onAssistantClear);
 
   const assistantForm = document.getElementById('assistant-form');
   if (assistantForm) assistantForm.addEventListener('submit', onAssistantFormSubmit);
