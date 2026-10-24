@@ -15,12 +15,6 @@
 #schedule-view {
   margin-top: 20px;
   padding: 22px 26px 26px;
-  border: none;
-  border-radius: 0;
-  background: transparent !important;
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
-  box-shadow: none !important;
 }
 
 #schedule-view[hidden] {
@@ -32,9 +26,9 @@
   gap: 0;
   margin: 12px 0;
   padding: 3px;
-  border: 1px solid rgba(255, 255, 255, 0.6);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.3);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface-alt);
   position: relative;
 }
 
@@ -51,8 +45,8 @@
   margin-bottom: 8px;
   padding: 12px 14px;
   border: none;
-  border-radius: 12px;
-  background: #FFFFFF !important;
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
@@ -62,8 +56,8 @@
 #schedule-edit-list li {
   margin-bottom: 8px;
   border: none !important;
-  border-radius: 12px;
-  background: #FFFFFF !important;
+  border-radius: var(--radius-md);
+  background: var(--surface-card) !important;
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 

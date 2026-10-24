@@ -1,4 +1,4 @@
-/* --- Переключатель «День / Неделя» и карточки дня ------------------------ */
+/* --- Переключатель «День / Неделя», сегмент-контролы и карточки дня ------- */
 /* Оба — принадлежность телефона: на ПК их нет, там всегда таблица недели.
    Сама кнопка сегмента живёт в общем слое: те же .view-switch-btn носят
    периоды статистики, а они видны и на ПК (§11y). */
@@ -12,7 +12,7 @@
   min-height: 44px;
   padding: 6px 12px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--radius-sm);
   background: transparent;
   color: var(--text);
   font: inherit;
@@ -22,32 +22,61 @@
 }
 
 .view-switch-btn.is-active {
-  background: #FFFFFF;
+  background: var(--surface-card);
   color: var(--text);
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
 /* --- Анимированный индикатор (капля) для переключателей --- */
-#main-view-switch button,
-#schedule-switch button,
-#tab-bar button {
-  position: relative;
-  z-index: 2;
-  background: transparent !important;
-  border: none;
-}
-
 .glass-indicator {
   position: absolute;
   top: 4px;
   height: calc(100% - 8px);
   left: 0;
-  border-radius: 999px;
-  background: rgba(255, 255, 255, 0.8);
+  border-radius: var(--radius-pill);
+  background: var(--surface-card);
   box-shadow: 0 2px 8px rgba(0,0,0,0.1);
   transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), width 0.3s ease;
   z-index: 1;
   pointer-events: none;
+}
+
+/* Все сегмент-контролы приложения. position: relative — точка отсчёта
+   капли-индикатора; isolation держит z-index кнопок внутри контрола. */
+#main-view-switch,
+#schedule-switch,
+#schedule-edit-switch,
+#stats-period,
+#stats-qaza-period,
+#stats-habits-period,
+#stats-habit-period,
+#stats-fast-period,
+#stats-sleep-period {
+  position: relative;
+  isolation: isolate;
+}
+
+/* Кнопки поверх капли: фон прозрачный у .view-switch-btn, здесь остаётся
+   только слой. Единый список вместо копий в effects.css. */
+#main-view-switch > button,
+#schedule-switch > button,
+#schedule-edit-switch > button,
+#stats-period > button,
+#stats-qaza-period > button,
+#stats-habits-period > button,
+#stats-habit-period > button,
+#stats-fast-period > button,
+#stats-sleep-period > button {
+  position: relative;
+  z-index: 2;
+  background: transparent;
+  border: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .glass-indicator {
+    transition: none;
+  }
 }
 
 /* Пустая таблица без ответа сервера: пометка стоит над карточками дня
@@ -57,7 +86,7 @@
   padding: 14px 16px;
   background: var(--surface);
   border: 1px solid var(--border);
-  border-radius: 14px;
+  border-radius: var(--radius-md);
   color: var(--text-muted);
   font-size: 14px;
   text-align: center;
@@ -77,4 +106,3 @@
 #day-cards[hidden] {
   display: none;
 }
-

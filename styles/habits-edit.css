@@ -1,14 +1,8 @@
 /* --- Экран «Привычки» ---------------------------------------------------- */
-/* Контейнер прозрачный: серый фон страницы просвечивает. */
+/* Контейнер прозрачный: фон страницы просвечивает. */
 #habits-edit-view {
   margin-top: 20px;
   padding: 22px 26px 26px;
-  border: none;
-  border-radius: 0;
-  background: transparent !important;
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
-  box-shadow: none !important;
 }
 
 #habits-edit-list {
@@ -22,8 +16,8 @@
 
 /* Строка привычки: заголовок всегда виден, поля раскрываются по тапу */
 .habit-row-edit {
-  border: 1px solid var(--border);
-  border-radius: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
   background-color: var(--surface-alt);
   overflow: hidden;
 }
@@ -99,9 +93,9 @@
   width: 100%;
   min-height: 44px;
   padding: 10px 12px;
-  border: 1px solid rgba(255, 255, 255, 0.6);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
   outline: none;
   color: var(--text);
   font: inherit;

@@ -24,18 +24,12 @@
 
 /* «Ураза» — карточка того же образца: раздел открывается из шапки каза
    и живёт внутри той же вкладки. «Цикл сна» — тоже: свой вход, но та же
-   карточка с появлением. Контейнеры прозрачные: серый фон страницы просвечивает. */
+   карточка с появлением. Контейнеры прозрачные: фон страницы просвечивает. */
 #qaza-view,
 #fast-view,
 #sleep-view {
   margin-top: 20px;
   padding: 22px 26px 26px;
-  border: none;
-  border-radius: 0;
-  background: transparent !important;
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
-  box-shadow: none !important;
   animation: qaza-view-in .22s ease-out;
 }
 
@@ -57,7 +51,7 @@
   justify-content: space-between;
   gap: 16px;
   padding-bottom: 12px;
-  border-bottom: 1px solid rgba(60, 60, 67, 0.15);
+  border-bottom: 1px solid var(--separator);
 }
 
 .qaza-head h2 {
@@ -69,7 +63,7 @@
 
 .qaza-summary {
   margin: 16px 0 0;
-  color: #8E8E93;
+  color: var(--text-tertiary);
   font-variant-numeric: tabular-nums;
 }
 
@@ -101,9 +95,9 @@
   align-items: center;
   gap: 12px;
   padding: 11px 14px;
-  background: #FFFFFF;
-  border: 1px solid #E5E5EA;
-  border-radius: 12px;
+  background: var(--surface-card);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
   transition: transform .18s ease, box-shadow .18s ease, border-color .18s ease;
 }
@@ -140,7 +134,7 @@
 .qaza-start-mark,
 .qaza-add-mark {
   padding: 2px 8px;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background-color: var(--accent);
   color: var(--on-accent);
   font-size: 11px;
@@ -177,10 +171,10 @@
   align-items: center;
   gap: 8px;
   padding: 8px 13px;
-  border: 1px solid #E5E5EA;
-  border-radius: 999px;
-  background-color: #FFFFFF;
-  color: #1c1c22;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  background-color: var(--surface-card);
+  color: var(--text);
   cursor: pointer;
   transition: border-color .15s, background-color .15s,
     transform .18s ease, box-shadow .18s ease;
@@ -197,14 +191,21 @@
 
 /* Цвет плюс слово-пометка — выбор не передаётся только цветом */
 .qaza-start-option.is-cursor {
-  background: rgba(88, 112, 197, 0.12);
-  color: #5870C5;
-  border: 1px solid rgba(88, 112, 197, 0.3);
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
 }
 .qaza-add-option.is-picked {
-  background: rgba(88, 112, 197, 0.12);
-  color: #5870C5;
-  border: 1px solid rgba(88, 112, 197, 0.3);
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+}
+
+/* Выполненная каза в таблице: та же акцентная пилюля, что у выбранных опций */
+#qaza-done {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
 }
 
 /* Радио скрыто визуально, но остаётся фокусируемым с клавиатуры */
@@ -235,19 +236,19 @@
 /* Надпись «Начать с: …» над планом */
 .qaza-plan-start {
   margin: 0 0 12px;
-  color: #8E8E93;
+  color: var(--text-tertiary);
   font-size: 13px;
 }
 
 /* Превью следующих пунктов плана: без кнопки, приглушённые */
 .qaza-plan-next {
-  color: #8E8E93;
+  color: var(--text-tertiary);
   font-size: 12px;
 }
 
 .qaza-note {
   margin: 16px 0 0;
-  color: #8E8E93;
+  color: var(--text-tertiary);
 }
 
 .qaza-actions {
@@ -339,7 +340,7 @@
   margin: 0;
   padding: 8px 12px;
   border: 1px solid transparent;
-  border-radius: 10px;
+  border-radius: var(--radius-md);
   font-size: 15px;
 }
 
@@ -377,7 +378,7 @@
 .qaza-add-hint {
   max-width: 68ch;
   margin: 12px 0 0;
-  color: #8E8E93;
+  color: var(--text-tertiary);
   font-size: 13px;
 }
 

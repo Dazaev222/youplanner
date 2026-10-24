@@ -19,6 +19,8 @@
   background-color: rgba(0, 0, 0, .45);
 }
 
+/* Плотная белая карточка: без стекла и полупрозрачных рамок. Тень мягкая,
+   но заметная — на белой странице только она отделяет окно от фона. */
 .modal-window {
   position: relative;
   width: 680px;
@@ -26,13 +28,10 @@
   max-height: 80vh;
   overflow-y: auto;
   padding: 22px 26px 26px;
-  border: 1px solid rgba(255, 255, 255, 0.35);
-  border-radius: 20px;
-  background: rgba(255, 255, 255, 0.75);
-  -webkit-backdrop-filter: blur(20px) saturate(1.3);
-  backdrop-filter: blur(20px) saturate(1.3);
+  border-radius: var(--radius-lg);
+  background: var(--surface-card);
   color: var(--text);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.6), 0 8px 32px rgba(0, 0, 0, 0.08);
+  box-shadow: var(--shadow);
 }
 
 .modal-header {
@@ -41,7 +40,7 @@
   justify-content: space-between;
   gap: 16px;
   padding-bottom: 12px;
-  border-bottom: 1px solid var(--border);
+  border-bottom: 1px solid var(--separator);
 }
 
 .modal-header h2 {
@@ -79,19 +78,19 @@
   align-items: center;
   gap: 8px;
   padding: 10px 12px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
   background-color: var(--surface-alt);
 }
 
-/* Поля лежат на плашке --surface-alt, поэтому сами — --surface */
+/* Поля лежат на плашке --surface-alt, поэтому сами — --surface-card */
 #habit-list input,
 #habit-list select {
   min-height: 32px;
   padding: 4px 8px;
-  border: 1px solid rgba(255, 255, 255, 0.6);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
   outline: none;
   color: var(--text);
   font: inherit;
@@ -139,9 +138,9 @@
 .form-fields select {
   min-height: 34px;
   padding: 6px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.6);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
   outline: none;
   color: var(--text);
   font: inherit;
@@ -153,9 +152,9 @@
 .input {
   min-height: 34px;
   padding: 6px 10px;
-  border: 1px solid rgba(255, 255, 255, 0.6);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.4);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
   outline: none;
   color: var(--text);
   font: inherit;
@@ -187,7 +186,7 @@
 .habit-row-body input:focus,
 .habit-row-body select:focus {
   border-color: var(--accent);
-  box-shadow: 0 0 0 3px rgba(88, 112, 197, 0.2);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
 #form-name {

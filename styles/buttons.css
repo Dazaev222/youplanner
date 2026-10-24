@@ -7,7 +7,7 @@
   min-height: 32px;
   padding: 6px 14px;
   border: 1px solid transparent;
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: transparent;
   color: var(--text);
   font: inherit;
@@ -48,9 +48,11 @@
   filter: brightness(1.08);
 }
 
+/* Вторичная кнопка на белой странице: плотная светлая подложка вместо
+   полупрозрачного белого, который на --bg исчезает */
 .btn-secondary {
-  background: rgba(255, 255, 255, 0.4);
-  border: 1px solid rgba(255, 255, 255, 0.7);
+  background: var(--surface-alt);
+  border: 1px solid var(--surface-alt);
   color: var(--text);
 }
 
