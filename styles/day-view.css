@@ -24,7 +24,8 @@
 .view-switch-btn.is-active {
   background: var(--surface-card);
   color: var(--text);
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  /* Тень несёт только капля-индикатор под кнопкой: две тени друг на друге
+     давали «размытое свечение» активного сегмента */
 }
 
 /* --- Анимированный индикатор (капля) для переключателей --- */
@@ -35,7 +36,7 @@
   left: 0;
   border-radius: var(--radius-pill);
   background: var(--surface-card);
-  box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   transition: transform 0.3s cubic-bezier(0.34, 1.56, 0.64, 1), width 0.3s ease;
   z-index: 1;
   pointer-events: none;

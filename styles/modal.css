@@ -179,8 +179,8 @@
   outline-offset: 1px;
 }
 
-.cell-number:focus,
-.cell-select:focus,
+/* Фокус полей форм — акцентный. Ячейки таблицы привычек здесь не участвуют:
+   у них нейтральный серый фокус по решению владельца (cells.css) */
 .form-fields input:focus,
 .form-fields select:focus,
 #habit-list input:focus,

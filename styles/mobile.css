@@ -25,11 +25,13 @@
     flex: 1 1 auto;
   }
 
-  /* Активная половина: цвет плюс фон — состояние видно и без оттенка */
+  /* Активная половина: белая пилюля с легкой тенью — тот же сегмент, что
+     у «День / Неделя», без синей рамки и акцентной заливки */
   #mobile-day-tabs .btn.is-active {
-    background-color: var(--accent-soft);
-    border-color: var(--accent);
+    background-color: var(--surface-card);
+    border-color: var(--border-soft);
     color: var(--text);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
   }
 
   /* Переключатель «День / Неделя»: два сегмента на общей подложке */
