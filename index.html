@@ -260,7 +260,7 @@
        заглушка, реального запроса к API нет. Ключ хранится только на
        устройстве (youplanner.api_key) и не участвует в синхронизации. -->
   <section id="assistant-view" hidden>
-    <div class="qaza-head">
+    <div class="qaza-head assistant-head">
       <button type="button" class="btn btn-secondary" id="assistant-back">← Назад</button>
       <h2>Ассистент</h2>
       <div class="assistant-head-actions">
@@ -270,31 +270,32 @@
                 aria-label="Настройки API-ключа">⚙</button>
       </div>
     </div>
-    <p id="assistant-hint" class="qaza-summary">Ассистент отвечает по вашим привычкам,
-      каза, сну и уразе. Пока в тестовом режиме: ответы — заглушка.</p>
     <div id="assistant-chat" aria-live="polite"></div>
-    <div id="assistant-chips">
-      <button type="button" class="assistant-chip" data-chip="Сводка недели">Сводка недели</button>
-      <button type="button" class="assistant-chip" data-chip="Что я пропускаю?">Что я пропускаю?</button>
-      <button type="button" class="assistant-chip" data-chip="Как дела с каза?">Как дела с каза?</button>
-    </div>
-    <form id="assistant-form" novalidate>
-      <button type="button" id="assistant-pdf-indicator"
-              class="assistant-pdf-indicator" hidden data-assistant-pdf-clear
-              aria-label="Убрать текст PDF из чата"></button>
-      <div class="assistant-input-row">
-        <label id="assistant-pdf-btn" class="btn btn-secondary assistant-pdf-btn"
-               for="assistant-pdf-input" role="button" tabindex="0"
-               aria-label="Прикрепить PDF-файл">📎
-          <input type="file" id="assistant-pdf-input" accept="application/pdf,.pdf" hidden>
-        </label>
-        <input type="text" id="assistant-input" class="input"
-               placeholder="Спросите что-нибудь…" autocomplete="off"
-               aria-label="Сообщение ассистенту">
-        <button type="submit" id="assistant-send" class="btn btn-primary"
-                aria-label="Отправить">➤</button>
+    <div class="assistant-dock">
+      <p id="assistant-hint" class="qaza-summary"></p>
+      <div id="assistant-chips">
+        <button type="button" class="assistant-chip" data-chip="Сводка недели">Сводка недели</button>
+        <button type="button" class="assistant-chip" data-chip="Что я пропускаю?">Что я пропускаю?</button>
+        <button type="button" class="assistant-chip" data-chip="Как дела с каза?">Как дела с каза?</button>
       </div>
-    </form>
+      <form id="assistant-form" novalidate>
+        <button type="button" id="assistant-pdf-indicator"
+                class="assistant-pdf-indicator" hidden data-assistant-pdf-clear
+                aria-label="Убрать текст PDF из чата"></button>
+        <div class="assistant-input-row">
+          <label id="assistant-pdf-btn" class="btn btn-secondary assistant-pdf-btn"
+                 for="assistant-pdf-input" role="button" tabindex="0"
+                 aria-label="Прикрепить PDF-файл">📎
+            <input type="file" id="assistant-pdf-input" accept="application/pdf,.pdf" hidden>
+          </label>
+          <input type="text" id="assistant-input" class="input"
+                 placeholder="Спросите что-нибудь…" autocomplete="off"
+                 aria-label="Сообщение ассистенту">
+          <button type="submit" id="assistant-send" class="btn btn-primary"
+                  aria-label="Отправить">➤</button>
+        </div>
+      </form>
+    </div>
   </section>
 
   <!-- Модалка ввода API-ключа ассистента. Ключ вводится пользователем,

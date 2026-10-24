@@ -810,3 +810,26 @@
   }
 }
 
+
+/* --- Экран ассистента: чат на весь телефон -------------------------------- */
+/* Чат — единственный экран-«приложение»: глобальная шапка не нужна (у чата
+   своя с «Назад»), экран лежит над страницей и заканчивается над таб-баром.
+   Прокручивается только лента, шапка и поле ввода закреплены (assistant.css) */
+@media (max-width: 700px) {
+  body.view-assistant #header {
+    display: none;
+  }
+
+  #assistant-view {
+    position: fixed;
+    inset: 0;
+    bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+    height: auto;
+    min-height: 0;
+    padding: 10px 12px 8px;
+    /* перебиваем общий запас под таб-бар: сам offset уже над капсулой */
+    padding-bottom: 8px !important;
+    background: var(--bg);
+    z-index: 5;
+  }
+}

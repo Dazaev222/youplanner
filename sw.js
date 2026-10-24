@@ -1,4 +1,4 @@
-const CACHE = 'youplanner-v18';
+const CACHE = 'youplanner-v19';
 const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon.svg',
   './styles/tokens.css', './styles/layout.css', './styles/buttons.css',
   './styles/table.css', './styles/cells.css', './styles/progress-circle.css',
