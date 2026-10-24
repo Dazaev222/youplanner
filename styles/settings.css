@@ -80,9 +80,9 @@
   }
 }
 
-/* iOS-отклик строки списка: лёгкая серая подложка при нажатии */
+/* iOS-отклик строки списка: плотная серая подложка при нажатии */
 .settings-row:active {
-  background: var(--surface-alt);
+  background: var(--surface-pressed);
 }
 
 .settings-chevron {

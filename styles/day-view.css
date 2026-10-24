@@ -85,7 +85,7 @@
 .habits-note {
   margin: 12px 0;
   padding: 14px 16px;
-  background: var(--surface);
+  background: var(--surface-muted);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-md);
   color: var(--text-muted);
