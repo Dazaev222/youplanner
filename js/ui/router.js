@@ -30,6 +30,7 @@ export const SCREENS = {
   'sleep': { el: 'sleep-view', tab: 'settings', bodyClass: 'view-settings' },
   'schedule': { el: 'schedule-view', tab: 'schedule' },
   'schedule-edit': { el: 'schedule-edit-view', tab: 'schedule-edit' },
+  'assistant': { el: 'assistant-view', tab: 'assistant', bodyClass: 'view-assistant' },
 };
 
 // Механика переключения: видимость контейнеров, шапка и мобильные детали,
@@ -46,6 +47,7 @@ export function applyScreen(name) {
   setHidden('qaza-btn', !isMain);
   setHidden('schedule-btn', !isMain);
   setHidden('settings-btn', !isMain);
+  setHidden('assistant-btn', !isMain);
   // Кнопка статистики открывает панель с экранами раздела: на других
   // экранах ей нечего делать
   setHidden('stats-menu-btn', !isMain);
@@ -66,7 +68,7 @@ export function applyScreen(name) {
   // Классы на body гасят шапку действий во вложенных экранах. У статистики
   // свой класс, а не view-settings: гасят они одно и то же, но имя
   // читается по экрану
-  const classes = ['view-qaza', 'view-prayer', 'view-fast', 'view-settings', 'view-stats'];
+  const classes = ['view-qaza', 'view-prayer', 'view-fast', 'view-settings', 'view-stats', 'view-assistant'];
   const active = Object.prototype.hasOwnProperty.call(SCREENS, name)
     ? SCREENS[name].bodyClass
     : null;
