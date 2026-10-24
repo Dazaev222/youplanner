@@ -33,6 +33,7 @@
   <link rel="stylesheet" href="styles/settings.css">
   <link rel="stylesheet" href="styles/stats.css">
   <link rel="stylesheet" href="styles/habits-edit.css">
+  <link rel="stylesheet" href="styles/assistant.css">
   <link rel="stylesheet" href="styles/mobile.css">
 </head>
 <body>
@@ -52,6 +53,7 @@
       <button id="week-today" class="btn btn-secondary">Сегодня</button>
     </nav>
     <div id="header-actions">
+      <button id="assistant-btn" class="btn btn-secondary">Ассистент</button>
       <button id="qaza-btn" class="btn btn-secondary">Каза-намазы</button>
       <button id="schedule-btn" class="btn btn-secondary">Расписание</button>
       <button id="settings-btn" class="btn btn-secondary">Настройки</button>
@@ -253,6 +255,59 @@
     </div>
     <ul id="schedule-list"></ul>
   </section>
+
+  <!-- Вкладка «ИИ-Ассистент»: чат с помощником. Пока каркас: ответы —
+       заглушка, реального запроса к API нет. Ключ хранится только на
+       устройстве (youplanner.api_key) и не участвует в синхронизации. -->
+  <section id="assistant-view" hidden>
+    <div class="qaza-head">
+      <button type="button" class="btn btn-secondary" id="assistant-back">← Назад</button>
+      <h2>Ассистент</h2>
+      <button type="button" id="assistant-settings" class="btn btn-secondary"
+              aria-label="Настройки API-ключа">⚙</button>
+    </div>
+    <p id="assistant-hint" class="qaza-summary">Ассистент отвечает по вашим привычкам,
+      каза, сну и уразе. Пока в тестовом режиме: ответы — заглушка.</p>
+    <div id="assistant-chat" aria-live="polite"></div>
+    <div id="assistant-chips">
+      <button type="button" class="assistant-chip" data-chip="Сводка недели">Сводка недели</button>
+      <button type="button" class="assistant-chip" data-chip="Что я пропускаю?">Что я пропускаю?</button>
+      <button type="button" class="assistant-chip" data-chip="Как дела с каза?">Как дела с каза?</button>
+    </div>
+    <form id="assistant-form" novalidate>
+      <input type="text" id="assistant-input" class="input"
+             placeholder="Спросите что-нибудь…" autocomplete="off"
+             aria-label="Сообщение ассистенту">
+      <button type="submit" id="assistant-send" class="btn btn-primary"
+              aria-label="Отправить">➤</button>
+    </form>
+  </section>
+
+  <!-- Модалка ввода API-ключа ассистента. Ключ вводится пользователем,
+       в коде его нет; живёт только в localStorage устройства. -->
+  <div id="assistant-key-modal" class="modal" hidden>
+    <div class="modal-backdrop" data-assistant-key-close></div>
+    <div class="modal-window" role="dialog" aria-modal="true" aria-labelledby="assistant-key-title">
+      <div class="modal-header">
+        <h2 id="assistant-key-title">API-ключ ассистента</h2>
+        <button id="assistant-key-close" class="btn btn-secondary" data-assistant-key-close
+                aria-label="Закрыть">✕</button>
+      </div>
+      <div class="modal-body">
+        <p class="qaza-summary">Ключ от neuraldeep.ru хранится только на этом
+          устройстве и никуда не отправляется вместе с данными.</p>
+        <div class="form-fields">
+          <input id="assistant-key-input" type="password" placeholder="API-ключ"
+                 autocomplete="off" aria-label="API-ключ">
+        </div>
+        <p id="assistant-key-error" class="form-error" role="alert"></p>
+        <div class="form-actions">
+          <button type="button" id="assistant-key-save" class="btn btn-primary">Сохранить</button>
+          <button type="button" id="assistant-key-cancel" class="btn btn-secondary">Отмена</button>
+        </div>
+      </div>
+    </div>
+  </div>
 
   <!-- Раздел «Настройки»: пока заглушка. Место для цвета фона, экспорта/импорта
        данных и синхронизации — появятся отдельными шагами. -->
@@ -594,6 +649,9 @@
       <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="3" y="4" width="18" height="18" rx="3"/><path d="M16 2v4M8 2v4M3 10h18"/><text id="tab-calendar-date" x="12" y="18" font-size="7" font-weight="bold" stroke="none" fill="currentColor" text-anchor="middle"></text></svg>
       <span>Расписание</span>
     </button>
+    <button type="button" class="tab-item" data-view="assistant">
+      <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3l1.9 5.1L19 10l-5.1 1.9L12 17l-1.9-5.1L5 10l5.1-1.9L12 3z"/><path d="M19 15l.9 2.1L22 18l-2.1.9L19 21l-.9-2.1L16 18l2.1-.9L19 15z"/></svg>
+      <span>Ассистент</span></button>
     <button type="button" class="tab-item" data-view="settings">
       <svg viewBox="0 0 24 24" aria-hidden="true"><polygon points="12 2 21 7 21 17 12 22 3 17 3 7"/><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/></svg>
       <span>Настройки</span></button>

@@ -483,11 +483,12 @@
   }
 
   /* У «Молитв» и «Уразы» в шапке заголовок и «← Назад»: колонка растянула бы
-     кнопку во всю ширину карточки */
+     кнопку во всю ширину карточки. У ассистента та же история плюс шестерёнка */
   #prayer-view .qaza-head,
   #prayer-settings-view .qaza-head,
   #fast-view .qaza-head,
-  #sleep-view .qaza-head {
+  #sleep-view .qaza-head,
+  #assistant-view .qaza-head {
     flex-direction: row;
     align-items: center;
   }
@@ -767,7 +768,9 @@
 @media (max-width: 768px) {
   #habit-form input,
   #habit-form select,
-  .prayer-field input {
+  .prayer-field input,
+  #assistant-input,
+  #assistant-key-input {
     font-size: 16px !important;
   }
 }

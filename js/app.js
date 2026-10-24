@@ -14,6 +14,11 @@ import { APP_BUILD, APP_VERSION } from './data/ui.js';
 import { clearSyncPending, syncPending } from './sync/state.js';
 import { flushPendingSync, markCloudReady, scheduleSync, settleHabitsAfterSync, syncFromCloud, syncToCloud } from './sync/sync.js';
 import { onFastAdd, onFastDone, onFastEdit, onFastInitCancel, onFastInitSave, renderFastView, resetFastForm } from './ui/fast-view.js';
+import {
+  closeAssistantKeyModal, onAssistantChipClick, onAssistantFormSubmit,
+  onAssistantKeyCancel, onAssistantKeySave, openAssistantKeyModal,
+  renderAssistantView,
+} from './ui/assistant-view.js';
 import { closeModal, onFormSubmit, onHabitListClick, onHabitsEditChange, onHabitsEditClick, openModal, renderHabitsEditList, setFormError, updateFormFields } from './ui/habits-edit.js';
 import { closeLevelSheet, onLevelPick } from './ui/level-sheet.js';
 import { changeWeek, goToday, onTableChange, onTableClick, renderDayCards, renderHeader, renderMainView, renderTable, updateRowCircle } from './ui/main-table.js';
@@ -522,6 +527,36 @@ export function bindEvents() {
     });
   }
 
+  // Вкладка «ИИ-Ассистент»: входы — кнопка шапки на ПК и таб-бар на телефоне,
+  // выход — «← Назад». Модалка ключа открывается шестерёнкой и сама, когда
+  // вопрос задан без ключа
+  const assistantButton = document.getElementById('assistant-btn');
+  if (assistantButton) assistantButton.addEventListener('click', function () { switchAppView('assistant'); });
+
+  const assistantBack = document.getElementById('assistant-back');
+  if (assistantBack) assistantBack.addEventListener('click', function () { switchAppView('main'); });
+
+  const assistantSettings = document.getElementById('assistant-settings');
+  if (assistantSettings) assistantSettings.addEventListener('click', openAssistantKeyModal);
+
+  const assistantForm = document.getElementById('assistant-form');
+  if (assistantForm) assistantForm.addEventListener('submit', onAssistantFormSubmit);
+
+  const assistantChips = document.getElementById('assistant-chips');
+  if (assistantChips) assistantChips.addEventListener('click', onAssistantChipClick);
+
+  const assistantKeySave = document.getElementById('assistant-key-save');
+  if (assistantKeySave) assistantKeySave.addEventListener('click', onAssistantKeySave);
+
+  const assistantKeyCancel = document.getElementById('assistant-key-cancel');
+  if (assistantKeyCancel) assistantKeyCancel.addEventListener('click', onAssistantKeyCancel);
+
+  const assistantKeyClose = document.getElementById('assistant-key-close');
+  if (assistantKeyClose) assistantKeyClose.addEventListener('click', closeAssistantKeyModal);
+
+  const assistantKeyBackdrop = document.querySelector('.modal-backdrop[data-assistant-key-close]');
+  if (assistantKeyBackdrop) assistantKeyBackdrop.addEventListener('click', closeAssistantKeyModal);
+
   // Нижний таб-бар: тот же переключатель разделов, что и у кнопок шапки
   const tabItems = document.querySelectorAll('#tab-bar .tab-item');
   for (let i = 0; i < tabItems.length; i++) {
@@ -881,6 +916,8 @@ const ROUTE_RENDER = {
   // Незакрытая форма не переживает уход с экрана: возвращаться к наполовину
   // заполненному полю незачем, а первый запуск снова покажет форму сам
   'fast': function () { resetFastForm(); renderFastView(); },
+  // Ассистенту на входе нужно только обновить подпись про ключ
+  'assistant': renderAssistantView,
 };
 
 export function switchAppView(name) {

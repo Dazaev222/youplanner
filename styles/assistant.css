@@ -1,0 +1,103 @@
+/* --- Вкладка «ИИ-Ассистент» ---------------------------------------------- */
+/* Чат в стиле приложения: пузыри пользователя — акцентные пилюли справа,
+   ответы ассистента — белые карточки слева. Поле ввода и чипы быстрых
+   команд стоят в потоке под лентой: лента растёт, страница прокручивается. */
+
+#assistant-chat {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.assistant-msg {
+  max-width: 78%;
+  padding: 10px 14px;
+  border-radius: var(--radius-md);
+  font-size: 14px;
+  line-height: 1.45;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  animation: assistant-msg-in .18s ease-out;
+}
+
+@keyframes assistant-msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* Сообщение пользователя: акцентная пилюля справа */
+.assistant-msg-user {
+  align-self: flex-end;
+  border-bottom-right-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+/* Ответ ассистента: белая карточка слева, как строки настроек */
+.assistant-msg-bot {
+  align-self: flex-start;
+  border-bottom-left-radius: var(--radius-sm);
+  background: var(--surface-card);
+  border: 1px solid var(--border-soft);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+/* Задержка ответа — часть каркаса: пока ассистент «думает» */
+.assistant-msg-bot.is-typing {
+  color: var(--text-muted);
+}
+
+/* Быстрые команды над полем ввода */
+#assistant-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+.assistant-chip {
+  padding: 8px 14px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-pill);
+  background: var(--surface-card);
+  color: var(--accent);
+  font: inherit;
+  font-size: 13px;
+  cursor: pointer;
+  transition: border-color .15s, background-color .15s, color .15s;
+}
+
+.assistant-chip:hover {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+}
+
+.assistant-chip:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Поле отправки: пилюля ввода и круглая кнопка рядом */
+#assistant-form {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+#assistant-form .input {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+#assistant-send {
+  flex: 0 0 auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .assistant-msg {
+    animation: none;
+  }
+}
