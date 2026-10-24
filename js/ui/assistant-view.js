@@ -16,9 +16,10 @@ import { showToast } from '../core/dom.js';
 export const ASSISTANT_API_KEY = 'youplanner.api_key';
 export const ASSISTANT_HISTORY_KEY = 'youplanner.assistant_history';
 // OpenAI-совместимый эндпоинт neuraldeep.ru; модель — одна строка,
-// меняется здесь, если владелец переключит тариф.
+// меняется здесь, если владелец переключит тариф. Из документации
+// NeuralDeep: базовые модели — gpt-oss-120b и qwen3.6-35b-a3b.
 const ASSISTANT_API_URL = 'https://api.neuraldeep.ru/v1/chat/completions';
-const ASSISTANT_MODEL = 'gpt-4o-mini';
+const ASSISTANT_MODEL = 'gpt-oss-120b';
 const REQUEST_TIMEOUT_MS = 30000;
 const HISTORY_KEEP = 50;   // сколько реплик хранить на устройстве
 const HISTORY_SEND = 20;   // сколько последних реплик уходит в запрос
@@ -156,6 +157,18 @@ function friendlyError(status) {
   return 'Сервис вернул неожиданный ответ (ошибка ' + status + ').';
 }
 
+// AbortSignal.timeout появился в Safari только в 15.4: на старых iPhone
+// его вызов кидал TypeError, и каждый запрос мгновенно падал в «Нет связи».
+// Ручной контроллер работает везде, поэтому подстраховываем им.
+function timeoutSignal(ms) {
+  if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) {
+    return AbortSignal.timeout(ms);
+  }
+  const controller = new AbortController();
+  setTimeout(function () { controller.abort(); }, ms);
+  return controller.signal;
+}
+
 async function requestAssistantReply() {
   let response;
   try {
@@ -169,13 +182,25 @@ async function requestAssistantReply() {
         model: ASSISTANT_MODEL,
         messages: buildMessages(),
       }),
-      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+      signal: timeoutSignal(REQUEST_TIMEOUT_MS),
     });
   } catch (e) {
-    throw new Error('Нет связи с сервисом нейросети. Проверьте интернет и попробуйте ещё раз.');
+    // Реальная причина — в консоль: TypeError (сеть/CORS/старый API),
+    // TimeoutError/AbortError (30 с без ответа) видны только так.
+    console.error('[assistant] запрос не дошёл:', e && e.name + ': ' + e.message, e);
+    throw new Error(e && e.name === 'TimeoutError'
+      ? 'Сервис не ответил за 30 секунд. Попробуйте ещё раз.'
+      : 'Нет связи с сервисом нейросети. Подробности — в консоли браузера (F12).');
   }
 
   if (!response.ok) {
+    let detail = '';
+    try {
+      detail = (await response.text()).slice(0, 500);
+    } catch (e) {
+      // тело ошибки не прочиталось — статус уже показан ниже
+    }
+    console.error('[assistant] HTTP ' + response.status, ASSISTANT_API_URL, detail);
     throw new Error(friendlyError(response.status));
   }
 
@@ -238,6 +263,14 @@ export function openAssistantKeyModal() {
 export function closeAssistantKeyModal() {
   const modal = document.getElementById('assistant-key-modal');
   if (modal) modal.hidden = true;
+}
+
+// Escape закрывает модалку ключа — как нативные alert iOS. Состояние читается
+// в момент нажатия, поэтому один обработчик на document живёт вечно.
+export function onAssistantKeyKeydown(event) {
+  if (event.key !== 'Escape') return;
+  const modal = document.getElementById('assistant-key-modal');
+  if (modal && !modal.hidden) closeAssistantKeyModal();
 }
 
 // Сохранение ключа: пустая строка ключом не считается — это «ключа нет»,
