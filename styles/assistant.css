@@ -59,6 +59,7 @@
 }
 
 .assistant-chip {
+  min-height: 44px;
   padding: 8px 14px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-pill);
@@ -67,12 +68,19 @@
   font: inherit;
   font-size: 13px;
   cursor: pointer;
-  transition: border-color .15s, background-color .15s, color .15s;
+  transition: background-color .15s, color .15s, transform .15s ease;
 }
 
-.assistant-chip:hover {
-  border-color: var(--accent);
-  background: var(--accent-soft);
+/* iOS-отклик: нажатие вместо наведения */
+.assistant-chip:active {
+  transform: scale(0.98);
+}
+
+@media (hover: hover) {
+  .assistant-chip:hover {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
 }
 
 .assistant-chip:focus-visible {

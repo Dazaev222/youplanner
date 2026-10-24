@@ -66,8 +66,8 @@
    у всех, слева — у первой, справа — у последней, там же и радиусы. */
 .habit-row td {
   background-color: var(--surface-card);
-  border-top: 1px solid var(--border);
-  border-bottom: 1px solid var(--border);
+  border-top: 1px solid var(--border-soft);
+  border-bottom: 1px solid var(--border-soft);
   transition: border-color .18s ease;
 }
 
@@ -78,13 +78,13 @@
 }
 
 .habit-row td:first-child {
-  border-left: 1px solid var(--border);
+  border-left: 1px solid var(--border-soft);
   border-top-left-radius: var(--radius-md);
   border-bottom-left-radius: var(--radius-md);
 }
 
 .habit-row td:last-child {
-  border-right: 1px solid var(--border);
+  border-right: 1px solid var(--border-soft);
   border-top-right-radius: var(--radius-md);
   border-bottom-right-radius: var(--radius-md);
 }

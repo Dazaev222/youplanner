@@ -73,8 +73,16 @@
   cursor: pointer;
 }
 
-.settings-row:hover {
-  color: var(--accent);
+/* Наведение — только с курсором; на тач-экранах отклик даёт :active */
+@media (hover: hover) {
+  .settings-row:hover {
+    color: var(--accent);
+  }
+}
+
+/* iOS-отклик строки списка: лёгкая серая подложка при нажатии */
+.settings-row:active {
+  background: var(--surface-alt);
 }
 
 .settings-chevron {

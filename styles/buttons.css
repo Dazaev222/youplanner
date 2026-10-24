@@ -43,22 +43,29 @@
   color: var(--on-accent);
 }
 
-.btn-primary:hover {
-  background-color: var(--accent);
-  filter: brightness(1.08);
-}
-
-/* Вторичная кнопка на белой странице: плотная светлая подложка вместо
-   полупрозрачного белого, который на --bg исчезает */
+/* Вторичная кнопка: белая пилюля со светло-серой рамкой — читается на
+   белой странице и держит iOS-нейтральность */
 .btn-secondary {
-  background: var(--surface-alt);
-  border: 1px solid var(--surface-alt);
+  background: var(--surface-card);
+  border: 1px solid var(--border-soft);
   color: var(--text);
 }
 
-.btn-secondary:hover {
-  border-color: var(--accent);
-  color: var(--accent);
+/* Вариантные ховеры — только там, где есть настоящий курсор */
+@media (hover: hover) {
+  .btn-primary:hover {
+    background-color: var(--accent);
+    filter: brightness(1.08);
+  }
+
+  .btn-secondary:hover {
+    border-color: var(--accent);
+    color: var(--accent);
+  }
+
+  .btn-danger:hover {
+    filter: brightness(1.08);
+  }
 }
 
 .btn-danger {
@@ -67,7 +74,10 @@
   color: var(--on-danger);
 }
 
-.btn-danger:hover {
-  filter: brightness(1.08);
+/* Нажатие на тач-экранах: лёгкое сжатие вместо заливающего hover */
+.btn-primary:active,
+.btn-secondary:active,
+.btn-danger:active {
+  transform: scale(0.98);
 }
 
