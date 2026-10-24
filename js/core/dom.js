@@ -34,6 +34,24 @@ export function showToast(message) {
   }, 3500);
 }
 
+// Тост об ошибке: тот же единственный элемент #toast, но одинаковый текст
+// не перезаписывается заново — только продлевается отсчёт скрытия. Иначе
+// цепочка одинаковых сбоев (три Enter во время чтения PDF) каждый раз
+// «зажигает» плашку заново, и она кажется мигающей.
+export function showErrorToast(message) {
+  const toast = document.getElementById('toast');
+  if (!toast) return;
+  if (!toast.hidden && toast.textContent === message) {
+    if (toastTimer) clearTimeout(toastTimer);
+    toastTimer = setTimeout(function () {
+      toast.hidden = true;
+      toastTimer = null;
+    }, 3500);
+    return;
+  }
+  showToast(message);
+}
+
 // Показ и скрытие элемента по id
 export function setHidden(id, hidden) {
   const element = document.getElementById(id);
