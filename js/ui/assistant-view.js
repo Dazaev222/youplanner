@@ -411,11 +411,19 @@ export function renderAssistantView() {
   renderHistory();
 }
 
+// Приветствие пустого чата: без истории лента — не «белая дыра», а стартовая
+// реплика ассистента. В localStorage не пишется и в запросы не попадает.
+const ASSISTANT_WELCOME = 'Привет! Я ассистент YouPlanner — отвечаю по данным вашего трекера. Спросите что-нибудь или выберите быструю команду ниже.';
+
 function renderHistory() {
   const chat = document.getElementById('assistant-chat');
   if (!chat) return;
   chat.textContent = '';
   const history = readHistory();
+  if (!history.length) {
+    appendMessage('bot', ASSISTANT_WELCOME);
+    return;
+  }
   for (let i = 0; i < history.length; i++) {
     appendMessage(history[i].role === 'user' ? 'user' : 'bot', history[i].content);
   }
