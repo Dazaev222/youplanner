@@ -39,3 +39,14 @@ export function setHidden(id, hidden) {
   const element = document.getElementById(id);
   if (element) element.hidden = hidden;
 }
+
+// Высота, на которую клавиатура перекрывает окно. В медиа-запросе телефона
+// шторки стоят по bottom и поднимаются на эту величину: без неё клавиатура
+// накрывает панель формы вместе с полем ввода.
+export function syncSheetToKeyboard() {
+  if (!window.visualViewport) return;
+  const offset = Math.max(0,
+    window.innerHeight - window.visualViewport.height
+    - window.visualViewport.offsetTop);
+  document.documentElement.style.setProperty('--keyboard-offset', offset + 'px');
+}
