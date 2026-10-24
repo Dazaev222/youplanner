@@ -240,23 +240,20 @@ export function calcProgress(habit, dates) {
     'no': 0, 'нет': 0, 'rest': 0, 'отдых': 0 };
 
   // Находим самую раннюю дату с записью по этой привычке
-  let minDate = null;
+  let firstIdx = -1;
   for (let i = 0; i < dates.length; i++) {
     if (recordValue(dates[i], habit.id) !== undefined) {
-      minDate = dates[i];
+      firstIdx = i;
       break; // даты идут от младшего к старшему
     }
   }
 
   // Нет записей — 0%
-  if (minDate === null) return 0;
+  if (firstIdx === -1) return 0;
 
-  // Обрезаем даты до первой записи (даты уже отсортированы)
-  let filteredDates = dates;
-  if (minDate > dates[0]) {
-    const firstIdx = dates.indexOf(minDate);
-    filteredDates = dates.slice(firstIdx);
-  }
+  // Обрезаем даты до первой записи (индекс уже найден выше: второй проход
+  // indexOf по массиву на 365 дней был бы лишним)
+  const filteredDates = firstIdx > 0 ? dates.slice(firstIdx) : dates;
 
   const base = filteredDates.length;
   if (base <= 0) return 0;

@@ -17,7 +17,7 @@ import { flushPendingSync, markCloudReady, scheduleSync, settleHabitsAfterSync, 
 import { onFastAdd, onFastDone, onFastEdit, onFastInitCancel, onFastInitSave, renderFastView, resetFastForm } from './ui/fast-view.js';
 import {
   closeAssistantKeyModal, onAssistantChipClick, onAssistantClear,
-  onAssistantFormSubmit, onAssistantKeyCancel, onAssistantKeyKeydown,
+  onAssistantFormSubmit, onAssistantKeyCancel,
   onAssistantKeySave, onAssistantModelChange, onAssistantPdfClear,
   onAssistantPdfPick, openAssistantKeyModal, renderAssistantView,
 } from './ui/assistant-view.js';
@@ -46,15 +46,6 @@ export let syncStatusTimer = null;
 // не применяется, а локальный остаётся как есть. Проверки повторяют те, что уже
 // работают при чтении ключей и в parseBackup: молитвы — как loadPrayer, сон —
 // как loadSleep, истории чистятся теми же valid* при записи раздела.
-
-
-
-
-
-
-
-
-
 
 // Надпись под кнопками ручной синхронизации гаснет сама
 export function showSyncStatus(message) {
@@ -125,23 +116,8 @@ export function onBackupRead(text) {
 /* --- Состояние приложения ------------------------------------------------ */
 // appState живёт в js/ui/state.js: его читают и мутируют несколько модулей.
 
-/* --- Константы ----------------------------------------------------------- */
-
-/* --- Вспомогательные функции (не пересекаются с именами data.js) --------- */
-
 // syncSheetToKeyboard переехала в core/dom.js: ею пользуются шторки
 // уровня (js/ui/level-sheet.js) и подписка на клавиатуру в bindEvents
-
-/* --- Разметка (строки, чтобы собрать таблицу одним присвоением) ---------- */
-
-
-
-
-
-
-
-/* --- Инициализация ------------------------------------------------------- */
-
 
 export function init() {
   // Межвкладочная страховка: событие storage приходит только из других
@@ -578,9 +554,6 @@ export function bindEvents() {
   const assistantKeyBackdrop = document.querySelector('.modal-backdrop[data-assistant-key-close]');
   if (assistantKeyBackdrop) assistantKeyBackdrop.addEventListener('click', closeAssistantKeyModal);
 
-  // Escape закрывает модалку ключа — тот же жест, что крестик и фон
-  document.addEventListener('keydown', onAssistantKeyKeydown);
-
   // Выбор модели в настройках ассистента: сохраняется сразу, кнопка
   // «Сохранить» относится только к ключу
   const assistantModelSelect = document.getElementById('assistant-model-select');
@@ -736,9 +709,12 @@ export function bindEvents() {
     syncFromCloud();
   });
 
-  // Escape разбирает окна по слоям: сначала верхнее меню, потом то, что под
-  // ним, и только затем саму форму. Иначе форма закрылась бы, оставив меню
-  // висеть на экране.
+  // Escape разбирает окна строго по слоям, ОДНО окно на нажатие: панель
+  // статистики, модалка ключа ассистента, модалка привычки, шторка уровня —
+  // в порядке «верхнее первым». Раньше модалка привычки закрывалась без
+  // return, и одно нажатие снимало и её, и шторку уровня под ней, а модалка
+  // ключа ассистента жила своим обработчиком и закрывалась параллельно с
+  // остальными. Теперь порядок единый: каждое нажатие гасит ровно верхний слой.
   document.addEventListener('keydown', function (event) {
     if (event.key !== 'Escape') return;
 
@@ -749,8 +725,17 @@ export function bindEvents() {
       return;
     }
 
+    const keyModal = document.getElementById('assistant-key-modal');
+    if (keyModal && !keyModal.hidden) {
+      closeAssistantKeyModal();
+      return;
+    }
+
     const modal = document.getElementById('habit-modal');
-    if (modal && !modal.hidden) closeModal();
+    if (modal && !modal.hidden) {
+      closeModal();
+      return;
+    }
 
     // Попап уровня открывается из таблицы, но снимается
     // тем же правилом: Escape гасит верхнюю шторку за раз
@@ -777,14 +762,19 @@ export function bindEvents() {
     });
   }
 
-  // Переключатель «День / Неделя». Выбор запоминается на будущие запуски
+  // Переключатель «День / Неделя». Выбор запоминается на будущие запуски.
+  // Память устройства, не данные: при переполненной квоте запись молча
+  // пропускается — иначе setItem бросил бы исключение посреди обработчика
+  // и renderMainView() не выполнился бы (экран завис в старом режиме)
   const switchBox = document.getElementById('main-view-switch');
   if (switchBox) {
     switchBox.addEventListener('click', function (event) {
       const btn = event.target.closest('.view-switch-btn');
       if (!btn) return;
       ui.mainView = btn.getAttribute('data-view');
-      localStorage.setItem('youplanner.mainView', ui.mainView);
+      try {
+        localStorage.setItem('youplanner.mainView', ui.mainView);
+      } catch (e) { /* настройка-расходник: переживает отказ хранилища */ }
       renderMainView();
     });
   }
@@ -866,57 +856,6 @@ export function bindEvents() {
   if (listScheduleEdit) listScheduleEdit.addEventListener('click', onScheduleEditListClick);
 }
 
-/* --- Шапка и таблица ----------------------------------------------------- */
-
-
-/* --- Мобильная вёрстка --------------------------------------------------- */
-
-
-
-
-/* --- Режим «День» -------------------------------------------------------- */
-
-
-
-
-/* --- Делегированные обработчики таблицы ---------------------------------- */
-
-
-
-
-
-
-
-/* --- Изменение значения ячейки ------------------------------------------- */
-
-
-
-/* --- Навигация по неделям ------------------------------------------------ */
-
-
-
-
-/* --- Редактор расписания (Настройки → Редактировать расписание) ------------ */
-
-
-
-
-/* --- Попап уровня выполнения (§1.3) --------------------------------------- */
-
-
-
-
-
-
-/* --- Вкладка «Каза-намазы» ----------------------------------------------- */
-
-
-
-
-
-
-
-
 // Куда вернёт «Назад» с экранов статистики. Входов два — строка в Настройках
 // на ПК и гамбургер на телефоне, — и вернуть надо туда, откуда вошли.
 // Значение снимается один раз, на входе в раздел: иначе переход между
@@ -967,9 +906,13 @@ export function switchAppView(name) {
   // кода) без этого оставил бы его висеть поверх нового экрана.
   // Модалка ключа ассистента — третий такой попап: у таб-бара z-index выше,
   // и без закрытия он бы переключал вкладки под открытой модалкой.
+  // Модалка привычки — четвёртый: она живёт вне секций экранов (вне #app),
+  // поэтому setHidden её не гасит, и без явного закрытия она осталась бы
+  // поверх нового раздела.
   closeStatsMenu();
   closeLevelSheet();
   closeAssistantKeyModal();
+  closeModal();
 
   // Вход в раздел запоминает, откуда вошли, — туда «Назад» из хаба и вернёт
   if (isStatsView(name) && !isStatsView(currentView)) statsReturnView = currentView;
@@ -1108,67 +1051,9 @@ async function onBgReset() {
   showToast('Фон сброшен');
 }
 
-
 // Выбранный период живёт на устройстве, а не в данных человека: как ui.mainView,
 // это отметка последнего просмотра, а не запись. Категория у каждой своя,
 // поэтому общей переменной нет — её читает loadStatsPeriod(category)
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-/* ---------- Экран «Молитвы» ---------------------------------------------- */
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 
 // Обновление ячеек каза во всех днях отображаемой недели
 export function updateQazaCells() {
@@ -1184,47 +1069,6 @@ export function updateQazaCells() {
   // В режиме «День» таблица скрыта — обновляем ещё и карточки
   if (isMainDayView()) renderDayCards();
 }
-
-/* --- Вкладка «Ураза» ----------------------------------------------------- */
-
-
-
-
-
-
-
-
-
-/* --- Раздел «Цикл сна» --------------------------------------------------- */
-
-
-
-
-
-
-
-
-
-
-/* --- Модальное окно ------------------------------------------------------ */
-
-
-
-
-
-/* --- Экран «Привычки» (настройки, телефон) ------------------------------- */
-
-
-
-
-
-
-
-/* --- Форма добавления привычки ------------------------------------------- */
-
-
-
-
 
 /* --- Проводка слоёв через шину событий -------------------------------------
    Единственное место, где слои слышат друг друга: данные эмитят правку,
@@ -1423,8 +1267,4 @@ window.addEventListener('orientationchange', function () {
   scheduleLiquidIndicators();
 });
   
-
-
-
-
 

@@ -244,8 +244,12 @@ export function markPrayerMadhhab(madhhab) {
     });
 }
 // Раз в минуту: счётчик до следующего намаза и смена суток. В полночь
-// пересобирается весь день — времена-то у него свои.
+// пересобирается весь день — времена-то у него свои. Вкладка скрыта — тик
+// пропускается: расчёт двух дней и перерисовка ленты вслепую ничего не дают,
+// а вход на вкладку всё равно собирает экран заново через ROUTE_RENDER.
 export function prayerTick() {
+  const view = document.getElementById('prayer-view');
+  if (!view || view.hidden) return;
   if (prayerDateISO(new Date()) !== prayerRenderedDay) {
     renderPrayerView();
     return;

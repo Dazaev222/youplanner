@@ -340,7 +340,7 @@ export function renderStatsHabitView() {
   const habits = loadHabits();
   let habit = null;
   for (let i = 0; i < habits.length; i++) {
-    if (habits[i].id === statsHabitId) habit = habits[i];
+    if (habits[i].id === statsHabitId) { habit = habits[i]; break; }
   }
   if (!habit) return;
 
