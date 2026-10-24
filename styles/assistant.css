@@ -1,35 +1,44 @@
 /* --- Вкладка «ИИ-Ассистент» ---------------------------------------------- */
-/* Экран — обычная вкладка в потоке #app, как каза и молитвы: растёт вместе
-   с лентой, прокручивается страница, запас под таб-бар ставит mobile.css.
-   Пузыри — iOS/TickTick: акцентная пилюля пользователя справа, белая
-   карточка ассистента слева. */
+/* Экран-колонка: шапка и док с полем ввода закреплены, прокручивается только
+   лента сообщений. Высота — честный flex-фит, а не константа: когда вкладка
+   активна, #app сам становится колонкой на всю высоту окна, и экран отдаёт
+   ленте всё, что осталось от глобальной шапки. Константа вида
+   calc(100vh - 80px) уже пробовалась и ломалась на телефоне, где шапка
+   выше 120px: док уезжал под таб-бар. Пузыри — iOS/TickTick: акцентная
+   пилюля пользователя справа, белая карточка ассистента слева. */
 
-/* Каркас тот же, что у #prayer-view: отступ от глобальной шапки и плотный
-   фон — контент других вкладок не просвечивает */
-#assistant-view {
-  margin-top: 20px;
-  padding: 22px 26px 26px;
-  background-color: var(--bg);
-  animation: qaza-view-in .22s ease-out;
-}
-
-/* Парное правило к контейнеру: без него любой display у #assistant-view
-   перебил бы атрибут hidden, и экран оставался бы нарисованным поверх
-   остальных вкладок */
+/* Парное правило обязательно: display:flex у контейнера иначе перебивает
+   атрибут hidden, и неактивный экран просвечивает поверх других вкладок */
 #assistant-view[hidden] {
   display: none;
 }
 
-/* Шапка чата: прилипает к верху окна, когда лента длиннее экрана —
-   «Назад» и настройки всегда на виду */
+/* Пока открыт ассистент, каркас приложения — колонка на весь экран: глобальная
+   шапка и вкладка делят окно без прокрутки страницы. На телефоне шапку
+   прячет mobile.css, и чат занимает экран целиком */
+body.view-assistant #app {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  padding-bottom: 0;
+}
+
+#assistant-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  margin-top: 12px;
+  padding: 0 26px;
+  background-color: var(--bg);
+  animation: qaza-view-in .22s ease-out;
+}
+
+/* Шапка чата — закреплённая строка экрана: «Назад», заголовок и настройки
+   всегда на виду, лента прокручивается под ними */
 .assistant-head {
-  position: sticky;
-  top: 0;
-  z-index: 10;
-  background: var(--bg);
-  border-bottom: 1px solid var(--separator);
-  padding-bottom: 10px;
-  margin-bottom: 4px;
+  flex-shrink: 0;
+  padding-top: 4px;
 }
 
 .assistant-head-actions {
@@ -37,13 +46,19 @@
   gap: 8px;
 }
 
-/* Лента сообщений: колонка пузырей, растёт вместе с историей — экран
-   прокручивается страницей, как у других вкладок */
+/* Лента — единственный скроллируемый слой экрана: растягивается на всё
+   пространство между шапкой и доком. overscroll-behavior не пускает прокрутку
+   «наружу» экрана при упоре в край */
 #assistant-chat {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   display: flex;
   flex-direction: column;
   gap: 10px;
-  padding: 12px 2px 16px;
+  padding: 14px 2px 16px;
+  scrollbar-width: thin;
 }
 
 .assistant-msg {
@@ -61,6 +76,14 @@
     opacity: 0;
     transform: translateY(4px);
   }
+}
+
+/* Серия односторонних реплик сидит плотнее, как в iOS Messages: соседние
+   пузыри одного автора сдвигаются на 6px (при gap 10px остаётся 4px).
+   Браузеры без :has() просто видят равные 10px */
+.assistant-msg-user:has(+ .assistant-msg-user),
+.assistant-msg-bot:has(+ .assistant-msg-bot) {
+  margin-bottom: -6px;
 }
 
 /* Сообщение пользователя: акцентная пилюля справа, «хвост» в углу */
@@ -93,10 +116,11 @@
 
 /* --- Нижняя зона: подпись, чипы, поле ввода -------------------------------- */
 .assistant-dock {
+  flex-shrink: 0;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  padding-top: 10px;
+  gap: 10px;
+  padding: 12px 0 14px;
   border-top: 1px solid var(--separator);
   background: var(--bg);
 }
@@ -121,16 +145,18 @@
   display: none;
 }
 
+/* Чип — приглушённая пилюля акцента: читается кнопкой, но тише поля ввода */
 .assistant-chip {
   flex: 0 0 auto;
   min-height: 44px;
-  padding: 8px 14px;
-  border: 1px solid var(--border-soft);
+  padding: 8px 16px;
+  border: 0;
   border-radius: var(--radius-pill);
-  background: var(--surface-card);
+  background: var(--accent-soft);
   color: var(--accent);
   font: inherit;
   font-size: 13px;
+  font-weight: 500;
   cursor: pointer;
   transition: background-color .15s, color .15s, transform .15s ease;
 }
@@ -142,8 +168,8 @@
 
 @media (hover: hover) {
   .assistant-chip:hover {
-    border-color: var(--accent);
-    background: var(--accent-soft);
+    background: var(--surface-pressed);
+    color: var(--accent);
   }
 }
 
@@ -153,28 +179,82 @@
 }
 
 /* Поле отправки — колонка: сверху плашка прикреплённого PDF (когда есть),
-   снизу ряд «скрепка + поле + отправить» */
+   снизу капсула «скрепка + поле + отправить» */
 #assistant-form {
   display: flex;
   flex-direction: column;
   gap: 8px;
 }
 
+/* Капсула композера в стиле iOS/TickTick: серая пилюля, внутри скрепка и
+   круглая кнопка отправки. Фокус подсвечивает капсулу целиком, а не поле */
 .assistant-input-row {
   display: flex;
-  gap: 8px;
+  align-items: center;
+  gap: 6px;
+  padding: 5px 5px 5px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--surface-alt);
+  transition: background-color .15s, border-color .15s, box-shadow .15s;
 }
 
-.assistant-input-row .input {
+.assistant-input-row:focus-within {
+  border-color: var(--accent);
+  background: var(--surface-card);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+#assistant-input {
   flex: 1 1 auto;
   min-width: 0;
+  min-height: 36px;
+  padding: 0 6px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 15px;
 }
 
+/* Круглая кнопка отправки — акцентная, как в композере iOS */
 #assistant-send {
   flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: var(--on-accent);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  transition: transform .15s ease, filter .15s;
 }
 
-/* Пока идёт запрос, ввод заблокирован (анти-спам): приглушение по скиллу */
+#assistant-send:active {
+  transform: scale(0.94);
+}
+
+@media (hover: hover) {
+  #assistant-send:hover {
+    filter: brightness(1.08);
+  }
+}
+
+#assistant-send:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Пока идёт запрос или читается PDF, ввод заблокирован (анти-спам):
+   приглушение по скиллу */
 #assistant-input:disabled,
 #assistant-send:disabled {
   opacity: 0.5;
@@ -187,18 +267,33 @@
   pointer-events: none;
 }
 
-/* Скрепка — квадратная кнопка в рост поля: label прячет file-input,
+/* Скрепка — призрачная кнопка внутри капсулы: label прячет file-input,
    клик открывает системный выбор файла */
 .assistant-pdf-btn {
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 40px;
-  min-height: 34px;
-  font-size: 16px;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  font-size: 17px;
+  border-radius: var(--radius-pill);
+  color: var(--text-muted);
   cursor: pointer;
   user-select: none;
+  transition: background-color .15s, color .15s;
+}
+
+.assistant-pdf-btn:active {
+  background: var(--surface-pressed);
+}
+
+@media (hover: hover) {
+  .assistant-pdf-btn:hover {
+    color: var(--accent);
+    background: var(--surface-pressed);
+  }
 }
 
 .assistant-pdf-btn:focus-visible {
@@ -211,11 +306,11 @@
 .assistant-pdf-indicator {
   align-self: flex-start;
   max-width: 100%;
-  padding: 6px 12px;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--radius-md);
+  padding: 6px 14px;
+  border: 0;
+  border-radius: var(--radius-pill);
   background-color: var(--surface-alt);
-  color: var(--text);
+  color: var(--text-muted);
   font: inherit;
   font-size: 13px;
   text-align: left;
@@ -227,8 +322,8 @@
 
 @media (hover: hover) {
   .assistant-pdf-indicator:hover {
-    border-color: var(--danger);
     color: var(--danger);
+    background: var(--surface-pressed);
   }
 }
 

@@ -200,7 +200,10 @@ function buildMessages() {
 // хранилища и лишний вес кэша ни к чему), перезагрузка страницы его сбрасывает.
 // Прикрепляется к каждому запросу, пока файл не сброшен; в историю диалога
 // не попадает — только в системный промпт.
-const PDF_MAX_PAGES = 30;        // страницы читаются последовательно, до лимита
+// Потолок страниц 200: файлы «100+ страниц» из сценария тестирования раньше
+// резались на 30-й странице, и модель видела четверть документа. 200 страниц
+// читаются последовательно ~2–5 с; раньше упрётся символьный лимит.
+const PDF_MAX_PAGES = 200;
 const PDF_MAX_CHARS = 50000;     // ~15–20k токенов: не упирается в контекст API
 const PDFJS_BASE = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/';
 
@@ -208,17 +211,15 @@ let pdfContext = null;   // { name, pages, text } | null
 let pdfParsing = false;
 let pdfWorkerUrl = '';   // blob-URL воркера pdf.js, создаётся при первом PDF
 
-export function assistantPdfState() {
-  return { name: pdfContext && pdfContext.name, parsing: pdfParsing };
-}
-
 export function onAssistantPdfPick() {
   const fileInput = document.getElementById('assistant-pdf-input');
   const file = fileInput && fileInput.files && fileInput.files[0];
+  // Сброс значения — в любом пути, включая «занят»: иначе повторный выбор того
+  // же файла не стреляет change, и скрепка кажется сломанной
+  if (fileInput) fileInput.value = '';
   if (!file) return;
   if (pdfParsing) return;   // параллельный разбор не запускаем
   parsePdf(file);
-  fileInput.value = '';     // повторный выбор того же файла снова срабатывает
 }
 
 function setPdfIndicator(text) {
@@ -247,6 +248,7 @@ function appendPageText(buffer, pageText, charsUsed) {
 
 async function parsePdf(file) {
   pdfParsing = true;
+  updateAssistantControls();
   setPdfIndicator('Читаю ' + file.name + '…');
   try {
     // Динамический import: pdf.js нужен только при выборе файла, старт
@@ -307,6 +309,7 @@ async function parsePdf(file) {
     showToast('Не удалось прочитать PDF: ' + (e && e.message ? e.message : 'ошибка'));
   } finally {
     pdfParsing = false;
+    updateAssistantControls();
   }
 }
 
@@ -363,7 +366,7 @@ async function requestAssistantReply() {
     // TimeoutError/AbortError (30 с без ответа) видны только так.
     console.error('[assistant] запрос не дошёл:', e && e.name + ': ' + e.message, e);
     throw new Error(e && e.name === 'TimeoutError'
-      ? 'Сервис не ответил за 30 секунд. Попробуйте ещё раз.'
+      ? 'Сервис не ответил за 60 секунд. Попробуйте ещё раз.'
       : 'Нет связи с сервисом нейросети. Подробности — в консоли браузера (F12).');
   }
 
@@ -425,8 +428,10 @@ function renderHistory() {
     return;
   }
   for (let i = 0; i < history.length; i++) {
-    appendMessage(history[i].role === 'user' ? 'user' : 'bot', history[i].content);
+    appendMessage(history[i].role === 'user' ? 'user' : 'bot', history[i].content, true);
   }
+  // Одна прокрутка в конец вместо плавной на каждый пузырь
+  chat.scrollTop = chat.scrollHeight;
 }
 
 export function openAssistantKeyModal() {
@@ -511,14 +516,16 @@ export function onAssistantClear() {
 
 // Пузырь в ленте. Текст кладётся через textContent: реплики пользователя и
 // ответы модели не должны превращаться в разметку (защита от XSS).
-function appendMessage(kind, text) {
+function appendMessage(kind, text, silent) {
   const chat = document.getElementById('assistant-chat');
   if (!chat) return null;
   const msg = document.createElement('div');
   msg.className = 'assistant-msg assistant-msg-' + kind;
   msg.textContent = text;
   chat.appendChild(msg);
-  msg.scrollIntoView({ block: 'end', behavior: 'smooth' });
+  // silent=true: перерисовка истории скроллит ленту один раз в конце,
+  // а не дёргает плавный скролл на каждом из десятков пузырей
+  if (!silent) msg.scrollIntoView({ block: 'end', behavior: 'smooth' });
   return msg;
 }
 
@@ -532,26 +539,44 @@ function appendUserMessage(text) {
 // иначе быстрые повторные вопросы ловили 429), а Enter игнорится флагом.
 let assistantBusy = false;
 
-function setAssistantBusy(busy) {
-  assistantBusy = busy;
+// Один источник правды для состояния кнопок. Гасит отправку и скрепку и на
+// время запроса, и на время разбора PDF: раньше вопрос, отправленный пока
+// большой PDF ещё читался, уходил в API вообще без текста файла — модель
+// честно отвечала «в отрывке нет содержания». Ввод текста при разборе PDF
+// остаётся доступным: печатать можно, отправится после.
+function updateAssistantControls() {
   const input = document.getElementById('assistant-input');
   const send = document.getElementById('assistant-send');
   const pdfBtn = document.getElementById('assistant-pdf-btn');
-  if (input) input.disabled = busy;
-  if (send) send.disabled = busy;
-  if (pdfBtn) pdfBtn.classList.toggle('is-disabled', busy);
+  const blocked = assistantBusy || pdfParsing;
+  if (input) input.disabled = assistantBusy;
+  if (send) send.disabled = blocked;
+  if (pdfBtn) pdfBtn.classList.toggle('is-disabled', blocked);
 }
 
+function setAssistantBusy(busy) {
+  assistantBusy = busy;
+  updateAssistantControls();
+}
+
+// false — отправка не состоялась (занято/пусто/читается PDF), поле не чистится
 export function onAssistantSubmit(text) {
   const message = String(text || '').trim();
-  if (!message || assistantBusy) return;
+  if (!message) return false;
+  if (pdfParsing) {
+    showToast('PDF ещё читается — повторите отправку через пару секунд');
+    return false;
+  }
+  if (assistantBusy) return false;
   appendUserMessage(message);
   pushHistory('user', message);
   if (!readAssistantApiKey()) {
+    // Реплика принята в историю; ключ попросим и дождёмся повторной отправки
     openAssistantKeyModal();
-    return;
+  } else {
+    runAssistantReply();
   }
-  runAssistantReply();
+  return true;
 }
 
 async function runAssistantReply() {
@@ -589,13 +614,13 @@ async function runAssistantReply() {
   pushHistory('assistant', reply);
 }
 
-// Обработчик формы: гасит перезагрузку и чистит поле.
+// Обработчик формы: гасит перезагрузку; чистит поле только после принятой
+// отправки — блокировка (читается PDF / идёт запрос) текст не теряет
 export function onAssistantFormSubmit(event) {
   event.preventDefault();
   const input = document.getElementById('assistant-input');
   if (!input) return;
-  onAssistantSubmit(input.value);
-  input.value = '';
+  if (onAssistantSubmit(input.value)) input.value = '';
 }
 
 // Чипы делегированы по контейнеру: текст команды — в data-chip.

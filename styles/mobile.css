@@ -467,12 +467,12 @@
   }
 
   /* Вкладка каза: меньше паддингов, шапка в столбик. У уразы — то же самое:
-     она открывается из той же шапки и живёт внутри той же вкладки. Ассистент —
-     та же карточка в потоке: боковые 26px ПК-версии на телефоне лишние */
+     она открывается из той же шапки и живёт внутри той же вкладки.
+     Ассистент не входит: на телефоне это экран-колонка на всю высоту —
+     его каркас задан ниже отдельным блоком */
   #qaza-view,
   #fast-view,
-  #sleep-view,
-  #assistant-view {
+  #sleep-view {
     margin-top: 12px;
     padding: 14px 12px 18px;
     border-radius: var(--radius-md);
@@ -784,13 +784,68 @@
 
   /* Запас снизу под плавающий таб-бар (БАГ 3): последний текст на вкладках
      не уходит под капсулу. 100px = высота капсулы 64 + отступ 20 + запас,
-     плюс safe-area нижней «полки» iPhone */
+     плюс safe-area нижней «полки» iPhone. Ассистент не входит: его экран
+     сам задаёт запас каркасом ниже */
   #qaza-view, #fast-view, #sleep-view, #prayer-view, #prayer-settings-view,
-  #habits-edit-view, #assistant-view, #settings-view,
+  #habits-edit-view, #settings-view,
   #stats-view, #stats-qaza-view, #stats-habits-view, #stats-habit-view,
   #stats-fast-view, #stats-sleep-view,
   #schedule-view, #schedule-edit-view {
     padding-bottom: calc(100px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  /* --- Ассистент: экран-колонка на всю высоту ----------------------------- */
+  /* Чат на телефоне — отдельный «экран приложения», как в iOS Messages:
+     глобальная шапка (логотип, недели) прячется, чат с собственной шапкой
+     занимает окно целиком. Док закреплён над плавающим таб-баром: запас
+     84px = 64 капсула + 20 отступ, поле ввода никогда не уезжает под бар */
+  body.view-assistant #app {
+    display: flex;
+    flex-direction: column;
+    height: 100dvh;
+    padding: 0;
+  }
+
+  body.view-assistant #header {
+    display: none;
+  }
+
+  #assistant-view {
+    flex: 1 1 auto;
+    min-height: 0;
+    margin-top: 0;
+    padding: 0 12px calc(84px + env(safe-area-inset-bottom, 0px));
+    border-radius: 0;
+  }
+
+  /* Собственная шапка чата начинает экран: запас под чёлку/Dynamic Island —
+     viewport-fit=cover растягивает страницу под вырез */
+  #assistant-view .assistant-head {
+    padding-top: calc(8px + env(safe-area-inset-top, 0px));
+  }
+
+  /* Пузыри и капсула чуть крупнее настольных: палец вместо курсора */
+  #assistant-view .assistant-msg {
+    font-size: 16px;
+  }
+
+  #assistant-input {
+    font-size: 16px !important;  /* отключает автозум iOS при фокусе */
+    min-height: 40px;
+  }
+
+  #assistant-send {
+    width: 40px;
+    height: 40px;
+  }
+
+  .assistant-pdf-btn {
+    width: 40px;
+    height: 40px;
+  }
+
+  .assistant-input-row {
+    padding: 4px 4px 4px 5px;
   }
 
   /* Тап-цель кнопок на телефоне — 44px по гайдлайнам Apple. Документированные
