@@ -1,11 +1,12 @@
-const CACHE = 'youplanner-v22';
+const CACHE = 'youplanner-v23';
 const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon.svg',
   './styles/tokens.css', './styles/layout.css', './styles/buttons.css',
   './styles/table.css', './styles/cells.css', './styles/progress-circle.css',
   './styles/modal.css', './styles/qaza.css', './styles/day-view.css',
   './styles/schedule.css', './styles/sheets.css', './styles/prayer.css',
   './styles/toast.css', './styles/settings.css', './styles/stats.css',
-  './styles/habits-edit.css', './styles/assistant.css', './styles/mobile.css',
+  './styles/habits-edit.css', './styles/assistant.css', './styles/background.css',
+  './styles/mobile.css',
   // pdf.js для чтения PDF в ассистенте: локальные копии вместо CDN —
   // офлайн-PWA разбирает файлы без сети
   './js/vendor/pdf.min.mjs', './js/vendor/pdf.worker.min.mjs',

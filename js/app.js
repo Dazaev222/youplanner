@@ -1,6 +1,7 @@
 import { bus } from './core/bus.js';
 import { getWeekStart, toISODate } from './core/dates.js';
 import { cssEscape, showToast, syncSheetToKeyboard } from './core/dom.js';
+import { compressBgImage, loadBgBlob, loadBgDim, resetBg, saveBgBlob, saveBgDim } from './data/background.js';
 import { applyBackup, buildBackup, parseBackup } from './data/backup.js';
 import { loadHabits } from './data/habits.js';
 import { migrateDropTasks } from './data/migrations.js';
@@ -165,6 +166,10 @@ export function init() {
   // Стартовый раздел ставим тем же переключателем, что и кнопки:
   // так главная вкладка сразу подсвечена, а таб-бар скрыт на ПК
   switchAppView('main');
+
+  // Фон приложения из IndexedDB — асинхронно и молча: без записи фон
+  // просто отсутствует, ошибка хранилища не должна ронять запуск
+  restoreAppBackground().catch(function () { return null; });
 
   // Раз в минуту обновляются счётчик и окно намаза. Таймер один на приложение
   // и идёт всегда: вкладка может быть закрыта, а при её открытии экран всё
@@ -484,6 +489,18 @@ export function bindEvents() {
   // Экспорт и импорт данных
   const exportButton = document.getElementById('settings-export');
   if (exportButton) exportButton.addEventListener('click', exportData);
+
+  // Фон приложения: выбор файла, живой ползунок затемнения (сохранение на
+  // change — на input только переставляем переменную), сброс с подтверждением
+  const bgFile = document.getElementById('settings-bg-file');
+  if (bgFile) bgFile.addEventListener('change', onBgFilePick);
+  const bgDim = document.getElementById('settings-bg-dim');
+  if (bgDim) {
+    bgDim.addEventListener('input', onBgDimInput);
+    bgDim.addEventListener('change', onBgDimChange);
+  }
+  const bgReset = document.getElementById('settings-bg-reset');
+  if (bgReset) bgReset.addEventListener('click', onBgReset);
 
   const importButton = document.getElementById('settings-import');
   if (importButton) {
@@ -976,6 +993,119 @@ export function switchAppView(name) {
 export function renderSettingsView() {
   const version = document.getElementById('settings-version');
   if (version) version.textContent = 'Версия: ' + APP_VERSION + ' · сборка ' + APP_BUILD;
+  renderBackgroundSettings();
+}
+
+/* ---------- Фон приложения ------------------------------------------------ */
+
+// Живой objectURL текущего фона: при замене/сбросе старый отзывается,
+// иначе blob висит в памяти до перезагрузки страницы
+let bgObjectUrl = null;
+// Blob последней установки — превью в Настройках показывает его же,
+// без второго чтения IDB
+let bgCurrentBlob = null;
+
+// Применить фон к странице: URL картинки и плотность скрима — переменные
+// на :root, видимость слоёв — классом body.has-app-bg (без фона скрим
+// не должен затемнять обычный белый фон)
+function applyBackgroundToPage(url, dim) {
+  const root = document.documentElement;
+  root.style.setProperty('--app-bg-image', url ? 'url("' + url + '")' : 'none');
+  root.style.setProperty('--bg-scrim-opacity', String(Math.round(dim) / 100));
+  document.body.classList.toggle('has-app-bg', Boolean(url));
+}
+
+// Восстановление при старте: Blob из IndexedDB → objectURL → переменные.
+// Без IDB (песочница тестов) и без записи фон просто отсутствует
+async function restoreAppBackground() {
+  const blob = await loadBgBlob();
+  if (!blob) return;
+  bgCurrentBlob = blob;
+  bgObjectUrl = URL.createObjectURL(blob);
+  applyBackgroundToPage(bgObjectUrl, loadBgDim());
+}
+
+// Панель «Фон приложения» в Настройках: статус, миниатюра, слайдер, сброс
+function renderBackgroundSettings() {
+  const status = document.getElementById('settings-bg-status');
+  const preview = document.getElementById('settings-bg-preview');
+  const reset = document.getElementById('settings-bg-reset');
+  const dim = document.getElementById('settings-bg-dim');
+  const dimValue = document.getElementById('settings-bg-dim-value');
+  if (!status || !dim || !dimValue) return;
+  const has = Boolean(bgCurrentBlob);
+  if (status) {
+    status.textContent = has
+      ? 'Фото установлено · ' + Math.round(bgCurrentBlob.size / 1024) + ' КБ'
+      : 'Фото не установлено';
+  }
+  if (preview) {
+    preview.hidden = !has;
+    if (has) preview.src = bgObjectUrl || '';
+  }
+  if (reset) reset.hidden = !has;
+  dim.value = String(loadBgDim());
+  dimValue.textContent = dim.value + '%';
+}
+
+// Выбор файла: сжать под экран, положить в IDB, применить. Затемнение
+// сбрасывается на авто-уровень для нового фото (по его яркости)
+async function onBgFilePick() {
+  const input = document.getElementById('settings-bg-file');
+  const file = input && input.files && input.files[0];
+  if (input) input.value = '';   // повторный выбор того же файла снова сработает
+  if (!file) return;
+  if (!file.type || file.type.indexOf('image/') !== 0) {
+    showToast('Это не изображение — выберите фото');
+    return;
+  }
+  let packed;
+  try {
+    packed = await compressBgImage(file);
+  } catch (e) {
+    showToast('Не удалось обработать фото: ' + (e && e.message ? e.message : 'ошибка'));
+    return;
+  }
+  const saved = await saveBgBlob(packed.blob);
+  if (!saved) {
+    showToast('Браузер не дал сохранить фон: память недоступна');
+    return;
+  }
+  saveBgDim(packed.dim);
+  if (bgObjectUrl) URL.revokeObjectURL(bgObjectUrl);
+  bgCurrentBlob = packed.blob;
+  bgObjectUrl = URL.createObjectURL(packed.blob);
+  applyBackgroundToPage(bgObjectUrl, packed.dim);
+  renderBackgroundSettings();
+  showToast('Фон установлен · ' + Math.round(packed.blob.size / 1024) + ' КБ');
+}
+
+// Ползунок затемнения: живая перестановка переменной, сохранение — на change
+function onBgDimInput() {
+  const dim = document.getElementById('settings-bg-dim');
+  const dimValue = document.getElementById('settings-bg-dim-value');
+  if (!dim) return;
+  if (dimValue) dimValue.textContent = dim.value + '%';
+  applyBackgroundToPage(bgObjectUrl, Number(dim.value));
+}
+
+function onBgDimChange() {
+  const dim = document.getElementById('settings-bg-dim');
+  if (!dim) return;
+  saveBgDim(Number(dim.value));
+}
+
+// Сброс: убрать картинку из IDB и настройку затемнения из localStorage,
+// погасить слои. С подтверждением — действие мгновенное и необратимое
+async function onBgReset() {
+  if (!confirm('Убрать фото фона?')) return;
+  await resetBg();
+  if (bgObjectUrl) URL.revokeObjectURL(bgObjectUrl);
+  bgObjectUrl = null;
+  bgCurrentBlob = null;
+  applyBackgroundToPage(null, 100);
+  renderBackgroundSettings();
+  showToast('Фон сброшен');
 }
 
 

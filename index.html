@@ -34,9 +34,18 @@
   <link rel="stylesheet" href="styles/stats.css">
   <link rel="stylesheet" href="styles/habits-edit.css">
   <link rel="stylesheet" href="styles/assistant.css">
+  <link rel="stylesheet" href="styles/background.css">
   <link rel="stylesheet" href="styles/mobile.css">
 </head>
 <body>
+<!-- Фон приложения: два фиксированных слоя под контентом (z-index: -1).
+     Картинка — сжатая копия пользовательского фото из IndexedDB (URL
+     подставляется в --app-bg-image), поверх — белый скрим с переменной
+     плотностью --bg-scrim-opacity. Без установленного фото оба слоя
+     скрыты (нет класса has-app-bg у body). Локальная настройка устройства:
+     в синхронизацию и файлы копий не входит. -->
+<div id="app-bg-layer" aria-hidden="true"></div>
+<div id="app-bg-scrim" aria-hidden="true"></div>
 <!-- Разметка страницы YouPlanner. Только содержимое <body>: шапка, таблица привычек, модалка. -->
 <div id="app">
   <header id="header">
@@ -365,6 +374,33 @@
         <button type="button" id="settings-sleep" class="settings-row">
           <span>Цикл сна</span><span class="settings-chevron">›</span>
         </button>
+      </li>
+      <!-- Фон приложения: локальная настройка устройства — как API-ключ,
+           в синхронизацию и файлы копий не входит. Фото сжимается под экран
+           и хранится в IndexedDB; затемнение — в localStorage -->
+      <li id="settings-bg-item">
+        <p class="settings-row settings-bg-title">Фон приложения</p>
+        <div class="settings-bg-panel">
+          <div class="settings-bg-preview-row">
+            <img id="settings-bg-preview" class="settings-bg-preview" alt=""
+                 hidden>
+            <p id="settings-bg-status" class="settings-bg-status">
+              Фото не установлено</p>
+          </div>
+          <label class="btn btn-secondary settings-bg-upload" for="settings-bg-file"
+                 role="button" tabindex="0" aria-label="Загрузить фото фона">
+            Загрузить фото
+            <input type="file" id="settings-bg-file" accept="image/*" hidden>
+          </label>
+          <button type="button" id="settings-bg-reset" class="btn btn-secondary"
+                  hidden>Сбросить фон</button>
+          <label class="settings-bg-dim" for="settings-bg-dim">
+            <span class="settings-bg-dim-label">Затемнение</span>
+            <input type="range" id="settings-bg-dim" min="0" max="100" step="1"
+                   value="80" aria-label="Затемнение фона">
+            <span class="settings-bg-dim-value" id="settings-bg-dim-value">80%</span>
+          </label>
+        </div>
       </li>
       <li>
         <button type="button" id="settings-export" class="settings-row">
