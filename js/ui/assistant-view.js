@@ -180,11 +180,21 @@ function buildMessages() {
     + (context ? 'Данные пользователя:\n' + context : 'Данных пока нет.');
   // PDF прикрепляется к каждому запросу, пока файл не сброшен: модель отвечает
   // по документу, а история диалога остаётся лёгкой — текст в неё не пишется.
+  // Длинный документ уходит фрагментами, отобранными по последнему вопросу:
+  // весь текст не влезает в бюджет запроса, а нужное место модель видит.
   if (pdfContext) {
-    system = 'Вот текст из PDF-файла «' + pdfContext.name + '» (' + pdfContext.pages
-      + ' стр.):\n' + pdfContext.text
-      + '\n\nОтветь на вопрос пользователя, опираясь на этот текст. '
-      + 'Если ответа в тексте нет — так и скажи.\n\n' + system;
+    if (pdfContext.chunks) {
+      const selected = selectPdfChunks(lastUserQuestion(), pdfContext.chunks, PDF_MAX_CHARS);
+      system = 'Вот фрагменты длинного документа «' + pdfContext.name + '» ('
+        + pdfContext.pages + ' стр.), отобранные по вопросу пользователя:\n' + selected
+        + '\n\nОтветь на вопрос пользователя, опираясь на эти фрагменты. '
+        + 'Если ответа в них нет — так и скажи, не выдумывай.\n\n' + system;
+    } else {
+      system = 'Вот текст из PDF-файла «' + pdfContext.name + '» (' + pdfContext.pages
+        + ' стр.):\n' + pdfContext.text
+        + '\n\nОтветь на вопрос пользователя, опираясь на этот текст. '
+        + 'Если ответа в тексте нет — так и скажи.\n\n' + system;
+    }
   }
   return [{ role: 'system', content: system }].concat(
     readHistory().slice(-HISTORY_SEND)
@@ -202,9 +212,34 @@ function buildMessages() {
 // не попадает — только в системный промпт.
 // Потолок страниц 200: файлы «100+ страниц» из сценария тестирования раньше
 // резались на 30-й странице, и модель видела четверть документа. 200 страниц
-// читаются последовательно ~2–5 с; раньше упрётся символьный лимит.
+// читаются последовательно ~2–5 с.
 const PDF_MAX_PAGES = 200;
-const PDF_MAX_CHARS = 50000;     // ~15–20k токенов: не упирается в контекст API
+// Потолок ЧТЕНИЯ в память. Раньше он совпадал с запросным (50 000) — и длинный
+// документ обрезался на 50-й тысяче: модель не видела остальное никак. Теперь
+// читается до 200 000 символов, а в запрос уходит отобранное (§ умной нарезки).
+const PDF_READ_MAX_CHARS = 200000;
+// Бюджет PDF-текста в ОДНОМ запросе: ~15–20k токенов, не упирается в контекст API.
+const PDF_MAX_CHARS = 50000;
+// --- Умная нарезка (чанкинг) длинных PDF ------------------------------------
+// Документ больше PDF_MAX_CHARS не обрезается, а нарезается на фрагменты
+// (чанки) по абзацам. При вопросе по ключевым словам выбираются релевантные
+// фрагменты, и только они идут в системный промпт: модель видит нужное место
+// из документа любой толщины, а контекст запроса остаётся в бюджете.
+const PDF_CHUNK_SIZE = 1200;     // целевой размер фрагмента (~300–400 токенов)
+const PDF_CHUNK_MIN = 400;       // мельче не склеиваем: точность поиска дороже
+// Служебные слова вопроса: сами по себе они не ищутся, иначе вопрос
+// «что там про каза?» находил бы каждый фрагмент со словом «что».
+const PDF_STOPWORDS = ('и в во не что он на я с со как а то все она так его но да ты ' +
+  'к у же вы за бы по только ее мне было вот от меня еще нет о из ему теперь когда ' +
+  'даже ну вдруг ли если уже или ни быть был него до вас нибудь опять уж вам ведь ' +
+  'там потом себя ничего ей может они тут где есть надо ней для мы тебя их чем была ' +
+  'сам чтоб без будто чего раз тоже себе под будет тогда кто этот потому этого ' +
+  'какой совсем здесь этом один почти мой тем чтобы нее кажется сейчас были куда ' +
+  'зачем сказать всех никогда сегодня можно при наконец два об другой хоть после ' +
+  'над больше тот через эти нас про всего них какая много разве три четыре пусть ' +
+  'кроме пожалуйста скажи расскажи должен должна нужно можно the and for that with ' +
+  'this from have what when where your you are was were will they them their').split(' ');
+
 // pdf.js лежит локально (js/vendor/) и прекэшируется сервис-воркером:
 // офлайн-PWA продолжает читать PDF, без CDN. Абсолютный URL строится от
 // baseURI документа при первом PDF: динамический import резолвит
@@ -217,7 +252,7 @@ function vendorPdfUrl(file) {
   return new URL('js/vendor/' + file, document.baseURI).href;
 }
 
-let pdfContext = null;   // { name, pages, text } | null
+let pdfContext = null;   // { name, pages, text, chunks } | null
 let pdfParsing = false;
 
 export function onAssistantPdfPick() {
@@ -241,18 +276,187 @@ function setPdfIndicator(text) {
 function resetPdfContext() {
   pdfContext = null;
   setPdfIndicator('');
-}// Ранний выход при переполнении: страница читается целиком, но в буфер
+}
+// Текст страницы с сохранением переносов строк: item.hasEOL — перевод строки
+// внутри страницы, и именно он разбивает текст на абзацы, по которым идут
+// чанки. Старая склейка пробелом сливала документ в одну строку, и нарезать
+// его по абзацам было бы нечем.
+function pdfPageTextFromItems(content) {
+  let out = '';
+  const items = content.items;
+  for (let i = 0; i < items.length; i++) {
+    out += items[i].str;
+    out += items[i].hasEOL ? '\n' : ' ';
+  }
+  return out.replace(/[ \t]+/g, ' ').replace(/ ?\n ?/g, '\n').trim();
+}
+// Ранний выход при переполнении: страница читается целиком, но в буфер
 // попадает только остаток лимита — память не копит лишнее.
 // Счётчик charsUsed считает СИМВОЛЫ: раньше лимит сравнивался с числом
 // страниц (buffer.length), никогда не срабатывал, и текст мог уехать в
 // запрос далеко за лимитом.
 function appendPageText(buffer, pageText, charsUsed) {
-  const room = PDF_MAX_CHARS - charsUsed.value;
+  const room = PDF_READ_MAX_CHARS - charsUsed.value;
   if (room <= 0) return false;
   const piece = pageText.length > room ? pageText.slice(0, room) : pageText;
   buffer.push(piece);
   charsUsed.value += piece.length;
-  return charsUsed.value < PDF_MAX_CHARS;
+  return charsUsed.value < PDF_READ_MAX_CHARS;
+}
+
+// --- Нарезка и поиск по фрагментам -------------------------------------------
+
+// Делит текст на фрагменты по абзацам (строкам — перенос строки внутри
+// страницы это абзац). Абзацы докидываются в фрагмент, пока тот меньше
+// PDF_CHUNK_SIZE; мелкий хвост добирается до PDF_CHUNK_MIN, чтобы последний
+// фрагмент не был обрывком в три слова. Абзац-гигант (слитая таблица) режется
+// отдельно: по предложениям, а совсем без предложений — жёстким окном.
+export function chunkPdfText(text) {
+  if (!text) return [];
+  const paragraphs = String(text).split(/\n+/);
+  const chunks = [];
+  let buffer = '';
+  const flush = function () {
+    if (buffer) { chunks.push(buffer); buffer = ''; }
+  };
+  for (let i = 0; i < paragraphs.length; i++) {
+    const p = paragraphs[i].trim();
+    if (!p) continue;
+    if (p.length > PDF_CHUNK_SIZE * 2) {
+      flush();
+      const pieces = pdfSplitBigParagraph(p);
+      for (let k = 0; k < pieces.length; k++) chunks.push(pieces[k]);
+      continue;
+    }
+    if (buffer && buffer.length + p.length + 1 > PDF_CHUNK_SIZE
+        && buffer.length >= PDF_CHUNK_MIN) {
+      flush();
+    }
+    buffer = buffer ? buffer + '\n' + p : p;
+  }
+  flush();
+  return chunks;
+}
+// Резка одного длинного абзаца. Регулярка с lookbehind не годится: Safari
+// старше 16.4 падает на ней ещё при разборе файла. Поэтому границы
+// предложений ищутся проходом: знак конца предложения, за которым пробел.
+function pdfSplitBigParagraph(p) {
+  const sentences = [];
+  let start = 0;
+  for (let i = 0; i < p.length; i++) {
+    const ch = p.charAt(i);
+    if (ch !== '.' && ch !== '!' && ch !== '?' && ch !== '…') continue;
+    const next = i + 1 < p.length ? p.charAt(i + 1) : '';
+    if (next !== '' && next !== ' ' && next !== '\n') continue;
+    sentences.push(p.slice(start, i + 1));
+    start = i + 1;
+  }
+  if (start < p.length) sentences.push(p.slice(start));
+
+  const pieces = [];
+  let piece = '';
+  for (let i = 0; i < sentences.length; i++) {
+    const s = sentences[i].trim();
+    if (!s) continue;
+    if (s.length > PDF_CHUNK_SIZE) {
+      if (piece) { pieces.push(piece); piece = ''; }
+      for (let k = 0; k < s.length; k += PDF_CHUNK_SIZE) {
+        pieces.push(s.slice(k, k + PDF_CHUNK_SIZE));
+      }
+      continue;
+    }
+    if (piece && piece.length + s.length + 1 > PDF_CHUNK_SIZE) {
+      pieces.push(piece);
+      piece = '';
+    }
+    piece = piece ? piece + ' ' + s : s;
+  }
+  if (piece) pieces.push(piece);
+  return pieces;
+}
+// Слова вопроса в нижнем регистре без служебных: короткие (< 3) и стоп-слова
+// поиск не ведут, иначе каждый фрагмент «релевантен» любому вопросу.
+export function pdfQueryTokens(question) {
+  const words = String(question || '').toLowerCase().match(/[a-zа-яё0-9]+/g) || [];
+  const tokens = [];
+  for (let i = 0; i < words.length; i++) {
+    const w = words[i];
+    if (w.length < 3 || PDF_STOPWORDS.indexOf(w) !== -1) continue;
+    if (tokens.indexOf(w) === -1) tokens.push(w);
+  }
+  return tokens;
+}
+// Число вхождений needle в hay. indexOf-цикл вместо match: на 200 000
+// символов регулярный обход в разы тяжелее, а считать нужно на каждый фрагмент.
+function pdfCountOccurrences(hay, needle) {
+  if (!needle) return 0;
+  let count = 0;
+  let pos = hay.indexOf(needle);
+  while (pos !== -1) {
+    count++;
+    pos = hay.indexOf(needle, pos + needle.length);
+  }
+  return count;
+}
+// Фрагменты, отобранные под вопрос, одним куском текста. Слово ищется целиком
+// и усечённо (без последних двух букв у длинных слов): «напомин» ловит и
+// «напоминание», и «напоминания», не требуя настоящего стеммера.
+// Пустой результат поиска (вопрос из одних служебных слов) — начало документа:
+// оглавление и первые главы чаще прочего отвечают на общий вопрос. Выбранные
+// фрагменты склеиваются в порядке документа — связный контекст, а не мешок.
+export function selectPdfChunks(question, chunks, budget) {
+  if (!chunks || !chunks.length) return '';
+  if (budget === undefined) budget = PDF_MAX_CHARS;
+
+  const tokens = pdfQueryTokens(question);
+  const scores = new Array(chunks.length);
+  for (let i = 0; i < chunks.length; i++) scores[i] = 0;
+  if (tokens.length) {
+    const lower = new Array(chunks.length);
+    for (let i = 0; i < chunks.length; i++) lower[i] = chunks[i].toLowerCase();
+    for (let i = 0; i < chunks.length; i++) {
+      let score = 0;
+      for (let t = 0; t < tokens.length; t++) {
+        const token = tokens[t];
+        let hits = pdfCountOccurrences(lower[i], token);
+        if (!hits && token.length >= 5) {
+          hits = pdfCountOccurrences(lower[i], token.slice(0, token.length - 2));
+        }
+        score += hits;
+      }
+      scores[i] = score;
+    }
+  }
+
+  const order = chunks.map(function (_c, i) { return i; })
+    .sort(function (a, b) { return scores[b] - scores[a] || a - b; });
+
+  const picked = [];
+  let used = 0;
+  for (let k = 0; k < order.length; k++) {
+    const i = order[k];
+    if (!picked.length) {
+      // первый — самый релевантный (или просто первый), берётся всегда
+      picked.push(i);
+      used += chunks[i].length > budget ? budget : chunks[i].length + 2;
+      continue;
+    }
+    if (scores[i] <= 0) break;   // релевантные кончились
+    if (used + chunks[i].length + 2 > budget) break;
+    picked.push(i);
+    used += chunks[i].length + 2;
+  }
+  picked.sort(function (a, b) { return a - b; });
+  return picked.map(function (i) { return chunks[i]; }).join('\n\n');
+}
+// Последний вопрос пользователя из истории: по нему ищутся фрагменты.
+// В истории его нет (старт чата) — пустая строка, поиск вернёт начало документа.
+function lastUserQuestion() {
+  const history = readHistory();
+  for (let i = history.length - 1; i >= 0; i--) {
+    if (history[i].role === 'user') return history[i].content;
+  }
+  return '';
 }
 
 async function parsePdf(file) {
@@ -273,10 +477,8 @@ async function parsePdf(file) {
     for (let i = 1; i <= Math.min(doc.numPages, PDF_MAX_PAGES); i++) {
       const page = await doc.getPage(i);
       const content = await page.getTextContent();
-      const pageText = content.items.map(function (item) { return item.str; })
-        .join(' ').replace(/\s+/g, ' ').trim();
       pages = i;
-      if (!appendPageText(buffer, pageText, charsUsed)) {
+      if (!appendPageText(buffer, pdfPageTextFromItems(content), charsUsed)) {
         page.cleanup();
         break;
       }
@@ -287,11 +489,17 @@ async function parsePdf(file) {
     // Диагностика «читает только обложку»: видно, сколько страниц в файле
     // и сколько реально прочитано и вошло в лимит. До destroy(): у убитого
     // документа numPages уже не прочитать
+    const truncated = pages < doc.numPages || text.length >= PDF_READ_MAX_CHARS;
+    const finalText = truncated
+      ? text.replace(/\s+\S*$/, '') + ' …[текст обрезан]'
+      : text;
+    const long = finalText.length > PDF_MAX_CHARS;
+    const chunks = long ? chunkPdfText(finalText) : null;
     console.log('[assistant] PDF ' + file.name + ': страниц в файле ' + doc.numPages
-      + ', прочитано ' + pages + ', символов ' + text.length);
-    const truncated = pages < doc.numPages || text.length >= PDF_MAX_CHARS;
+      + ', прочитано ' + pages + ', символов ' + text.length
+      + (chunks ? ', фрагментов ' + chunks.length : ''));
     await doc.destroy();
-    if (!text) {
+    if (!finalText.trim()) {
       resetPdfContext();
       showErrorToast('В PDF не найдено текста — возможно, это сканы');
       return;
@@ -299,10 +507,17 @@ async function parsePdf(file) {
     pdfContext = {
       name: file.name,
       pages: pages,
-      text: truncated ? text.replace(/\s+\S*$/, '') + ' …[текст обрезан]' : text,
+      text: finalText,
+      // Длинный документ живёт фрагментами: в запрос уйдут только те, что
+      // отвечают на вопрос (умная нарезка). Короткий — как был, целиком.
+      chunks: chunks,
     };
-    setPdfIndicator('✕ ' + pdfContext.name + ' · ' + pages + ' стр. — нажмите, чтобы убрать');
-    showToast('PDF прочитан: ' + pages + ' стр.');
+    setPdfIndicator('✕ ' + pdfContext.name + ' · ' + pages + ' стр.'
+      + (chunks ? ' · нарезан: ' + chunks.length + ' фраг.' : '')
+      + ' — нажмите, чтобы убрать');
+    showToast(chunks
+      ? 'PDF прочитан: ' + pages + ' стр., нарезан на ' + chunks.length + ' фрагментов'
+      : 'PDF прочитан: ' + pages + ' стр.');
   } catch (e) {
     console.error('[assistant] разбор PDF не удался:', e);
     resetPdfContext();
@@ -465,13 +680,9 @@ export function closeAssistantKeyModal() {
   if (modal) modal.hidden = true;
 }
 
-// Escape закрывает модалку ключа — как нативные alert iOS. Состояние читается
-// в момент нажатия, поэтому один обработчик на document живёт вечно.
-export function onAssistantKeyKeydown(event) {
-  if (event.key !== 'Escape') return;
-  const modal = document.getElementById('assistant-key-modal');
-  if (modal && !modal.hidden) closeAssistantKeyModal();
-}
+// Escape для модалки ключа обрабатывает общий послойный обработчик в app.js:
+// у всех окон один жест «верхнее — первым», а не два независимых обработчика,
+// закрывавших две модалки одним нажатием.
 
 // Сохранение ключа: пустая строка ключом не считается — это «ключа нет»,
 // как и у уразы, где ноль и отсутствие счётчика различаются сознательно.
