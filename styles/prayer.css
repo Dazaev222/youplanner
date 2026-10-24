@@ -205,17 +205,26 @@
   gap: 8px;
   min-height: 44px;
   padding: 10px 16px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--border-soft);
   border-radius: var(--radius-pill);
-  background: var(--surface-alt);
+  background: var(--surface-card);
+  color: var(--text);
   cursor: pointer;
+  transition: background-color .15s, color .15s, transform .15s ease;
 }
 
+/* iOS-отклик: только нажатие, без :hover */
+.prayer-madhhab-option:active,
+.prayer-method-option:active {
+  transform: scale(0.98);
+}
+
+/* Выбранный метод/мазхаб: акцентная подложка и текст, без рамки */
 .prayer-madhhab-option.is-active,
 .prayer-method-option.is-active {
-  border-color: var(--accent);
+  border-color: transparent;
   background: var(--accent-soft);
-  color: var(--text);
+  color: var(--accent);
 }
 
 /* Радио скрыто визуально, но остаётся фокусируемым: кольцо фокуса рисуется
@@ -233,7 +242,7 @@
 .prayer-method-radio:focus-visible + span {
   outline: 2px solid var(--accent);
   outline-offset: 3px;
-  border-radius: 6px;
+  border-radius: var(--radius-sm);
 }
 
 .prayer-settings-block {

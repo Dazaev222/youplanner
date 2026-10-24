@@ -30,9 +30,11 @@
   transition: background-color .15s, border-color .15s, color .15s, transform .15s ease;
 }
 
-.cell-x:hover {
-  border-color: var(--danger);
-  color: var(--danger);
+@media (hover: hover) {
+  .cell-x:hover {
+    border-color: var(--danger);
+    color: var(--danger);
+  }
 }
 
 .cell-x.is-active {

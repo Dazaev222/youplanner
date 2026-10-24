@@ -136,6 +136,11 @@
     display: none;
   }
 
+  /* Ассистент тоже открывается таб-баром — кнопка в шапке лишняя (БАГ 1) */
+  #assistant-btn {
+    display: none;
+  }
+
   /* Статистика на телефоне открывается гамбургером — строка в Настройках
      там лишняя. Из разметки она не удаляется: на ПК это единственный вход
      в раздел, и порядок строк #settings-list держит набор export-import */
@@ -162,7 +167,7 @@
     height: 44px;
     padding: 0;
     border: 0;
-    border-radius: 8px;
+    border-radius: var(--radius-sm);
     background: transparent;
     color: var(--text);
     cursor: pointer;
@@ -183,13 +188,20 @@
     display: block;
   }
 
-  /* Подложка накрывает экран целиком, включая таб-бар (z-index 50).
-     Своего display у неё нет нигде: иначе он перебил бы атрибут hidden */
+  /* Подложка накрывает экран целиком, включая таб-бар. z-index выше
+     капсулы (1000): меню и затемнение стоят НАД таб-баром, а не под ним
+     (БАГ 2 — регресс слияния effects.css, там были 1100/1200) */
   #stats-menu-backdrop {
     position: fixed;
     inset: 0;
     background: rgba(0, 0, 0, .35);
-    z-index: 55;
+    z-index: 1050;
+  }
+
+  /* Открытый drawer полностью перекрывает таб-бар; для браузеров с :has()
+     капсула прячется совсем — аккуратнее, чем подсветка сквозь затемнение */
+  body:has(#stats-menu.is-open) #tab-bar {
+    display: none;
   }
 
   /* Заголовок панели — подпись, а не пункт: приглушён и не кликается */
@@ -462,9 +474,12 @@
     border-radius: var(--radius-md);
   }
 
+  /* Шапка в столбик: логотип, подпись недели, действия.
+     align-items: flex-start вместо stretch (БАГ 4): иначе «← Назад» и другие
+     кнопки шапок растягивались на всю ширину экрана */
   .qaza-head {
     flex-direction: column;
-    align-items: stretch;
+    align-items: flex-start;
     gap: 8px;
   }
 
@@ -590,7 +605,7 @@
   }
 
   .qaza-add-hint {
-    font-size: 12px;
+    font-size: 13px;
   }
 
   /* Нижний таб-бар: плавающая капсула в стиле Liquid Glass (TickTick/iOS):
@@ -694,12 +709,12 @@
     gap: 2px;
     padding: 6px 10px;
     border: 0;
+    border-radius: var(--radius-sm);
     background: transparent;
     color: var(--text-muted);
     font: inherit;
     font-size: 11px;
     cursor: pointer;
-    border-radius: 8px;
   }
 
   .tab-item.is-active {
@@ -761,6 +776,24 @@
   body.view-fast #mobile-day-tabs,
   body.view-settings #mobile-day-tabs {
     display: none;
+  }
+
+  /* Запас снизу под плавающий таб-бар (БАГ 3): последний текст на вкладках
+     не уходит под капсулу. 100px = высота капсулы 64 + отступ 20 + запас,
+     плюс safe-area нижней «полки» iPhone */
+  #qaza-view, #fast-view, #sleep-view, #prayer-view, #prayer-settings-view,
+  #habits-edit-view, #assistant-view, #settings-view,
+  #stats-view, #stats-qaza-view, #stats-habits-view, #stats-habit-view,
+  #stats-fast-view, #stats-sleep-view,
+  #schedule-view, #schedule-edit-view {
+    padding-bottom: calc(100px + env(safe-area-inset-bottom, 0px)) !important;
+  }
+
+  /* Тап-цель кнопок на телефоне — 44px по гайдлайнам Apple. Документированные
+     исключения ниже по файлу (#prayer-btn/#fast-btn на экране 320px)
+     перебиваются по id и остаются компактными */
+  .btn {
+    min-height: 44px;
   }
 }
 

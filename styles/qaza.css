@@ -85,8 +85,6 @@
   display: flex;
   flex-direction: column;
   gap: 8px;
-  /* Сцена для лёгкого 3D-подъёма карточек при наведении */
-  perspective: 900px;
 }
 
 .qaza-row,
@@ -106,15 +104,10 @@
   justify-content: space-between;
 }
 
-/* Подъём карточки при наведении. Только там, где есть настоящий курсор:
-   на тач-устройствах hover «залипает» после касания. */
-@media (hover: hover) {
-  .qaza-row:hover,
-  .qaza-plan-item:hover {
-    transform: translateZ(14px) rotateX(1.2deg);
-    box-shadow: var(--shadow);
-    border-color: var(--accent);
-  }
+/* Пункт плана нажимается (отметить выполнение): iOS-отклик — лёгкое
+   сжатие, без 3D-подъёмов и синих обводок при наведении */
+.qaza-plan-item:active {
+  transform: scale(0.98);
 }
 
 /* Текущий намаз: цвет плюс слово «сейчас» — информация не только цветом */
@@ -170,42 +163,39 @@
   display: inline-flex;
   align-items: center;
   gap: 8px;
+  min-height: 44px;
   padding: 8px 13px;
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-pill);
   background-color: var(--surface-card);
   color: var(--text);
   cursor: pointer;
-  transition: border-color .15s, background-color .15s,
-    transform .18s ease, box-shadow .18s ease;
+  transition: background-color .15s, color .15s, transform .15s ease;
 }
 
-@media (hover: hover) {
-  .qaza-start-option:hover,
-  .qaza-add-option:hover {
-    border-color: var(--accent);
-    transform: translateZ(8px);
-    box-shadow: var(--shadow);
-  }
+/* iOS-отклик: только нажатие, никакого :hover — на тач-экранах он залипает */
+.qaza-start-option:active,
+.qaza-add-option:active {
+  transform: scale(0.98);
 }
 
 /* Цвет плюс слово-пометка — выбор не передаётся только цветом */
 .qaza-start-option.is-cursor {
   background: var(--accent-soft);
   color: var(--accent);
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-color: transparent;
 }
 .qaza-add-option.is-picked {
   background: var(--accent-soft);
   color: var(--accent);
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-color: transparent;
 }
 
-/* Выполненная каза в таблице: та же акцентная пилюля, что у выбранных опций */
+/* Выполненная каза в таблице: та же акцентная пилюля без рамки */
 #qaza-done {
   background: var(--accent-soft);
   color: var(--accent);
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, transparent);
+  border-color: transparent;
 }
 
 /* Радио скрыто визуально, но остаётся фокусируемым с клавиатуры */
@@ -243,7 +233,7 @@
 /* Превью следующих пунктов плана: без кнопки, приглушённые */
 .qaza-plan-next {
   color: var(--text-tertiary);
-  font-size: 12px;
+  font-size: 13px;
 }
 
 .qaza-note {
@@ -420,11 +410,7 @@
   .cell:hover .cell-select,
   .cell:hover .cell-check,
   .cell:hover .cell-x,
-  .cell-level-btn:hover,
-  .qaza-row:hover,
-  .qaza-plan-item:hover,
-  .qaza-start-option:hover,
-  .qaza-add-option:hover {
+  .cell-level-btn:hover {
     transform: none;
   }
 }
@@ -434,9 +420,11 @@
   cursor: not-allowed;
 }
 
-.btn-secondary:disabled:hover {
-  border-color: var(--border);
-  color: var(--text);
+@media (hover: hover) {
+  .btn-secondary:disabled:hover {
+    border-color: var(--border-soft);
+    color: var(--text);
+  }
 }
 
 /* Ячейка каза в таблице: только чтение, значение приходит со вкладки */

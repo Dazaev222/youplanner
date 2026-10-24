@@ -99,9 +99,11 @@
   font-size: 13px;
 }
 
-#habit-list input:hover,
-#habit-list select:not(:disabled):hover {
-  border-color: var(--accent);
+@media (hover: hover) {
+  #habit-list input:hover,
+  #habit-list select:not(:disabled):hover {
+    border-color: var(--accent);
+  }
 }
 
 #habit-list select {
