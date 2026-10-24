@@ -9,7 +9,7 @@
 // {role, content}, хвост из 50 сообщений. В запрос уходит системный промпт
 // со снимком данных трекера и последние 20 реплик.
 
-import { showToast } from '../core/dom.js';
+import { showErrorToast, showToast } from '../core/dom.js';
 
 // Ключ = доступ ассистента к neuraldeep.ru. Имя ключа — часть каркаса:
 // следующему заходу менять его нельзя без миграции.
@@ -32,11 +32,11 @@ const ASSISTANT_DEFAULT_MODEL = ASSISTANT_MODELS[0].id;
 const REQUEST_TIMEOUT_MS = 60000;
 const HISTORY_KEEP = 50;   // сколько реплик хранить на устройстве
 const HISTORY_SEND = 20;   // сколько последних реплик уходит в запрос
-// Потолок снимка данных трекера в системном промпте. 15 000 символов —
-// разумный максимум: «Сводка недели» с богатой историей раньше упиралась
-// в меньший лимит, а вместе с PDF-текстом и историей остаётся запас
-// до контекста API (256k токенов у qwen)
-const CONTEXT_MAX_CHARS = 15000;
+// Потолок снимка данных трекера в системном промпте. 20 000 символов:
+// «Сводка недели» с богатой историей раньше упиралась в меньший лимит,
+// а вместе с PDF-текстом и историей остаётся запас до контекста API
+// (256k токенов у qwen)
+const CONTEXT_MAX_CHARS = 20000;
 
 export function readAssistantApiKey() {
   try {
@@ -205,11 +205,20 @@ function buildMessages() {
 // читаются последовательно ~2–5 с; раньше упрётся символьный лимит.
 const PDF_MAX_PAGES = 200;
 const PDF_MAX_CHARS = 50000;     // ~15–20k токенов: не упирается в контекст API
-const PDFJS_BASE = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/';
+// pdf.js лежит локально (js/vendor/) и прекэшируется сервис-воркером:
+// офлайн-PWA продолжает читать PDF, без CDN. Абсолютный URL строится от
+// baseURI документа при первом PDF: динамический import резолвит
+// относительный спецификатор от URL МОДУЛЯ (js/ui/), и строка 'js/vendor/…'
+// тянулась бы в js/ui/js/vendor. Абсолютный URL работает и на localhost,
+// и в подпапке GitHub Pages. import.meta не годится: тестовая песочница
+// гонит код классическим скриптом, где его синтаксис запрещён. Воркер
+// same-origin — workerSrc задаётся прямым путём, без blob-обёртки эпохи CDN
+function vendorPdfUrl(file) {
+  return new URL('js/vendor/' + file, document.baseURI).href;
+}
 
 let pdfContext = null;   // { name, pages, text } | null
 let pdfParsing = false;
-let pdfWorkerUrl = '';   // blob-URL воркера pdf.js, создаётся при первом PDF
 
 export function onAssistantPdfPick() {
   const fileInput = document.getElementById('assistant-pdf-input');
@@ -252,19 +261,10 @@ async function parsePdf(file) {
   setPdfIndicator('Читаю ' + file.name + '…');
   try {
     // Динамический import: pdf.js нужен только при выборе файла, старт
-    // PWA и офлайн-режим он не утяжеляет.
-    const pdfjs = await import(PDFJS_BASE + 'pdf.min.mjs');
-    // Воркер с CDN-URL не стартует: cross-origin Worker запрещён, и pdf.js
-    // молча висит на getDocument. Код воркера оборачивается в blob URL —
-    // он same-origin, и разбор страниц идёт вне UI-потока как положено.
-    if (!pdfWorkerUrl) {
-      const resp = await fetch(PDFJS_BASE + 'pdf.worker.min.mjs');
-      if (!resp.ok) throw new Error('не удалось загрузить pdf.js воркер');
-      const code = await resp.text();
-      pdfWorkerUrl = URL.createObjectURL(
-        new Blob([code], { type: 'text/javascript' }));
-    }
-    pdfjs.GlobalWorkerOptions.workerSrc = pdfWorkerUrl;
+    // PWA и офлайн-режим он не утяжеляет. Файл локальный и same-origin —
+    // воркер стартует прямым путём, без blob-обёртки
+    const pdfjs = await import(vendorPdfUrl('pdf.min.mjs'));
+    pdfjs.GlobalWorkerOptions.workerSrc = vendorPdfUrl('pdf.worker.min.mjs');
     const data = await file.arrayBuffer();
     const doc = await pdfjs.getDocument({ data: data }).promise;
     const buffer = [];
@@ -293,7 +293,7 @@ async function parsePdf(file) {
     await doc.destroy();
     if (!text) {
       resetPdfContext();
-      showToast('В PDF не найдено текста — возможно, это сканы');
+      showErrorToast('В PDF не найдено текста — возможно, это сканы');
       return;
     }
     pdfContext = {
@@ -306,7 +306,7 @@ async function parsePdf(file) {
   } catch (e) {
     console.error('[assistant] разбор PDF не удался:', e);
     resetPdfContext();
-    showToast('Не удалось прочитать PDF: ' + (e && e.message ? e.message : 'ошибка'));
+    showErrorToast('Не удалось прочитать PDF: ' + (e && e.message ? e.message : 'ошибка'));
   } finally {
     pdfParsing = false;
     updateAssistantControls();
@@ -559,23 +559,25 @@ function setAssistantBusy(busy) {
   updateAssistantControls();
 }
 
-// false — отправка не состоялась (занято/пусто/читается PDF), поле не чистится
+// false — отправка не состоялась (занято/читается PDF/нет ключа), поле не чистится
 export function onAssistantSubmit(text) {
   const message = String(text || '').trim();
   if (!message) return false;
   if (pdfParsing) {
-    showToast('PDF ещё читается — повторите отправку через пару секунд');
+    showErrorToast('PDF ещё читается — повторите отправку через пару секунд');
     return false;
   }
   if (assistantBusy) return false;
+  // Ключ проверяется ДО приёма реплики: без него запрос всё равно не уйдёт,
+  // а вопрос, осевший в истории, пришлось бы повторять после ввода ключа
+  if (!readAssistantApiKey()) {
+    showErrorToast('Сначала сохраните API-ключ — окно уже открыто');
+    openAssistantKeyModal();
+    return false;
+  }
   appendUserMessage(message);
   pushHistory('user', message);
-  if (!readAssistantApiKey()) {
-    // Реплика принята в историю; ключ попросим и дождёмся повторной отправки
-    openAssistantKeyModal();
-  } else {
-    runAssistantReply();
-  }
+  runAssistantReply();
   return true;
 }
 
