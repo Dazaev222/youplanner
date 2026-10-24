@@ -1,4 +1,4 @@
-const CACHE = 'youplanner-v16';
+const CACHE = 'youplanner-v17';
 const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon.svg',
   './styles/tokens.css', './styles/layout.css', './styles/buttons.css',
   './styles/table.css', './styles/cells.css', './styles/progress-circle.css',
@@ -45,6 +45,9 @@ self.addEventListener('activate', function (e) {
 });
 
 self.addEventListener('fetch', function (e) {
+  // Не-GET (POST к api.neuraldeep.ru, запись в Firebase) кэшировать нельзя:
+  // уходим в сеть без caches.match и respondWith.
+  if (e.request.method !== 'GET') return;
   const url = e.request.url;
   // Синхронизация с Firebase не кэшируется и не задерживается на caches.match
   if (url.indexOf('firebaseio.com') !== -1 || url.indexOf('firebase.google.com') !== -1) return;

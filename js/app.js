@@ -16,8 +16,8 @@ import { flushPendingSync, markCloudReady, scheduleSync, settleHabitsAfterSync, 
 import { onFastAdd, onFastDone, onFastEdit, onFastInitCancel, onFastInitSave, renderFastView, resetFastForm } from './ui/fast-view.js';
 import {
   closeAssistantKeyModal, onAssistantChipClick, onAssistantClear,
-  onAssistantFormSubmit, onAssistantKeyCancel, onAssistantKeySave,
-  openAssistantKeyModal, renderAssistantView,
+  onAssistantFormSubmit, onAssistantKeyCancel, onAssistantKeyKeydown,
+  onAssistantKeySave, openAssistantKeyModal, renderAssistantView,
 } from './ui/assistant-view.js';
 import { closeModal, onFormSubmit, onHabitListClick, onHabitsEditChange, onHabitsEditClick, openModal, renderHabitsEditList, setFormError, updateFormFields } from './ui/habits-edit.js';
 import { closeLevelSheet, onLevelPick } from './ui/level-sheet.js';
@@ -559,6 +559,9 @@ export function bindEvents() {
 
   const assistantKeyBackdrop = document.querySelector('.modal-backdrop[data-assistant-key-close]');
   if (assistantKeyBackdrop) assistantKeyBackdrop.addEventListener('click', closeAssistantKeyModal);
+
+  // Escape закрывает модалку ключа — тот же жест, что крестик и фон
+  document.addEventListener('keydown', onAssistantKeyKeydown);
 
   // Нижний таб-бар: тот же переключатель разделов, что и у кнопок шапки
   const tabItems = document.querySelectorAll('#tab-bar .tab-item');
