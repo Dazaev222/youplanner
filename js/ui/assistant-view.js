@@ -16,10 +16,11 @@ import { showToast } from '../core/dom.js';
 export const ASSISTANT_API_KEY = 'youplanner.api_key';
 export const ASSISTANT_HISTORY_KEY = 'youplanner.assistant_history';
 // OpenAI-совместимый эндпоинт neuraldeep.ru; модель — одна строка,
-// меняется здесь, если владелец переключит тариф. Из документации
-// NeuralDeep: базовые модели — gpt-oss-120b и qwen3.6-35b-a3b.
+// меняется здесь, если владелец переключит тариф. qwen3.6-35b-a3b —
+// единственная базовая модель «все тарифы · в РФ» (llms.txt NeuralDeep):
+// gpt-oss-120b живёт только на Starter/Pro вне РФ и даёт 404 мимо неё.
 const ASSISTANT_API_URL = 'https://api.neuraldeep.ru/v1/chat/completions';
-const ASSISTANT_MODEL = 'gpt-oss-120b';
+const ASSISTANT_MODEL = 'qwen3.6-35b-a3b';
 const REQUEST_TIMEOUT_MS = 30000;
 const HISTORY_KEEP = 50;   // сколько реплик хранить на устройстве
 const HISTORY_SEND = 20;   // сколько последних реплик уходит в запрос
