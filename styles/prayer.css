@@ -1,15 +1,9 @@
 /* Вкладка «Молитвы» ---------------------------------------------------- */
-/* Контейнеры прозрачные: серый фон страницы просвечивает. */
+/* Контейнеры прозрачные: фон страницы просвечивает. */
 #prayer-view,
 #prayer-settings-view {
   margin-top: 20px;
   padding: 22px 26px 26px;
-  border: none;
-  border-radius: 0;
-  background: transparent !important;
-  -webkit-backdrop-filter: none !important;
-  backdrop-filter: none !important;
-  box-shadow: none !important;
   animation: qaza-view-in .22s ease-out;
 }
 
@@ -36,7 +30,7 @@
 
 .prayer-ring-track {
   fill: none;
-  stroke: rgba(0, 98, 204, .16);
+  stroke: color-mix(in srgb, var(--accent) 16%, transparent);
   stroke-width: 12;
 }
 
@@ -93,8 +87,8 @@
   gap: 12px;
   padding: 12px 14px;
   border: none;
-  border-radius: 12px;
-  background: #FFFFFF !important;
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
@@ -156,11 +150,11 @@
   width: 100%;
   min-height: 44px;
   padding: 10px 12px;
-  border: 1px solid rgba(154, 175, 212, 0.6);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.75);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
   outline: none;
-  color: #1c1c22 !important;
+  color: var(--text);
   font: inherit;
   font-size: 16px;
   font-weight: 500;
@@ -168,13 +162,12 @@
 }
 
 /* Поля на экранах Настроек и Сна: та же плотная подложка, что у ячеек
-   недели, но без собственного размытия — иначе blur наслоился бы на blur
-   карточки. Галочки и файловый ввод исключены: это не текстовые поля. */
+   недели. Галочки и файловый ввод исключены: это не текстовые поля. */
 #settings-view input:not([type="checkbox"]):not([type="file"]),
 #sleep-view input:not([type="checkbox"]) {
-  border: 1px solid rgba(154, 175, 212, 0.6);
-  background: rgba(255, 255, 255, 0.75);
-  color: #1c1c22 !important;
+  border: 1px solid var(--border-soft);
+  background: var(--surface-card);
+  color: var(--text);
   font-weight: 500;
 }
 
@@ -213,7 +206,7 @@
   min-height: 44px;
   padding: 10px 16px;
   border: 1px solid var(--border);
-  border-radius: 999px;
+  border-radius: var(--radius-pill);
   background: var(--surface-alt);
   cursor: pointer;
 }

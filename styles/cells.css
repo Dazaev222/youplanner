@@ -19,8 +19,8 @@
   height: 20px;
   margin: 0 0 0 6px;
   padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 5px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
   background-color: var(--surface);
   color: var(--text-muted);
   font-size: 12px;
@@ -42,16 +42,15 @@
 }
 
 /* Поля внутри ячейки — той же формы, что пилюли вкладки каза: скругление,
-   полупрозрачная подложка, рамка. Подложка плотнее строки (0.75 против 0.5),
-   чтобы цифры читались на просвечивающем фоне, но своего blur у поля нет. */
+   плотная белая подложка, спокойная рамка. */
 .cell-number,
 .cell-select {
   padding: 4px 6px;
-  border: 1px solid rgba(154, 175, 212, 0.6);
-  border-radius: 10px;
-  background: rgba(255, 255, 255, 0.75);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
   outline: none;
-  color: #1c1c22 !important;
+  color: var(--text);
   font: inherit;
   font-size: 13px;
   font-weight: 500;
@@ -124,8 +123,8 @@
   min-height: 26px;
   margin-left: 3px;
   padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
   background-color: var(--surface-alt);
   color: var(--text-muted);
   line-height: 1;

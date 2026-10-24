@@ -5,9 +5,13 @@
   --bg: #FEFEFE;            /* основной фон страницы */
   --text: #1c1c22;          /* контраст к --surface #D8EDF7 ≈ 14:1 */
   --text-muted: #5c5c6e;
+  --text-tertiary: #8E8E93; /* подписи, шевроны, версии: третичный iOS-серый */
   --surface: #D8EDF7;       /* вторичный фон: карточки, панели, строки таблицы */
   --surface-alt: #EEF3FA;   /* вторичные поверхности: шапка таблицы, селекты, вторичные кнопки */
+  --surface-card: #FFFFFF;  /* плотные белые карточки: строки настроек, модалки, пузыри чата */
   --border: #9AAFD4;
+  --border-soft: #E5E5EA;   /* спокойные рамки карточек и полей на белом фоне */
+  --separator: rgba(60, 60, 67, 0.15); /* тонкие разделители списков, как в iOS */
   --accent: #5870C5;        /* кнопки, активные ссылки; белый текст на нём ≈ 4.5:1 */
   --accent-soft: #E8EDF8;   /* светлая подложка акцента: подсветка, выбранное состояние */
   --success: #1f9d63;
@@ -16,6 +20,12 @@
   --on-accent: #ffffff;     /* цвет текста на фоне --accent */
   --on-danger: #ffffff;     /* цвет текста на фоне --danger */
   --shadow: 0 8px 24px rgba(20, 20, 40, .12);
+
+  /* --- Радиусы: вся шкала скруглений, новые значения не заводить --- */
+  --radius-sm: 8px;         /* мелкие поля, кнопки сегментов */
+  --radius-md: 12px;        /* карточки-строки, инпуты, листы */
+  --radius-lg: 16px;        /* модалки, шторки, крупные карточки */
+  --radius-pill: 999px;     /* пилюли: кнопки, таб-бар, отметки */
 }
 
 /* --- База --- */
@@ -30,7 +40,7 @@ body {
 }
 
 body {
-  background-color: #F2F2F7;
+  background-color: var(--bg);
   min-height: 100dvh;
   color: var(--text);
   font-family: 'Inter', system-ui, sans-serif;
@@ -44,6 +54,5 @@ body {
 input,
 select,
 textarea {
-  color: #1c1c22 !important;
+  color: var(--text) !important;
 }
-
