@@ -12,6 +12,23 @@ import { BACKUP_LIMIT, FIREBASE_BACKUPS_URL, FIREBASE_URL, SYNC_DEBOUNCE_MS, SYN
 import { clearSyncPending, markSyncPending, normalizing, saveNormalized, syncPending, syncTs } from './state.js';
 import { hasData, validCloudFast, validCloudHabits, validCloudPrayer, validCloudQaza, validCloudQazaLog, validCloudRecords, validCloudSchedule, validCloudSleep } from './validators.js';
 export let syncTimer = null;
+// Сетевой таймаут обменов. Без него зависшее соединение (сеть отдаёт TCP,
+// но не отвечает) держит syncExchange открытым вечно: правки встают в
+// очередь и не уезжают, пока страница не перезагружена. Ручной контроллер,
+// а не AbortSignal.timeout: тот появился в Safari только в 15.4, и вызов
+// на старых iPhone кидал TypeError (см. js/ui/assistant-view.js).
+const SYNC_TIMEOUT_MS = 20000;
+function syncSignal() {
+  if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) {
+    return AbortSignal.timeout(SYNC_TIMEOUT_MS);
+  }
+  // Песочницы без Abort API (юнит-тесты, старые движки) ходят без сигнала:
+  // отсутствие таймаута лучше падения каждого обмена
+  if (typeof AbortController === 'undefined') return undefined;
+  const controller = new AbortController();
+  setTimeout(function () { controller.abort(); }, SYNC_TIMEOUT_MS);
+  return controller.signal;
+}
 // Идёт обмен с сервером. Свои же сохранения в этот момент не должны ставить
 // встречную отправку: loadQaza() зовёт saveQaza(), а syncToCloud() зовёт
 // loadQaza() — без флага каждая отправка планировала бы следующую.
@@ -161,7 +178,7 @@ export function cloudSnapshotWins(serverTs) {
 // тогда init отправляет наверх локальную копию.
 // Ошибки сети глотаем: приложение работает на локальных данных.
 export function syncFromCloud() {
-  return fetch(FIREBASE_URL + '.json')
+  return fetch(FIREBASE_URL + '.json', { signal: syncSignal() })
     .then(function (response) {
       if (!response.ok) throw new Error('нет ответа');
       return response.json();
@@ -234,6 +251,7 @@ export function syncToCloudNow() {
     .then(function (previous) {
       return fetch(FIREBASE_URL + '.json', {
         method: 'PUT',
+        signal: syncSignal(),
         headers: { 'Content-Type': 'application/json' },
         body: syncBody(ts, previous),
       }).then(function (response) {
@@ -290,8 +308,11 @@ export function syncBody(ts, previous) {
 // а не ребёнок данных: иначе PUT основного узла стирал бы копии (см. выше).
 // Возвращает предыдущий узел: не вышло записать копию — отправку это
 // не отменяет, и узел всё равно нужен вызывающему.
+// Два чтения — снимок данных и список бэкапов — независимы и ходят
+// параллельно: раньше они были последовательными, и каждое сохранение
+// платило тремя сетевыми кругами вместо двух (GET+GET → PUT).
 export function backupCloudSnapshot() {
-  return fetch(FIREBASE_URL + '.json')
+  return fetch(FIREBASE_URL + '.json', { signal: syncSignal() })
     .then(function (response) {
       if (!response.ok) throw new Error('нет ответа');
       return response.json();
@@ -305,21 +326,25 @@ export function backupCloudSnapshot() {
       const snapshot = Object.assign({}, previous);
       delete snapshot.backups;
 
-      return fetch(FIREBASE_BACKUPS_URL + '.json')
+      const readBackups = fetch(FIREBASE_BACKUPS_URL + '.json', { signal: syncSignal() })
         .then(function (response) {
           if (!response.ok) throw new Error('нет ответа');
           return response.json();
-        })
-        .then(function (list) {
-          const items = Array.isArray(list) ? list : [];
-          items.unshift(snapshot);
-          return fetch(FIREBASE_BACKUPS_URL + '.json', {
-            method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(items.slice(0, BACKUP_LIMIT)),
-          });
-        })
-        .then(function () { return previous; }, function () { return previous; });
+        });
+      const copyWrite = readBackups.then(function (list) {
+        const items = Array.isArray(list) ? list : [];
+        items.unshift(snapshot);
+        return fetch(FIREBASE_BACKUPS_URL + '.json', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(items.slice(0, BACKUP_LIMIT)),
+        });
+      });
+      // Успех копии и сам previous не зависят друг от друга: ждём оба,
+      // ошибка копии отправке не мешает (см. договор выше)
+      return Promise.all([copyWrite, Promise.resolve(previous)])
+        .then(function (results) { return results[1]; },
+          function () { return previous; });
     })
     .catch(function () { return null; });
 }
