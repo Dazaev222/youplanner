@@ -9,7 +9,7 @@
 // {role, content}, хвост из 50 сообщений. В запрос уходит системный промпт
 // со снимком данных трекера и последние 20 реплик.
 
-import { showErrorToast, showToast } from '../core/dom.js';
+import { handleNetworkError, showErrorToast, showToast } from '../core/dom.js';
 
 // Ключ = доступ ассистента к neuraldeep.ru. Имя ключа — часть каркаса:
 // следующему заходу менять его нельзя без миграции.
@@ -583,12 +583,16 @@ async function requestAssistantReply() {
       signal: guard.signal,
     });
   } catch (e) {
-    // Реальная причина — в консоль: TypeError (сеть/CORS/старый API),
-    // TimeoutError/AbortError (30 с без ответа) видны только так.
-    console.error('[assistant] запрос не дошёл:', e && e.name + ': ' + e.message, e);
-    throw new Error(e && e.name === 'TimeoutError'
-      ? 'Сервис не ответил за 60 секунд. Попробуйте ещё раз.'
-      : 'Нет связи с сервисом нейросети. Подробности — в консоли браузера (F12).');
+    // Реальная причина — в консоль (helper), текст — в ленту: TypeError
+    // (сеть/CORS/старый API) и TimeoutError/AbortError видны только так.
+    const timedOut = e && e.name === 'TimeoutError';
+    throw new Error(handleNetworkError(e, {
+      context: '[assistant]',
+      silent: true,
+      message: timedOut
+        ? 'Сервис не ответил за 60 секунд. Попробуйте ещё раз.'
+        : 'Нет связи с сервисом нейросети. Подробности — в консоли браузера (F12).',
+    }));
   } finally {
     // Таймер больше не нужен при любом исходе запроса
     guard.cancel();

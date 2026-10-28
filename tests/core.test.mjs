@@ -60,3 +60,23 @@ test('cssEscape обезвреживает кавычки и слэши для �
   // получают бэкслэш, разомкнуть селектор ими нельзя
   assert.equal(context.cssEscape('a"b\\c'), 'a\\"b\\\\c');
 });
+
+test('handleNetworkError: единый текст и подменяемый показ', () => {
+  const { context } = loadApp();
+  const shown = [];
+  const message = context.handleNetworkError(null, {
+    display: (text) => shown.push(text),
+  });
+  assert.equal(message,
+    'Нет связи с сервером. Проверьте интернет и попробуйте ещё раз.');
+  assert.deepEqual(shown, [message]);
+
+  const silent = [];
+  const custom = context.handleNetworkError(null, {
+    silent: true,
+    message: 'свой текст',
+    display: (text) => silent.push(text),
+  });
+  assert.equal(custom, 'свой текст');
+  assert.deepEqual(silent, []);
+});

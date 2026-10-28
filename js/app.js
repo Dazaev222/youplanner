@@ -1,6 +1,6 @@
 import { bus } from './core/bus.js';
 import { getWeekStart, toISODate } from './core/dates.js';
-import { cssEscape, showToast, syncSheetToKeyboard } from './core/dom.js';
+import { cssEscape, handleNetworkError, showToast, syncSheetToKeyboard } from './core/dom.js';
 import { compressBgImage, loadBgBlob, loadBgDim, resetBg, saveBgBlob, saveBgDim } from './data/background.js';
 import { applyBackup, buildBackup, parseBackup } from './data/backup.js';
 import { loadHabits } from './data/habits.js';
@@ -450,6 +450,11 @@ export function bindEvents() {
         settleHabitsAfterSync(result);
         appState.habits = loadHabits();
         renderMainView();
+        if (!result.reachable) {
+          // Сервер не ответил: «Обновлено» здесь было бы неправдой
+          handleNetworkError(null, { context: '[sync]', display: showSyncStatus });
+          return;
+        }
         showSyncStatus('Обновлено');
       });
     });
