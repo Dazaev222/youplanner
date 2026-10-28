@@ -193,40 +193,38 @@ export function cloudSnapshotWins(serverTs) {
 // Забирает данные с сервера. Промис разрешается true, если на сервере пусто —
 // тогда init отправляет наверх локальную копию.
 // Ошибки сети глотаем: приложение работает на локальных данных.
-export function syncFromCloud() {
-  return fetchWithTimeout(FIREBASE_URL + '.json')
-    .then(function (response) {
-      if (!response.ok) throw new Error('нет ответа');
-      return response.json();
-    })
-    .then(function (data) {
-      cloudReachable = true;
-      if (!data || typeof data !== 'object') {
-        return { reachable: true, serverEmpty: true };
-      }
+export async function syncFromCloud() {
+  try {
+    const response = await fetchWithTimeout(FIREBASE_URL + '.json');
+    if (!response.ok) throw new Error('нет ответа');
+    const data = await response.json();
 
-      const serverTs = Number(data.updatedAt) || 0;
-      if (!cloudSnapshotWins(serverTs)) {
-        // Снимок отвергнут, но привычек у нас нет вовсе — значит правка,
-        // которой сервер ещё не видел, привычек не касалась: править было
-        // нечего. Берём серверный список, иначе пустой уехал бы наверх
-        // и стёр серверный.
-        if (Array.isArray(data.habits) && hasData(data.habits) && !hasData(loadHabits())) {
-          localStorage.setItem(STORAGE_KEYS.habits, JSON.stringify(data.habits));
-          // Список только что сменился, а DOM остался прежним: обновление
-          // состояния и перерисовку делает подписчик sync:applied (§11v)
-          bus.emit('sync:applied');
-        }
-        return { reachable: true, serverEmpty: false };
-      }
+    cloudReachable = true;
+    if (!data || typeof data !== 'object') {
+      return { reachable: true, serverEmpty: true };
+    }
 
-      applyCloudData(data, serverTs);
+    const serverTs = Number(data.updatedAt) || 0;
+    if (!cloudSnapshotWins(serverTs)) {
+      // Снимок отвергнут, но привычек у нас нет вовсе — значит правка,
+      // которой сервер ещё не видел, привычек не касалась: править было
+      // нечего. Берём серверный список, иначе пустой уехал бы наверх
+      // и стёр серверный.
+      if (Array.isArray(data.habits) && hasData(data.habits) && !hasData(loadHabits())) {
+        localStorage.setItem(STORAGE_KEYS.habits, JSON.stringify(data.habits));
+        // Список только что сменился, а DOM остался прежним: обновление
+        // состояния и перерисовку делает подписчик sync:applied (§11v)
+        bus.emit('sync:applied');
+      }
       return { reachable: true, serverEmpty: false };
-    })
-    .catch(function () {
-      cloudReachable = false;
-      return { reachable: false, serverEmpty: false };
-    });
+    }
+
+    applyCloudData(data, serverTs);
+    return { reachable: true, serverEmpty: false };
+  } catch (e) {
+    cloudReachable = false;
+    return { reachable: false, serverEmpty: false };
+  }
 }
 // Единовременно идёт один обмен. Флаг syncing ниже защищает только
 // синхронные участки и не держится во время await fetch: параллельные
@@ -243,46 +241,52 @@ export function syncToCloud() {
     syncQueued = true;
     return syncExchange;
   }
-  function settled() {
-    syncExchange = null;
-    if (syncQueued) {
-      syncQueued = false;
-      syncToCloud();
+  async function run() {
+    try {
+      return await syncToCloudNow();
+    } finally {
+      syncExchange = null;
+      if (syncQueued) {
+        syncQueued = false;
+        syncToCloud();
+      }
     }
   }
-  syncExchange = syncToCloudNow().then(settled, settled);
+  syncExchange = run();
   return syncExchange;
 }
 // Отправляет локальные данные наверх. Ключ времени пишется ПОСЛЕ успешного
 // PUT: если отправка не дошла, локальная копия и в реальности не новее
 // серверной, и завышенный таймстамп помешал бы принять следующий снимок.
-export function syncToCloudNow() {
+export async function syncToCloudNow() {
   const ts = Date.now();
 
   // Сначала копия, потом запись: сбой копирования данные всё равно отправит.
   // Заодно оттуда берётся предыдущий узел — он нужен телу запроса.
-  return Promise.resolve()
-    .then(backupCloudSnapshot)
-    .catch(function () { return null; })
-    .then(function (previous) {
-      return fetchWithTimeout(FIREBASE_URL + '.json', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: syncBody(ts, previous),
-      }).then(function (response) {
-        if (response.ok) {
-          localStorage.setItem(SYNC_TS_KEY, String(ts));
-          if (!syncTimer) clearSyncPending();
-        }
-        return response;
-      });
-    })
-    .catch(function () {
-      // Сеть отвалилась на PUT: до следующего успешного ответа сервер
-      // считается недоступным, иначе cloudReachable залипает в true
-      // и syncBody перестаёт беречь серверные привычки при пустом локальном списке.
-      cloudReachable = false;
+  let previous = null;
+  try {
+    previous = await backupCloudSnapshot();
+  } catch (e) {
+    previous = null;
+  }
+
+  try {
+    const response = await fetchWithTimeout(FIREBASE_URL + '.json', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: syncBody(ts, previous),
     });
+    if (response.ok) {
+      localStorage.setItem(SYNC_TS_KEY, String(ts));
+      if (!syncTimer) clearSyncPending();
+    }
+    return response;
+  } catch (e) {
+    // Сеть отвалилась на PUT: до следующего успешного ответа сервер
+    // считается недоступным, иначе cloudReachable залипает в true
+    // и syncBody перестаёт беречь серверные привычки при пустом локальном списке.
+    cloudReachable = false;
+  }
 }
 // Тело PUT. Привычки берём локальные — кроме одного случая: сверка ни разу
 // не дошла до сервера, а список у нас пуст. Пустой список здесь значит
@@ -326,42 +330,39 @@ export function syncBody(ts, previous) {
 // Два чтения — снимок данных и список бэкапов — независимы и ходят
 // параллельно: раньше они были последовательными, и каждое сохранение
 // платило тремя сетевыми кругами вместо двух (GET+GET → PUT).
-export function backupCloudSnapshot() {
-  return fetchWithTimeout(FIREBASE_URL + '.json')
-    .then(function (response) {
-      if (!response.ok) throw new Error('нет ответа');
-      return response.json();
-    })
-    .then(function (previous) {
-      if (!previous || typeof previous !== 'object') return null;
+export async function backupCloudSnapshot() {
+  try {
+    const response = await fetchWithTimeout(FIREBASE_URL + '.json');
+    if (!response.ok) throw new Error('нет ответа');
+    const previous = await response.json();
+    if (!previous || typeof previous !== 'object') return null;
 
-      // Снимки старой схемы могли тащить вложенный backups от прежнего
-      // расположения: в новую историю его не кладём, иначе копии
-      // вкладывались бы друг в друга и раздували узел.
-      const snapshot = Object.assign({}, previous);
-      delete snapshot.backups;
+    // Снимки старой схемы могли тащить вложенный backups от прежнего
+    // расположения: в новую историю его не кладём, иначе копии
+    // вкладывались бы друг в друга и раздували узел.
+    const snapshot = Object.assign({}, previous);
+    delete snapshot.backups;
 
-      const readBackups = fetchWithTimeout(FIREBASE_BACKUPS_URL + '.json')
-        .then(function (response) {
-          if (!response.ok) throw new Error('нет ответа');
-          return response.json();
-        });
-      const copyWrite = readBackups.then(function (list) {
-        const items = Array.isArray(list) ? list : [];
-        items.unshift(snapshot);
-        return fetchWithTimeout(FIREBASE_BACKUPS_URL + '.json', {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify(items.slice(0, BACKUP_LIMIT)),
-        });
+    // Копия — best-effort: её сбой отправку не отменяет, но previous
+    // всё равно нужен вызывающему.
+    try {
+      const backupsResponse = await fetchWithTimeout(FIREBASE_BACKUPS_URL + '.json');
+      if (!backupsResponse.ok) throw new Error('нет ответа');
+      const list = await backupsResponse.json();
+      const items = Array.isArray(list) ? list : [];
+      items.unshift(snapshot);
+      await fetchWithTimeout(FIREBASE_BACKUPS_URL + '.json', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(items.slice(0, BACKUP_LIMIT)),
       });
-      // Успех копии и сам previous не зависят друг от друга: ждём оба,
-      // ошибка копии отправке не мешает (см. договор выше)
-      return Promise.all([copyWrite, Promise.resolve(previous)])
-        .then(function (results) { return results[1]; },
-          function () { return previous; });
-    })
-    .catch(function () { return null; });
+    } catch (e) {
+      // не вышло записать копию — данные всё равно отправит syncToCloudNow
+    }
+    return previous;
+  } catch (e) {
+    return null;
+  }
 }
 // Отложенная отправка: несколько правок подряд дают один PUT
 export function scheduleSync() {
