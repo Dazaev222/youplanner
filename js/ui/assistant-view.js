@@ -551,18 +551,24 @@ function friendlyError(status) {  if (status === 401 || status === 403) {
 
 // AbortSignal.timeout появился в Safari только в 15.4: на старых iPhone
 // его вызов кидал TypeError, и каждый запрос мгновенно падал в «Нет связи».
-// Ручной контроллер работает везде, поэтому подстраховываем им.
-function timeoutSignal(ms) {
+// Ручной контроллер работает везде, поэтому подстраховываем им. Таймер
+// возвращается вместе с сигналом: короткий ответ иначе оставлял бы его
+// жить до истечения таймаута.
+function timeoutGuard(ms) {
   if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) {
-    return AbortSignal.timeout(ms);
+    return { signal: AbortSignal.timeout(ms), cancel: function () {} };
   }
   const controller = new AbortController();
-  setTimeout(function () { controller.abort(); }, ms);
-  return controller.signal;
+  const timer = setTimeout(function () { controller.abort(); }, ms);
+  return {
+    signal: controller.signal,
+    cancel: function () { clearTimeout(timer); },
+  };
 }
 
 async function requestAssistantReply() {
   let response;
+  const guard = timeoutGuard(REQUEST_TIMEOUT_MS);
   try {
     response = await fetch(ASSISTANT_API_URL, {
       method: 'POST',
@@ -574,7 +580,7 @@ async function requestAssistantReply() {
         model: readAssistantModel(),
         messages: buildMessages(),
       }),
-      signal: timeoutSignal(REQUEST_TIMEOUT_MS),
+      signal: guard.signal,
     });
   } catch (e) {
     // Реальная причина — в консоль: TypeError (сеть/CORS/старый API),
@@ -583,6 +589,9 @@ async function requestAssistantReply() {
     throw new Error(e && e.name === 'TimeoutError'
       ? 'Сервис не ответил за 60 секунд. Попробуйте ещё раз.'
       : 'Нет связи с сервисом нейросети. Подробности — в консоли браузера (F12).');
+  } finally {
+    // Таймер больше не нужен при любом исходе запроса
+    guard.cancel();
   }
 
   if (!response.ok) {
