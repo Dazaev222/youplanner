@@ -181,6 +181,19 @@ export function applyCloudData(data, ts) {
   // чистым расходом — при сверах «ничего нового» частых.
   if (cloudApplied) bus.emit('sync:applied');
 }
+// Чей снимок применяем. Чистое правило без чтения глобального состояния:
+// серверный снимок должен быть строго новее и не спорить с правкой, которой
+// сервер ещё не видел (pending). Ранние возвраты вместо вложенных условий.
+export function serverSnapshotWins(serverTs, localTs, pending) {
+  const server = Number(serverTs) || 0;
+  const local = Number(localTs) || 0;
+
+  if (!server) return false;          // метки нет — не новее
+  if (server <= local) return false;
+  if (pending) return false;          // правка ещё не ушла наверх
+  return true;
+}
+
 // Уступает ли локальное состояние серверному снимку. Правило одно на все
 // сверки: снимок должен быть новее и не спорить с правкой, которой сервер
 // ещё не видел. Второе условие закрывает гонку первых секунд: правка, сделанная
@@ -188,7 +201,18 @@ export function applyCloudData(data, ts) {
 // syncToCloud), а пришедший снимок её уже не трогает — иначе правка пропала бы,
 // не дойдя до сервера. Другое устройство получит её при следующей сверке.
 export function cloudSnapshotWins(serverTs) {
-  return serverTs > syncTs() && !syncPending;
+  return serverSnapshotWins(serverTs, syncTs(), syncPending);
+}
+// Снимок отвергнут, но привычек у нас нет вовсе — значит правка, которой
+// сервер ещё не видел, привычек не касалась: править было нечего. Берём
+// серверный список, иначе пустой уехал бы наверх и стёр серверный.
+function adoptServerHabitsIfLocalEmpty(data) {
+  if (!Array.isArray(data.habits) || !hasData(data.habits)) return;
+  if (hasData(loadHabits())) return;
+  localStorage.setItem(STORAGE_KEYS.habits, JSON.stringify(data.habits));
+  // Список только что сменился, а DOM остался прежним: обновление
+  // состояния и перерисовку делает подписчик sync:applied (§11v)
+  bus.emit('sync:applied');
 }
 // Забирает данные с сервера. Промис разрешается true, если на сервере пусто —
 // тогда init отправляет наверх локальную копию.
@@ -206,16 +230,7 @@ export async function syncFromCloud() {
 
     const serverTs = Number(data.updatedAt) || 0;
     if (!cloudSnapshotWins(serverTs)) {
-      // Снимок отвергнут, но привычек у нас нет вовсе — значит правка,
-      // которой сервер ещё не видел, привычек не касалась: править было
-      // нечего. Берём серверный список, иначе пустой уехал бы наверх
-      // и стёр серверный.
-      if (Array.isArray(data.habits) && hasData(data.habits) && !hasData(loadHabits())) {
-        localStorage.setItem(STORAGE_KEYS.habits, JSON.stringify(data.habits));
-        // Список только что сменился, а DOM остался прежним: обновление
-        // состояния и перерисовку делает подписчик sync:applied (§11v)
-        bus.emit('sync:applied');
-      }
+      adoptServerHabitsIfLocalEmpty(data);
       return { reachable: true, serverEmpty: false };
     }
 
