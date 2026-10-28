@@ -87,3 +87,14 @@ test('вызов во время обмена доезжает повторны�
     'повторный обмен после очереди не состоялся');
   assert.equal(fetchImpl.stats.mainPuts(), 2);
 });
+
+test('выбор снимка: чистое правило timestamp и pending-правки', () => {
+  const { context } = loadApp();
+
+  assert.equal(context.serverSnapshotWins(200, 100, false), true);
+  assert.equal(context.serverSnapshotWins(100, 200, false), false);
+  assert.equal(context.serverSnapshotWins(200, 200, false), false);
+  assert.equal(context.serverSnapshotWins(200, 100, true), false);
+  assert.equal(context.serverSnapshotWins(0, 0, false), false);
+  assert.equal(context.serverSnapshotWins('200', 100, false), true);
+});
