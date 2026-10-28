@@ -1,4 +1,4 @@
-const CACHE = 'youplanner-v24';
+const CACHE = 'youplanner-v25';
 const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon.svg',
   './styles/tokens.css', './styles/layout.css', './styles/buttons.css',
   './styles/table.css', './styles/cells.css', './styles/progress-circle.css',
@@ -25,11 +25,13 @@ const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './ic
   './js/ui/habits-edit.js',
   './js/ui/stats-view.js',
   './js/app.js',
-  './js/core/bus.js', './js/core/dates.js', './js/core/storage.js', './js/core/dom.js',
+  './js/core/bus.js', './js/core/dates.js', './js/core/db.js',
+  './js/core/storage.js', './js/core/dom.js',
   './js/data/storage.js', './js/data/schedule.js', './js/data/habits.js',
   './js/data/migrations.js', './js/data/records.js', './js/data/qaza.js',
   './js/data/prayer.js', './js/data/fast.js', './js/data/sleep.js',
-  './js/data/stats.js', './js/data/backup.js', './js/data/ui.js',
+  './js/data/stats.js', './js/data/backup.js', './js/data/background.js',
+  './js/data/ui.js',
   './js/data/sync.js',
   './js/sync/state.js', './js/sync/validators.js'];
 
