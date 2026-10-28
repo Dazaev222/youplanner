@@ -18,16 +18,32 @@ export let syncTimer = null;
 // а не AbortSignal.timeout: тот появился в Safari только в 15.4, и вызов
 // на старых iPhone кидал TypeError (см. js/ui/assistant-view.js).
 const SYNC_TIMEOUT_MS = 20000;
-function syncSignal() {
+// Таймаут обмена. В fallback-ветке (Safari < 15.4) таймер создаётся вручную,
+// поэтому возвращается пара «сигнал + отмена»: без clearTimeout короткий
+// успешный обмен оставлял бы за собой живой таймер до 20 с.
+function syncGuard() {
   if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) {
-    return AbortSignal.timeout(SYNC_TIMEOUT_MS);
+    return { signal: AbortSignal.timeout(SYNC_TIMEOUT_MS), cancel: function () {} };
   }
   // Песочницы без Abort API (юнит-тесты, старые движки) ходят без сигнала:
   // отсутствие таймаута лучше падения каждого обмена
-  if (typeof AbortController === 'undefined') return undefined;
+  if (typeof AbortController === 'undefined') {
+    return { signal: undefined, cancel: function () {} };
+  }
   const controller = new AbortController();
-  setTimeout(function () { controller.abort(); }, SYNC_TIMEOUT_MS);
-  return controller.signal;
+  const timer = setTimeout(function () { controller.abort(); }, SYNC_TIMEOUT_MS);
+  return {
+    signal: controller.signal,
+    cancel: function () { clearTimeout(timer); },
+  };
+}
+// fetch с таймаутом: таймер снимается, как только запрос завершился любым
+// исходом (успех, ошибка, прерывание). Сам таймаут по-прежнему прерывает
+// зависший запрос.
+function fetchWithTimeout(url, options) {
+  const guard = syncGuard();
+  const request = Object.assign({}, options, { signal: guard.signal });
+  return fetch(url, request).finally(guard.cancel);
 }
 // Идёт обмен с сервером. Свои же сохранения в этот момент не должны ставить
 // встречную отправку: loadQaza() зовёт saveQaza(), а syncToCloud() зовёт
@@ -178,7 +194,7 @@ export function cloudSnapshotWins(serverTs) {
 // тогда init отправляет наверх локальную копию.
 // Ошибки сети глотаем: приложение работает на локальных данных.
 export function syncFromCloud() {
-  return fetch(FIREBASE_URL + '.json', { signal: syncSignal() })
+  return fetchWithTimeout(FIREBASE_URL + '.json')
     .then(function (response) {
       if (!response.ok) throw new Error('нет ответа');
       return response.json();
@@ -249,9 +265,8 @@ export function syncToCloudNow() {
     .then(backupCloudSnapshot)
     .catch(function () { return null; })
     .then(function (previous) {
-      return fetch(FIREBASE_URL + '.json', {
+      return fetchWithTimeout(FIREBASE_URL + '.json', {
         method: 'PUT',
-        signal: syncSignal(),
         headers: { 'Content-Type': 'application/json' },
         body: syncBody(ts, previous),
       }).then(function (response) {
@@ -312,7 +327,7 @@ export function syncBody(ts, previous) {
 // параллельно: раньше они были последовательными, и каждое сохранение
 // платило тремя сетевыми кругами вместо двух (GET+GET → PUT).
 export function backupCloudSnapshot() {
-  return fetch(FIREBASE_URL + '.json', { signal: syncSignal() })
+  return fetchWithTimeout(FIREBASE_URL + '.json')
     .then(function (response) {
       if (!response.ok) throw new Error('нет ответа');
       return response.json();
@@ -326,7 +341,7 @@ export function backupCloudSnapshot() {
       const snapshot = Object.assign({}, previous);
       delete snapshot.backups;
 
-      const readBackups = fetch(FIREBASE_BACKUPS_URL + '.json', { signal: syncSignal() })
+      const readBackups = fetchWithTimeout(FIREBASE_BACKUPS_URL + '.json')
         .then(function (response) {
           if (!response.ok) throw new Error('нет ответа');
           return response.json();
@@ -334,7 +349,7 @@ export function backupCloudSnapshot() {
       const copyWrite = readBackups.then(function (list) {
         const items = Array.isArray(list) ? list : [];
         items.unshift(snapshot);
-        return fetch(FIREBASE_BACKUPS_URL + '.json', {
+        return fetchWithTimeout(FIREBASE_BACKUPS_URL + '.json', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify(items.slice(0, BACKUP_LIMIT)),
