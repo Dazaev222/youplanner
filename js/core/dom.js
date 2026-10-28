@@ -52,6 +52,20 @@ export function showErrorToast(message) {
   showToast(message);
 }
 
+// Единый текст сетевого сбоя и единая точка его показа. display(message) —
+// куда вывести (по умолчанию error-тост); silent — только вернуть текст,
+// показать его вызывающий решит сам (например, в ленте ассистента).
+export const NETWORK_ERROR_TEXT =
+  'Нет связи с сервером. Проверьте интернет и попробуйте ещё раз.';
+
+export function handleNetworkError(error, options) {
+  const opts = options || {};
+  if (error) console.error((opts.context || '[сеть]') + ':', error);
+  const message = opts.message || NETWORK_ERROR_TEXT;
+  if (!opts.silent) (opts.display || showErrorToast)(message);
+  return message;
+}
+
 // Показ и скрытие элемента по id
 export function setHidden(id, hidden) {
   const element = document.getElementById(id);
