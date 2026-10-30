@@ -194,6 +194,28 @@ const sleepCases = [
       assert.equal(context.sleepAverageDurationMin('не массив'), null);
     },
   },
+  {
+    name: 'sleepWakeMinutes: факт сильнее плана, недостающее поле — план',
+    run: (context) => {
+      // realWake задан — подъём читается по факту
+      assert.equal(
+        context.sleepWakeMinutes({ realWake: '05:30', actualWake: '06:00' }),
+        '05:30',
+      );
+
+      // realWake null — «встал по плану», берётся actualWake
+      assert.equal(
+        context.sleepWakeMinutes({ realWake: null, actualWake: '06:00' }),
+        '06:00',
+      );
+
+      // Пары realWake нет вовсе (запись версий 1–3) — тоже actualWake
+      assert.equal(context.sleepWakeMinutes({ actualWake: '06:00' }), '06:00');
+
+      // Нет обоих полей — undefined, а не падение: чистый доступ ?? без валидации
+      assert.equal(context.sleepWakeMinutes({}), undefined);
+    },
+  },
 ];
 
 for (const scenario of sleepCases) {

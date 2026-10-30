@@ -106,9 +106,10 @@ export function validCloudSleep(sleep) {
 }
 // Расписание с сервера — один раздел, минимум: объект без массива, у которого
 // все четыре типа дня — массивы. Пункты не глубже проверяются: битый пункт
-// не должен терять раздел целиком, подправить его может loadSchedule, а
-// повторно сохранённая копия пройдёт через saveSchedule. Раздел без ключа
-// schedule (снимок старой версии) отвергается этим же правилом.
+// не должен терять раздел целиком, отбросить его при чтении может
+// loadSchedule (как validSleepHistory), а повторно сохранённая копия пройдёт
+// через saveSchedule. Раздел без ключа schedule (снимок старой версии)
+// отвергается этим же правилом.
 export function validCloudSchedule(data) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
   if (!Array.isArray(data.weekday) || !Array.isArray(data.weekend) ||

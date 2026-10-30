@@ -104,3 +104,16 @@ test('sw.js: каждый файл из ASSETS существует', () => {
   assert.deepEqual(missing, [], 'в ASSETS есть несуществующие файлы: '
     + missing.join(', '));
 });
+
+// Аудит 2026-10-31: icon-512.png из manifest.json не кэшировался — офлайн-
+// установка PWA оставалась без иконки. Манифест и precache не должны расходиться
+test('sw.js: все иконки из manifest.json есть в ASSETS', () => {
+  const manifest = JSON.parse(readFileSync(join(ROOT, 'manifest.json'), 'utf8'));
+  const assets = new Set(readAssets().map(normalize));
+
+  const missing = (manifest.icons || [])
+    .map((icon) => normalize(icon.src))
+    .filter((src) => src && !assets.has(src));
+  assert.deepEqual(missing, [], 'иконок из manifest.json нет в ASSETS: '
+    + missing.join(', '));
+});
