@@ -7,14 +7,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadApp } from './helpers/load-app.mjs';
+import { habit } from './helpers/fixtures.mjs';
 
 test('правка данных эмитит data:changed и взводит syncPending', () => {
   const app = loadApp();
   app.run("bus.on('data:changed', () => { globalThis.__changed = (globalThis.__changed || 0) + 1; })");
 
-  const ok = app.context.saveHabits([
-    { id: 'h1', name: 'Фаджр', type: 'boolean', unit: '', goal: null },
-  ]);
+  const ok = app.context.saveHabits([habit()]);
   assert.equal(ok, true);
   assert.equal(app.run('globalThis.__changed'), 1,
     'событие data:changed не дошло до подписчика');
@@ -37,7 +36,7 @@ test('safeSetItem при отказе хранилища эмитит storage:er
 
 test('syncFromCloud применяет снимок и эмитит sync:applied', async () => {
   const snapshot = {
-    habits: [{ id: 'h1', name: 'Фаджр', type: 'boolean', unit: '', goal: null }],
+    habits: [habit()],
     records: {},
     updatedAt: 1000,
   };
@@ -65,8 +64,8 @@ test('шина переживает отписку прямо из обрабо�
     globalThis.__count = 0;
     const off = bus.on('data:changed', () => { globalThis.__count++; off(); });
   `);
-  app.context.saveHabits([{ id: 'h1', name: 'Фаджр', type: 'boolean', unit: '', goal: null }]);
-  app.context.saveHabits([{ id: 'h1', name: 'Фаджр', type: 'boolean', unit: '', goal: null }]);
+  app.context.saveHabits([habit()]);
+  app.context.saveHabits([habit()]);
   assert.equal(app.run('globalThis.__count'), 1,
     'обработчик сработал после собственной отписки (или не сработал вовсе)');
 });
