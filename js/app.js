@@ -1,6 +1,6 @@
 import { bus } from './core/bus.js';
 import { getWeekStart, toISODate } from './core/dates.js';
-import { cssEscape, handleNetworkError, showToast, syncSheetToKeyboard } from './core/dom.js';
+import { cssEscape, handleNetworkError, showErrorToast, showToast, syncSheetToKeyboard } from './core/dom.js';
 import { compressBgImage, loadBgBlob, loadBgDim, resetBg, saveBgBlob, saveBgDim } from './data/background.js';
 import { applyBackup, buildBackup, parseBackup } from './data/backup.js';
 import { loadHabits } from './data/habits.js';
@@ -460,10 +460,19 @@ export function bindEvents() {
     });
   }
 
+  // Ручная отправка. syncToCloud разрешается Response при успешном PUT и
+  // undefined при сетевом сбое: «Отправлено» без ответа сервера — ложь,
+  // поэтому сбой виден как error-тост, а не как ложная удача
   const syncPush = document.getElementById('settings-sync-push');
   if (syncPush) {
     syncPush.addEventListener('click', function () {
-      syncToCloud().then(function () { showSyncStatus('Отправлено'); });
+      syncToCloud().then(function (result) {
+        if (result && result.ok) {
+          showSyncStatus('Отправлено');
+          return;
+        }
+        showErrorToast('Не отправлено: нет связи с сервером');
+      });
     });
   }
 

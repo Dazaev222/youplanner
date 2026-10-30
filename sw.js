@@ -1,5 +1,7 @@
-const CACHE = 'youplanner-v25';
-const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon.svg',
+const CACHE = 'youplanner-v26';
+// Иконки — все из manifest.json: отсутствующая в кэше иконка ломала бы
+// офлайн-установку PWA (аудит 2026-10-31: icon-512.png не кэшировался)
+const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon-512.png', './icon.svg',
   './styles/tokens.css', './styles/layout.css', './styles/buttons.css',
   './styles/table.css', './styles/cells.css', './styles/progress-circle.css',
   './styles/modal.css', './styles/qaza.css', './styles/day-view.css',
@@ -68,7 +70,9 @@ self.addEventListener('fetch', function (e) {
       fetch(e.request).then(function (resp) {
         if (resp && resp.ok) {
           const copy = resp.clone();
-          caches.open(CACHE).then(function (c) { c.put(e.request, copy); });
+          // Запись в кэш — побочный эффект мимо respondWith: без waitUntil
+          // SW может уснуть до её завершения, и офлайн-копия не обновится
+          e.waitUntil(caches.open(CACHE).then(function (c) { c.put(e.request, copy); }));
         }
         return resp;
       }).catch(function () { return caches.match(e.request); })

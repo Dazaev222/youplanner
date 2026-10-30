@@ -84,11 +84,24 @@ export const DEFAULT_SCHEDULE = {
   ],
 };
 
+// Годный пункт расписания — объект со строковыми непустыми time и text:
+// ровно это читают рендер (renderScheduleView) и редактор (сортировка по
+// time). По образцу validSleepHistory битый пункт тихо отбрасывается:
+// один битый пункт из серверного снимка не должен ронять раздел целиком
+function validScheduleItem(item) {
+  if (!item || typeof item !== 'object' || Array.isArray(item)) return false;
+  if (typeof item.time !== 'string' || item.time === '') return false;
+  return typeof item.text === 'string' && item.text !== '';
+}
+
 // Возвращает расписание как оно лежит в хранилище. Ключа нет, пустая строка,
 // битый JSON, не-объект или неполные четыре типа дня — всё читается как
 // расписание по умолчанию: DEFAULT_SCHEDULE остаётся отсылкой, пока человек
-// не отредактирует его через Настройки. Копия, а не ссылка: правки
-// из редактора не должны мутировать сам константный список.
+// не отредактирует его через Настройки. Битые пункты внутри типов (не-объекты,
+// без строковых time и text) тихо отбрасываются: серверный снимок вида
+// { weekday: [null] } доезжал до renderScheduleView и ронял его TypeError'ом
+// на item.time. Копия, а не ссылка: правки из редактора не должны мутировать
+// сам константный список.
 export function loadSchedule() {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.schedule);
@@ -97,6 +110,9 @@ export function loadSchedule() {
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return JSON.parse(JSON.stringify(DEFAULT_SCHEDULE));
     if (!Array.isArray(parsed.weekday) || !Array.isArray(parsed.weekend) ||
         !Array.isArray(parsed.fasting) || !Array.isArray(parsed.physical)) return JSON.parse(JSON.stringify(DEFAULT_SCHEDULE));
+    for (let i = 0; i < SCHEDULE_TYPES.length; i++) {
+      parsed[SCHEDULE_TYPES[i]] = parsed[SCHEDULE_TYPES[i]].filter(validScheduleItem);
+    }
     return parsed;
   } catch (e) {
     return JSON.parse(JSON.stringify(DEFAULT_SCHEDULE));

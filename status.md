@@ -1,19 +1,19 @@
 # YouPlanner — текущий статус
 
-Обновлено: 2026-10-29
+Обновлено: 2026-10-31
 
 ## Расположение
 
 - Папка: `C:\Users\Admin\Desktop\youplanner-new`
 - Код: `index.html` (разметка) + `styles/` (CSS по секциям) + `js/`
   (ES-модули: `core/`, `data/`, `sync/`, `ui/`, `vendor/`); сборки нет.
-- PWA: `manifest.json`, `sw.js` (кэш `youplanner-v25`), иконки.
+- PWA: `manifest.json`, `sw.js` (кэш `youplanner-v26`), иконки.
 - Документация: `README.md`, `Spec.md`, `status.md`.
 - Репозиторий: https://github.com/Dazaev222/youplanner
 - Сайт: https://dazaev222.github.io/youplanner/
-- Firebase-узел: https://youplanner-5c2f5-default-rtdb.firebaseio.com/youplanner-a7x9k2
+- Firebase-узел: https://youplanner-5c2f5-default-rtdb.firebaseio.com/youplanner-d8aaea12-60e6-4ac9-973c-46c19b387cd9
 - Корень бэкапов: `FIREBASE_BACKUPS_URL` =
-  https://youplanner-5c2f5-default-rtdb.firebaseio.com/youplanner-a7x9k2-backups
+  https://youplanner-5c2f5-default-rtdb.firebaseio.com/youplanner-d8aaea12-60e6-4ac9-973c-46c19b387cd9-backups
   (старый вложенный `youplanner-a7x9k2/backups` не используется).
 
 ## Работает
@@ -42,7 +42,7 @@
   устройства; выбор хранится в youplanner.stats.period как объект с пятью
   полями), категория «Каза-намазы»: сумма каза за период, средний темп,
   текущая серия, общий остаток, график по дням; категория «Привычки»: список
-  двенадцати строк с процентом за период и карточка привычки — средний
+  строк с процентом за период и карточка привычки — средний
   процент, текущая и лучшая серия, всего отметок, график по дням
   и сетка-календарь; категория «Ураза»:
   остаток, возмещено и добавлено за период, начало истории и график
@@ -76,6 +76,15 @@
   и импорт в файл, PWA на iPhone.
 
 ## Заходы
+
+- 2026-10-31 — Ночная сессия: PDF-фолбэк отбора чанков заменён равномерной
+  сеткой по документу + нормализация ё/е + поиск по границе слова
+  (assistant-view); детектор полускана с предупреждением; арифметика
+  статистики сна/каза/уразы перенесена в data-слой (sleepEntriesInPeriod,
+  sleepMinutesByDay, sleepAverageDurationMin, qazaDayCounts, fastPeriodStats,
+  sleepWakeMinutes); изоляция падений bus-подписчиков; валидация пунктов
+  расписания в loadSchedule; честный статус кнопки синхронизации; SW:
+  icon-512.png в precache, waitUntil на cache.put, кэш v26. Тесты 64 → 90.
 
 - 2026-10-28 — аудит Opus 5.5 (закрыт): YP-02 — цепочки `.then` в
   `js/sync/sync.js` переведены на async/await; YP-03 — чистое правило выбора
@@ -350,17 +359,19 @@
 
 youplanner.habits, records, qaza, sync.ts, mainView, stats.period,
 prayer, migrations, youplanner.qaza.fast, youplanner.qaza.log,
-youplanner.sleep, youplanner.api_key, youplanner.assistant_model,
+youplanner.schedule, youplanner.sleep, youplanner.api_key,
+youplanner.assistant_model,
 youplanner.assistant_history (ключи ассистента — только устройство),
 youplanner.app_bg (затемнение фона; фото фона — Blob в IndexedDB).
 
 ## Тесты
 
-Штатный прогон (без браузера): `npm test` → **64/64** в 12 файлах
+Штатный прогон (без браузера): `npm test` → **90/90** в 14 файлах
 `tests/*.test.mjs` (smoke, bus, backup, sync, core, modules, timers, xss,
-assistant, sw-assets, sleep, qaza-done). Покрывают граф модулей и висячие id, шину, бэкапы,
-single-flight синхронизации, XSS-экранирование, fallback-таймеры fetch,
-PDF-чанкинг и покрытие `ASSETS` в `sw.js`.
+assistant, sw-assets, sleep, qaza-done, schedule, fast). Покрывают граф
+модулей и висячие id, шину, бэкапы, single-flight синхронизации,
+XSS-экранирование, fallback-таймеры fetch, PDF-чанкинг и покрытие
+`ASSETS` в `sw.js`.
 
 Браузерный chaos-E2E: `node tests/e2e/chaos.e2e.mjs` → **7/7** (Playwright,
 внешняя сеть заблокирована, Firebase — заглушка): недоступный Firebase,
@@ -376,7 +387,7 @@ PDF-чанкинг и покрытие `ASSETS` в `sw.js`.
 
 1. Правки — в `index.html`, `styles/` или `js/`; сборки нет.
 2. При изменении списка ассетов поднять `CACHE` в `sw.js` (сейчас
-   `youplanner-v25`) и прогнать `sw-assets` вместе с `npm test`.
+   `youplanner-v26`) и прогнать `sw-assets` вместе с `npm test`.
 3. `npm test` и `node tests/e2e/chaos.e2e.mjs`.
 4. Коммит и push в `main`; GitHub Pages публикует статику.
 5. iPhone: закрыть иконку и открыть заново — новый Service Worker

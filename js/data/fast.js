@@ -152,3 +152,49 @@ export function fastRemainingLabel(n) {
 
   return 'Ураза: осталось ' + n + ' ' + word;
 }
+// Сводка уразы за период одним проходом по истории (§5): значения по дням,
+// суммы «Возмещено» и «Добавлено» и начало истории. Правило раньше жило
+// целиком в отрисовке статистики: dayIndex, разбор по источникам, минимум
+// даты — это арифметика хранилища, и view не должен её повторять, иначе
+// следующая цифра на другом экране посчитала бы период иначе. values[i]
+// отвечает dates[i]: день ищется через dayIndex, значение дня складывается,
+// а не присваивается — appendFastHistory пишет по событию на запись, но
+// правило суммы не вымирает вместе с этим обещанием. В значения и в done
+// попадают только done-события: «Возместить 1 день» — факт; add растит
+// остаток и идёт в added, set — перезапись счётчика, графику «Возмещено
+// по дням» чужая. since — минимум по ВСЕЙ истории, а не по периоду:
+// «История копится с» не должно меняться от выбранного окна, поэтому дата
+// снимается до отсечения чужих дней. Истории нет или она не массив —
+// нули и since null: читать нечего
+export function fastPeriodStats(fast, dates) {
+  const values = [];
+  if (!Array.isArray(dates)) return { values: values, done: 0, added: 0, since: null };
+
+  const dayIndex = {};
+  for (let i = 0; i < dates.length; i++) {
+    dayIndex[dates[i]] = i;
+    values.push(0);
+  }
+
+  let done = 0;
+  let added = 0;
+  let since = null;
+
+  const history = fast && Array.isArray(fast.history) ? fast.history : [];
+  for (let i = 0; i < history.length; i++) {
+    const event = history[i];
+    // Начало истории — по всей истории, а не по периоду
+    if (since === null || event.date < since) since = event.date;
+
+    const day = dayIndex[event.date];
+    if (day === undefined) continue;
+    if (event.source === FAST_SOURCE_DONE) {
+      done += event.count;
+      values[day] += event.count;
+    } else if (event.source === FAST_SOURCE_ADD) {
+      added += event.count;
+    }
+  }
+
+  return { values: values, done: done, added: added, since: since };
+}

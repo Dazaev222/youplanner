@@ -1,10 +1,10 @@
 import { escapeHtml } from '../core/dom.js';
-import { FAST_HISTORY_MIN, FAST_SOURCE_ADD, FAST_SOURCE_DONE, loadFast } from '../data/fast.js';
+import { FAST_HISTORY_MIN, fastPeriodStats, loadFast } from '../data/fast.js';
 import { loadHabits } from '../data/habits.js';
-import { loadQazaLog, qazaLogDoneByDay, qazaTotalRemaining } from '../data/qaza.js';
+import { loadQazaLog, qazaDayCounts, qazaTotalRemaining } from '../data/qaza.js';
 import { calcProgress, loadRecords } from '../data/records.js';
-import { loadSleep, sleepAverageDurationMin, sleepAverageMinutes, sleepEntriesInPeriod, sleepFormatDuration, sleepMinutesByDay, sleepTimeLabel, sleepTimeMinutes } from '../data/sleep.js';
-import { habitBestStreak, habitCurrentStreak, habitMarkedDays, habitsAveragePercent, loadStatsPeriod, qazaDoneOn, qazaStreak, statsPeriodDates } from '../data/stats.js';
+import { loadSleep, sleepAverageDurationMin, sleepAverageMinutes, sleepEntriesInPeriod, sleepFormatDuration, sleepMinutesByDay, sleepTimeLabel, sleepTimeMinutes, sleepWakeMinutes } from '../data/sleep.js';
+import { habitBestStreak, habitCurrentStreak, habitMarkedDays, habitsAveragePercent, loadStatsPeriod, qazaStreak, statsPeriodDates } from '../data/stats.js';
 import { ensureQazaState, getQazaState } from './qaza-view.js';
 import { markStatsPeriod, setStatsValue, statsChartMarkup, statsHabitGridMarkup, statsSummaryMarkup } from './stats-helpers.js';
 // Панель открыта — на панели класс is-open: по нему едет transform,
@@ -98,30 +98,19 @@ export function renderStatsQazaView() {
   const dates = statsPeriodDates(loadStatsPeriod('qaza'), today);
   const records = loadRecords();
 
-  // Источник за день зависит от журнала (§5). Журнала нет — как было: поле h6
-  // в записях дня, единственный свидетель каза за день. Журнал заведён — за
-  // дни до since всё ещё h6, а с since и позже считает журнал: стек очереди
-  // живёт только за сегодня, журнал же по датам не чистится
+  // Источник за день — «журнал с since, до него поле h6» — решает data-слой:
+  // qazaDayCounts отдаёт значения по дням и сумму, view только раскладывает
+  // готовое по местам
   const log = loadQazaLog();
-  const logDone = qazaLogDoneByDay(log);
-
-  let done = 0;
-  const values = [];
-  for (let i = 0; i < dates.length; i++) {
-    const count = log && dates[i] >= log.since
-      ? (logDone[dates[i]] || 0)
-      : qazaDoneOn(records, dates[i]);
-    values.push(count);
-    done += count;
-  }
+  const counts = qazaDayCounts(records, log, dates);
 
   ensureQazaState();
-  const average = done / dates.length;
+  const average = counts.total / dates.length;
 
   const summary = document.getElementById('stats-qaza-summary');
   if (summary) {
     summary.innerHTML = statsSummaryMarkup([
-      ['done', 'Выполнено за период', String(done)],
+      ['done', 'Выполнено за период', String(counts.total)],
       ['average', 'Средний темп в день', average.toFixed(1).replace('.', ',')],
       ['streak', 'Текущая серия, дней', String(qazaStreak(records, today))],
       ['total', 'Общий остаток', String(qazaTotalRemaining(getQazaState()))],
@@ -129,7 +118,7 @@ export function renderStatsQazaView() {
   }
 
   const chart = document.getElementById('stats-qaza-chart');
-  if (chart) chart.innerHTML = statsChartMarkup(values);
+  if (chart) chart.innerHTML = statsChartMarkup(counts.values);
 }
 // Категория «Ураза». Источник — растущая история счётчика (§5): интерфейс
 // уразы её только пишет, читает раздел статистики. Счётчика нет — ни цифр,
@@ -156,38 +145,16 @@ export function renderStatsFastView() {
   summary.hidden = false;
 
   const dates = statsPeriodDates(loadStatsPeriod('fast'), new Date());
-  const dayIndex = {};
-  const values = [];
-  for (let i = 0; i < dates.length; i++) {
-    dayIndex[dates[i]] = i;
-    values.push(0);
-  }
-
-  let done = 0;
-  let added = 0;
-  let since = null;
-
-  for (let i = 0; i < fast.history.length; i++) {
-    const event = fast.history[i];
-    // Начало истории — по всей истории, а не по периоду: «с какого дня
-    // копится» не должно меняться от выбранного окна
-    if (since === null || event.date < since) since = event.date;
-
-    const day = dayIndex[event.date];
-    if (day === undefined) continue;
-    if (event.source === FAST_SOURCE_DONE) {
-      done += event.count;
-      values[day] += event.count;
-    } else if (event.source === FAST_SOURCE_ADD) {
-      added += event.count;
-    }
-  }
+  // Суммы, разбор по источникам и начало истории — арифметика data-слоя:
+  // fastPeriodStats отдаёт значения по дням, суммы done/add и since,
+  // view только раскладывает готовое по местам
+  const stats = fastPeriodStats(fast, dates);
 
   summary.innerHTML = statsSummaryMarkup([
     ['remaining', 'Остаток', String(fast.remaining)],
-    ['done', 'Возмещено за период', String(done)],
-    ['added', 'Добавлено за период', String(added)],
-    ['since', 'История копится с', since === null ? '—' : since],
+    ['done', 'Возмещено за период', String(stats.done)],
+    ['added', 'Добавлено за период', String(stats.added)],
+    ['since', 'История копится с', stats.since === null ? '—' : stats.since],
   ]);
 
   // Истории мало — вместо графика строка текста: три столбика на всю ширину
@@ -195,12 +162,12 @@ export function renderStatsFastView() {
   if (fast.history.length < FAST_HISTORY_MIN) {
     chart.innerHTML = '';
     chart.hidden = true;
-    note.textContent = 'История копится с ' + (since === null ? '—' : since) +
+    note.textContent = 'История копится с ' + (stats.since === null ? '—' : stats.since) +
       '. Данных пока мало для графика';
     note.hidden = false;
   } else {
     chart.hidden = false;
-    chart.innerHTML = statsChartMarkup(values, 'Возмещено по дням');
+    chart.innerHTML = statsChartMarkup(stats.values, 'Возмещено по дням');
     note.hidden = true;
   }
 }
@@ -256,12 +223,13 @@ export function renderStatsSleepView() {
   const averageDuration = sleepAverageDurationMin(inPeriod);
 
   // Оба конца ночи — время суток, и history их уже проверила при чтении:
-  // каждое значение здесь число, а не null. Средний подъём — по факту
-  // (realWake), если он задан, иначе по actualWake. Это среднее точки
-  // на циферблате — средняя длительность считается отдельно, в data-слое
+  // каждое значение здесь число, а не null. Средний подъём — по факту,
+  // если он задан, иначе по плану: правило «факт ?? план» берётся из
+  // data-слоя (sleepWakeMinutes), как и вся арифметика раздела. Это среднее
+  // точки на циферблате — средняя длительность считается отдельно, в data-слое
   const bedMinutes = inPeriod.map(function (e) { return sleepTimeMinutes(e.bed); });
   const wakeMinutes = inPeriod.map(function (e) {
-    return sleepTimeMinutes(e.realWake ?? e.actualWake);
+    return sleepTimeMinutes(sleepWakeMinutes(e));
   });
 
   const averageBed = sleepAverageMinutes(bedMinutes);

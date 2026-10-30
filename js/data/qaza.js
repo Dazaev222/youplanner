@@ -3,6 +3,11 @@ import { addDays, toISODate } from '../core/dates.js';
 import { safeSetItem } from '../core/storage.js';
 import { loadPrayer, prayerDateISO, prayerMinutes, prayerTimes } from './prayer.js';
 import { getRecord, setRecord } from './records.js';
+// Встречный импорт: stats.js берёт отсюда QAZA_HABIT_ID, отсюда нужен
+// qazaDoneOn — второго читателя поля h6 нет, дублировать его нельзя. Цикл
+// безвреден: обе стороны зовут друг друга только внутри функций, и на
+// загрузке модулей ни одна ещё не работает
+import { qazaDoneOn } from './stats.js';
 import { saveNormalized } from '../sync/state.js';
 export const QAZA_STORAGE_KEY = 'youplanner.qaza';
 // Привычка, которая показывает счётчик каза за день. Id из спеки трекера:
@@ -271,6 +276,31 @@ export function qazaDoneCount(qaza, date) {
     if (entry.date === date && entry.source !== QAZA_SOURCE_MANUAL) count += 1;
   }
   return count;
+}
+// Каза за каждый день периода и сумма за период (§5). Правило источника за
+// день — «журнал с since, до него поле h6 записей» — раньше жило только
+// в отрисовке статистики, но это правило хранилища, а не разметки: view
+// не должен знать про log.since, иначе следующая цифра на другом экране
+// посчитала бы день по-другому. values[i] отвечает dates[i]: день с since
+// и позже читается из журнала (qazaLogDoneByDay уже отфильтровала ручные
+// добавления пропусков), раньше — qazaDoneOn по готовому снимку записей.
+// Журнала нет — все дни из записей, как до заведения журнала. total —
+// сумма значений: «Выполнено за период» и средний темп считают те же числа,
+// что и график
+export function qazaDayCounts(records, log, dates) {
+  const values = [];
+  if (!Array.isArray(dates)) return { values: values, total: 0 };
+
+  const logDone = qazaLogDoneByDay(log);
+  let total = 0;
+  for (let i = 0; i < dates.length; i++) {
+    const count = log && dates[i] >= log.since
+      ? (logDone[dates[i]] || 0)
+      : qazaDoneOn(records, dates[i]);
+    values.push(count);
+    total += count;
+  }
+  return { values: values, total: total };
 }
 // Выполнение текущего намаза: остаток уменьшается, курсор сдвигается дальше.
 // Счётчик каза за сегодня пишется в youplanner.records как привычка h6 —

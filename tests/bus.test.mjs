@@ -69,3 +69,26 @@ test('шина переживает отписку прямо из обрабо�
   assert.equal(app.run('globalThis.__count'), 1,
     'обработчик сработал после собственной отписки (или не сработал вовсе)');
 });
+
+// Ошибка одного подписчика гасится внутри emit (аудит 2026-10-31): раньше
+// исключение обрывало forEach — последующие подписчики того же события
+// не получали ничего, а эмиттер (например, saveHabits) падал вместе с ними.
+// Падение рендера одного экрана не должно ронять сохранение данных.
+test('падение одного подписчика не мешает остальным и не роняет emit', () => {
+  const app = loadApp();
+  const errors = [];
+  app.sandbox.console = { error: (...args) => errors.push(args) };
+  app.run(`
+    globalThis.__first = 0;
+    globalThis.__second = 0;
+    bus.on('data:changed', () => { globalThis.__first++; throw new Error('битый рендер'); });
+    bus.on('data:changed', () => { globalThis.__second++; });
+  `);
+
+  assert.doesNotThrow(() => app.context.saveHabits([habit()]),
+    'ошибка подписчика вышла наружу из emit');
+  assert.equal(app.run('globalThis.__first'), 1);
+  assert.equal(app.run('globalThis.__second'), 1,
+    'второй подписчик не получил событие после падения первого');
+  assert.equal(errors.length, 1, 'ошибка подписчика не попала в console.error');
+});
