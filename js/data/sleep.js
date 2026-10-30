@@ -226,6 +226,70 @@ export function sleepHistoryEntry(history, entry) {
   entries.push(entry);
   return entries;
 }
+// Записи периода, годные к подсчёту: не excluded и чей день входит в dates.
+// Правило «что считать» одно на все цифры раздела — средние, график и строка
+// хаба, — и жить оно должно в одном месте: разложенное по экранам, оно
+// разъезжается при первой же правке. excluded — явное «не считать этот день»:
+// человек сам его назвал, и день не попадает ни в средние, ни в график.
+// Порядок истории сохраняется: записи идут по дням, и график складывается сам.
+// Возвращается новый массив — история читается и в других местах, и фильтрация
+// не должна её трогать
+export function sleepEntriesInPeriod(history, dates) {
+  if (!Array.isArray(history)) return [];
+  if (!Array.isArray(dates) || dates.length === 0) return [];
+
+  const result = [];
+  for (let i = 0; i < history.length; i++) {
+    const entry = history[i];
+    if (entry.excluded === true) continue;
+    let inPeriod = false;
+    for (let j = 0; j < dates.length; j++) {
+      if (entry.date === dates[j]) {
+        inPeriod = true;
+        break;
+      }
+    }
+    if (inPeriod) result.push(entry);
+  }
+  return result;
+}
+// Сумма сна по дням периода: result[i] отвечает dates[i]. Значение дня —
+// realSleepMin, а без него sleepMin: null в realSleepMin значит «встал
+// по плану», и план тогда и есть факт. Сумма на день, а не присваивание:
+// sleepHistoryEntry держит одну запись на день, но правило суммы не вымирает
+// вместе с этим обещанием — вторая запись о том же дне сложилась бы в значение
+// дня, а не затёрла первую. Дни без записей остаются нулями: пустой день
+// на графике — ноль, а не дыра
+export function sleepMinutesByDay(history, dates) {
+  const result = [];
+  if (!Array.isArray(dates)) return result;
+
+  for (let i = 0; i < dates.length; i++) result.push(0);
+
+  const entries = sleepEntriesInPeriod(history, dates);
+  const dayIndex = {};
+  for (let i = 0; i < dates.length; i++) dayIndex[dates[i]] = i;
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    result[dayIndex[entry.date]] += entry.realSleepMin ?? entry.sleepMin;
+  }
+  return result;
+}
+// Средняя длительность по уже отобранным записям. Период и excluded здесь
+// не проверяются — это сделано sleepEntriesInPeriod, а среднее честно берёт
+// то, что ему дали: одна функция на отбор, другая на среднее. Значение
+// записи — realSleepMin ?? sleepMin, как во всех цифрах раздела. Округление
+// до целой минуты: человеку показывается «7 ч 40 мин», а не дробь. Пустой
+// массив — null: среднего нет, и вызывающий сам решает, что показать
+export function sleepAverageDurationMin(entries) {
+  if (!Array.isArray(entries) || entries.length === 0) return null;
+
+  let sum = 0;
+  for (let i = 0; i < entries.length; i++) {
+    sum += entries[i].realSleepMin ?? entries[i].sleepMin;
+  }
+  return Math.round(sum / entries.length);
+}
 // Чтение с проверкой. null — записей нет: нет ключа, битый JSON, не объект,
 // bed или wake не в виде 'HH:MM', fall не целое 0…120, пара actualWake/sleepMin
 // битая. Ничего не пишет: незаполненный раздел и есть отсутствие ключа

@@ -3,7 +3,7 @@ import { FAST_HISTORY_MIN, FAST_SOURCE_ADD, FAST_SOURCE_DONE, loadFast } from '.
 import { loadHabits } from '../data/habits.js';
 import { loadQazaLog, qazaLogDoneByDay, qazaTotalRemaining } from '../data/qaza.js';
 import { calcProgress, loadRecords } from '../data/records.js';
-import { loadSleep, sleepAverageMinutes, sleepFormatDuration, sleepTimeLabel, sleepTimeMinutes } from '../data/sleep.js';
+import { loadSleep, sleepAverageDurationMin, sleepAverageMinutes, sleepEntriesInPeriod, sleepFormatDuration, sleepMinutesByDay, sleepTimeLabel, sleepTimeMinutes } from '../data/sleep.js';
 import { habitBestStreak, habitCurrentStreak, habitMarkedDays, habitsAveragePercent, loadStatsPeriod, qazaDoneOn, qazaStreak, statsPeriodDates } from '../data/stats.js';
 import { ensureQazaState, getQazaState } from './qaza-view.js';
 import { markStatsPeriod, setStatsValue, statsChartMarkup, statsHabitGridMarkup, statsSummaryMarkup } from './stats-helpers.js';
@@ -71,24 +71,15 @@ export function renderStatsView() {
     qazaTotalRemaining(getQazaState()));
 
   // Сон — средняя длительность записи за период хаба. Дни берутся уже
-  // собранные: период у строки тот же, что у остальных цифр. Записи
-  // excluded пропускаются целиком, значение дня — realSleepMin ?? sleepMin
+  // собранные: период у строки тот же, что у остальных цифр. Отбор записей
+  // и среднее — те же функции data-слоя, что у экрана «Сон»: одна формула
+  // на обе цифры, а не две разошедшиеся
   const sleep = loadSleep();
   let sleepValue = '—';
   if (sleep && sleep.history.length > 0) {
-    const dayIndex = {};
-    for (let i = 0; i < dates.length; i++) dayIndex[dates[i]] = i;
-
-    let sum = 0;
-    let count = 0;
-    for (let i = 0; i < sleep.history.length; i++) {
-      const entry = sleep.history[i];
-      if (entry.excluded === true) continue;
-      if (dayIndex[entry.date] === undefined) continue;
-      sum += entry.realSleepMin ?? entry.sleepMin;
-      count++;
-    }
-    if (count > 0) sleepValue = sleepFormatDuration(Math.round(sum / count));
+    const entries = sleepEntriesInPeriod(sleep.history, dates);
+    const avg = sleepAverageDurationMin(entries);
+    sleepValue = avg === null ? '—' : sleepFormatDuration(avg);
   }
   setStatsValue('#stats-list [data-stat="sleep"] .stats-row-value', sleepValue);
 
@@ -216,10 +207,13 @@ export function renderStatsFastView() {
 // Категория «Сон». Источник — история раздела «Цикл сна» (§11ab): форма её
 // только пишет, читает раздел статистики. Пустых состояний два, и это разные
 // вещи: истории нет вовсе — показывать нечего, истории нет за выбранное окно
-// — данные есть, но не здесь. Средние отбоя и подъёма считает
-// sleepAverageMinutes: у времени суток своя арифметика, и обычное среднее
-// на ней врёт. Средний подъём — по полю actualWake, а не wake: в историю
-// идёт то, что вышло на самом деле, а wake — цель
+// — данные есть, но не здесь. Арифметика периода — отбор годных записей,
+// суммы по дням и средняя длительность — живёт в data/sleep.js: экран и
+// строка хаба считают её одной формулой, а view только рендерит готовое.
+// Средние отбоя и подъёма считает sleepAverageMinutes: у времени суток своя
+// арифметика, и обычное среднее на ней врёт. Средний подъём — по полю
+// actualWake, а не wake: в историю идёт то, что вышло на самом деле,
+// а wake — цель
 export function renderStatsSleepView() {
   markStatsPeriod('stats-sleep-period');
 
@@ -240,27 +234,9 @@ export function renderStatsSleepView() {
   }
 
   const dates = statsPeriodDates(loadStatsPeriod('sleep'), new Date());
-  const dayIndex = {};
-  const values = [];
-  for (let i = 0; i < dates.length; i++) {
-    dayIndex[dates[i]] = i;
-    values.push(0);
-  }
-
-  // Записи периода. Одна запись на день — держит sleepHistoryEntry, — но
-  // сумма на день, а не присваивание: вторая запись о том же дне сложилась бы
-  // в значение дня, а не затёрла первую. Записи excluded пропускаются целиком:
-  // человек сказал «не считать этот день», и он не должен попасть ни в средние,
-  // ни в график, ни в счётчик
-  const inPeriod = [];
-  for (let i = 0; i < sleep.history.length; i++) {
-    const entry = sleep.history[i];
-    if (entry.excluded === true) continue;
-    const day = dayIndex[entry.date];
-    if (day === undefined) continue;
-    inPeriod.push(entry);
-    values[day] += entry.realSleepMin ?? entry.sleepMin;
-  }
+  // Годные записи периода отбирает data-слой: excluded и дни вне окна до
+  // сюда не доходят — то же правило, по которому хаб считает свою строку
+  const inPeriod = sleepEntriesInPeriod(sleep.history, dates);
 
   if (inPeriod.length === 0) {
     summary.innerHTML = '';
@@ -274,20 +250,19 @@ export function renderStatsSleepView() {
 
   summary.hidden = false;
 
+  // Суммы по дням — для графика, средняя длительность — для сводки: обе
+  // цифры считаются в data-слое, view только раскладывает их по местам
+  const values = sleepMinutesByDay(sleep.history, dates);
+  const averageDuration = sleepAverageDurationMin(inPeriod);
+
   // Оба конца ночи — время суток, и history их уже проверила при чтении:
   // каждое значение здесь число, а не null. Средний подъём — по факту
-  // (realWake), если он задан, иначе по actualWake. Средняя длительность —
-  // по realSleepMin, если он задан, иначе по sleepMin
+  // (realWake), если он задан, иначе по actualWake. Это среднее точки
+  // на циферблате — средняя длительность считается отдельно, в data-слое
   const bedMinutes = inPeriod.map(function (e) { return sleepTimeMinutes(e.bed); });
   const wakeMinutes = inPeriod.map(function (e) {
     return sleepTimeMinutes(e.realWake ?? e.actualWake);
   });
-
-  let durationSum = 0;
-  for (let i = 0; i < inPeriod.length; i++) {
-    durationSum += inPeriod[i].realSleepMin ?? inPeriod[i].sleepMin;
-  }
-  const averageDuration = Math.round(durationSum / inPeriod.length);
 
   const averageBed = sleepAverageMinutes(bedMinutes);
   const averageWake = sleepAverageMinutes(wakeMinutes);

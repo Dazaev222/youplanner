@@ -304,6 +304,23 @@ function appendPageText(buffer, pageText, charsUsed) {
   return charsUsed.value < PDF_READ_MAX_CHARS;
 }
 
+// Пустая (сканированная) страница: pdf.js вытаскивает из скана пустоту или
+// одинокий номер страницы, поэтому порог — «меньше 10 символов текста».
+// Чистая функция: проверяется тестами без запуска разбора PDF.
+export function pdfIsBlankPage(pageText) {
+  return String(pageText).trim().length < 10;
+}
+
+// Предупреждение о «полускане»: если страниц достаточно много и больше
+// половины без текста, пользователь должен узнать, что ассистент видит
+// книгу не целиком. Меньше 10 страниц — молчим: пустые обложка и титульник
+// бывают и у обычных текстовых файлов. Чистая функция: проверяется тестами.
+export function pdfScannedWarning(pages, blankPages) {
+  if (pages < 10 || blankPages / pages < 0.6) return '';
+  return 'Внимание: ' + blankPages + ' из ' + pages + ' страниц без текста — '
+    + 'похоже, часть книги сканы, ассистент увидит только страницы с текстом';
+}
+
 // --- Нарезка и поиск по фрагментам -------------------------------------------
 
 // Делит текст на фрагменты по абзацам (строкам — перенос строки внутри
@@ -376,34 +393,44 @@ function pdfSplitBigParagraph(p) {
 }
 // Слова вопроса в нижнем регистре без служебных: короткие (< 3) и стоп-слова
 // поиск не ведут, иначе каждый фрагмент «релевантен» любому вопросу.
+// Ё у слова вопроса нормализуется в Е: без этого «чём» не совпадал со
+// стоп-словом «чем» и системно уводил вопрос в нулевой матч.
 export function pdfQueryTokens(question) {
   const words = String(question || '').toLowerCase().match(/[a-zа-яё0-9]+/g) || [];
   const tokens = [];
   for (let i = 0; i < words.length; i++) {
-    const w = words[i];
+    const w = words[i].replace(/ё/g, 'е');
     if (w.length < 3 || PDF_STOPWORDS.indexOf(w) !== -1) continue;
     if (tokens.indexOf(w) === -1) tokens.push(w);
   }
   return tokens;
 }
-// Число вхождений needle в hay. indexOf-цикл вместо match: на 200 000
-// символов регулярный обход в разы тяжелее, а считать нужно на каждый фрагмент.
+// Число вхождений needle в hay НА ГРАНИЦЕ СЛОВА СЛЕВА (префиксный поиск):
+// вхождение засчитывается, только если слово начинается с needle — pos === 0
+// или слева не буква/цифра. Голый substring-поиск ловил «каз» внутри
+// «казаться» — шум; левая граница оставляет префиксную семантику (слово
+// начинается с токена), что и нужно для русских словоформ. indexOf-цикл
+// вместо match: на 200 000 символов регулярный обход в разы тяжелее, а
+// считать нужно на каждый фрагмент.
 function pdfCountOccurrences(hay, needle) {
   if (!needle) return 0;
+  const letter = /[a-zа-яё0-9]/i;
   let count = 0;
   let pos = hay.indexOf(needle);
   while (pos !== -1) {
-    count++;
-    pos = hay.indexOf(needle, pos + needle.length);
+    if (pos === 0 || !letter.test(hay.charAt(pos - 1))) count++;
+    pos = hay.indexOf(needle, pos + 1);
   }
   return count;
 }
 // Фрагменты, отобранные под вопрос, одним куском текста. Слово ищется целиком
 // и усечённо (без последних двух букв у длинных слов): «напомин» ловит и
 // «напоминание», и «напоминания», не требуя настоящего стеммера.
-// Пустой результат поиска (вопрос из одних служебных слов) — начало документа:
-// оглавление и первые главы чаще прочего отвечают на общий вопрос. Выбранные
-// фрагменты склеиваются в порядке документа — связный контекст, а не мешок.
+// Пустой результат поиска (вопрос из одних служебных слов или ни одного
+// совпадения во всём документе) — равномерная выборка по всей книге: общий
+// вопрос («о чём книга», «перескажи») должен давать модели срез всего текста,
+// а не только оглавление. Выбранные фрагменты склеиваются в порядке
+// документа — связный контекст, а не мешок.
 export function selectPdfChunks(question, chunks, budget) {
   if (!chunks || !chunks.length) return '';
   if (budget === undefined) budget = PDF_MAX_CHARS;
@@ -411,9 +438,14 @@ export function selectPdfChunks(question, chunks, budget) {
   const tokens = pdfQueryTokens(question);
   const scores = new Array(chunks.length);
   for (let i = 0; i < chunks.length; i++) scores[i] = 0;
+  let maxScore = 0;
   if (tokens.length) {
     const lower = new Array(chunks.length);
-    for (let i = 0; i < chunks.length; i++) lower[i] = chunks[i].toLowerCase();
+    for (let i = 0; i < chunks.length; i++) {
+      // ё в тексте фрагментов тоже нормализуем в е: иначе токен «объем»
+      // не найдёт «объём», записанный через ё
+      lower[i] = chunks[i].toLowerCase().replace(/ё/g, 'е');
+    }
     for (let i = 0; i < chunks.length; i++) {
       let score = 0;
       for (let t = 0; t < tokens.length; t++) {
@@ -425,7 +457,15 @@ export function selectPdfChunks(question, chunks, budget) {
         score += hits;
       }
       scores[i] = score;
+      if (score > maxScore) maxScore = score;
     }
+  }
+
+  // Фолбэк: содержательных слов в вопросе нет или они не встретились нигде —
+  // релевантности нет, берём равномерную сетку по всей книге.
+  if (!tokens.length || maxScore === 0) {
+    return pdfSpreadPick(chunks, budget)
+      .map(function (i) { return chunks[i]; }).join('\n\n');
   }
 
   const order = chunks.map(function (_c, i) { return i; })
@@ -436,9 +476,11 @@ export function selectPdfChunks(question, chunks, budget) {
   for (let k = 0; k < order.length; k++) {
     const i = order[k];
     if (!picked.length) {
-      // первый — самый релевантный (или просто первый), берётся всегда
+      // первый — самый релевантный, берётся всегда. Учёт честный (реальная
+      // длина + разделитель): раньше длина клампилась «в потолок» бюджета,
+      // хотя чанк уходил в промпт целиком, — остаток бюджета врал
       picked.push(i);
-      used += chunks[i].length > budget ? budget : chunks[i].length + 2;
+      used += chunks[i].length + 2;
       continue;
     }
     if (scores[i] <= 0) break;   // релевантные кончились
@@ -449,8 +491,39 @@ export function selectPdfChunks(question, chunks, budget) {
   picked.sort(function (a, b) { return a - b; });
   return picked.map(function (i) { return chunks[i]; }).join('\n\n');
 }
+// Равномерная сетка индексов фрагментов по всему документу — фолбэк отбора,
+// когда совпадений с вопросом нет. maxPicks — сколько фрагментов среднего
+// размера влезает в бюджет; сетка всегда включает начало И конец документа.
+// Укладка идёт в порядке документа, и фрагмент, который не влезает,
+// ПРОПУСКАЕТСЯ, а не обрывает подбор — иначе хвост документа снова выпадал.
+// Совсем без вариантов остаётся индекс 0: инвариант старого поведения —
+// в промпте не бывает пусто. Проверка повторов через indexOf: Set здесь
+// избыточен, а в старых средах он дороже массива из десятков элементов.
+function pdfSpreadPick(chunks, budget) {
+  const maxPicks = Math.max(1, Math.floor(budget / (PDF_CHUNK_SIZE + 2)));
+  const grid = [];
+  if (chunks.length <= maxPicks) {
+    for (let i = 0; i < chunks.length; i++) grid.push(i);
+  } else {
+    for (let i = 0; i < maxPicks; i++) {
+      grid.push(Math.round(i * (chunks.length - 1) / (maxPicks - 1)));
+    }
+  }
+  const picked = [];
+  let used = 0;
+  for (let i = 0; i < grid.length; i++) {
+    const idx = grid[i];
+    if (picked.indexOf(idx) !== -1) continue;
+    if (used + chunks[idx].length + 2 > budget) continue;
+    picked.push(idx);
+    used += chunks[idx].length + 2;
+  }
+  if (!picked.length) return [0];
+  return picked;
+}
 // Последний вопрос пользователя из истории: по нему ищутся фрагменты.
-// В истории его нет (старт чата) — пустая строка, поиск вернёт начало документа.
+// В истории его нет (старт чата) — пустая строка, отбор уходит в фолбэк:
+// равномерная выборка по всей книге.
 function lastUserQuestion() {
   const history = readHistory();
   for (let i = history.length - 1; i >= 0; i--) {
@@ -474,11 +547,16 @@ async function parsePdf(file) {
     const buffer = [];
     const charsUsed = { value: 0 };
     let pages = 0;
+    let blankPages = 0;
     for (let i = 1; i <= Math.min(doc.numPages, PDF_MAX_PAGES); i++) {
       const page = await doc.getPage(i);
       const content = await page.getTextContent();
       pages = i;
-      if (!appendPageText(buffer, pdfPageTextFromItems(content), charsUsed)) {
+      const pageText = pdfPageTextFromItems(content);
+      // Пустые страницы считаем: доля сканов должна дойти до пользователя,
+      // а не остаться только в диагностике
+      if (pdfIsBlankPage(pageText)) blankPages += 1;
+      if (!appendPageText(buffer, pageText, charsUsed)) {
         page.cleanup();
         break;
       }
@@ -487,15 +565,17 @@ async function parsePdf(file) {
     }
     const text = buffer.join('\n').trim();
     // Диагностика «читает только обложку»: видно, сколько страниц в файле
-    // и сколько реально прочитано и вошло в лимит. До destroy(): у убитого
-    // документа numPages уже не прочитать
-    const truncated = pages < doc.numPages || text.length >= PDF_READ_MAX_CHARS;
+    // и сколько реально прочитано и вошло в лимит. numPages снимаем до
+    // destroy(): у убитого документа его уже не прочитать, а понадобится
+    // он и индикатору ниже — после destroy
+    const docPages = doc.numPages;
+    const truncated = pages < docPages || text.length >= PDF_READ_MAX_CHARS;
     const finalText = truncated
       ? text.replace(/\s+\S*$/, '') + ' …[текст обрезан]'
       : text;
     const long = finalText.length > PDF_MAX_CHARS;
     const chunks = long ? chunkPdfText(finalText) : null;
-    console.log('[assistant] PDF ' + file.name + ': страниц в файле ' + doc.numPages
+    console.log('[assistant] PDF ' + file.name + ': страниц в файле ' + docPages
       + ', прочитано ' + pages + ', символов ' + text.length
       + (chunks ? ', фрагментов ' + chunks.length : ''));
     await doc.destroy();
@@ -504,6 +584,10 @@ async function parsePdf(file) {
       showErrorToast('В PDF не найдено текста — возможно, это сканы');
       return;
     }
+    // «Полускан»: больше половины страниц без текста. Разбор при этом
+    // успешен — текстовые страницы прочитаны, поэтому предупреждение идёт
+    // ПОСЛЕ успеха: это ограничение файла, а не ошибка чтения
+    const scannedWarning = pdfScannedWarning(pages, blankPages);
     pdfContext = {
       name: file.name,
       pages: pages,
@@ -514,10 +598,14 @@ async function parsePdf(file) {
     };
     setPdfIndicator('✕ ' + pdfContext.name + ' · ' + pages + ' стр.'
       + (chunks ? ' · нарезан: ' + chunks.length + ' фраг.' : '')
+      // Обрезка по лимиту раньше была видна только в console.log: пользователь
+      // не знал, что вторая половина книги не прочитана
+      + (truncated ? ' · прочитано ' + pages + ' из ' + docPages + ' стр.' : '')
       + ' — нажмите, чтобы убрать');
     showToast(chunks
       ? 'PDF прочитан: ' + pages + ' стр., нарезан на ' + chunks.length + ' фрагментов'
       : 'PDF прочитан: ' + pages + ' стр.');
+    if (scannedWarning) showErrorToast(scannedWarning);
   } catch (e) {
     console.error('[assistant] разбор PDF не удался:', e);
     resetPdfContext();
