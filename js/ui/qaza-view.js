@@ -8,6 +8,11 @@ export let qazaState = null;
 // Намаз, выбранный в блоке ручного добавления. Живёт только в интерфейсе
 // и не сохраняется: это ещё не решение, а подготовка к нажатию «Добавить».
 export let qazaAddPick = null;
+// Защита «Выполнено» от двойного тапа. Первый клик перерисовывает план,
+// и второй клик прилетает в новую кнопку на том же месте. Пока идёт короткая
+// блокировка, повторное списание не допускается; затем кнопка оживает.
+const QAZA_DONE_LOCK_MS = 450;
+let qazaDoneProcessing = false;
 export function renderQazaView() {
   if (!qazaState) return;
 
@@ -200,7 +205,8 @@ export function renderQazaPlan() {
     html += '<div class="qaza-plan-item' + (isCurrent ? ' is-current' : '') + '">' +
       '<span class="qaza-plan-name">' + escapeHtml(NAMAZ_LABELS[key]) + '</span>' +
       (isCurrent
-        ? '<button type="button" id="qaza-done" class="btn btn-primary">Выполнено</button>'
+        ? '<button type="button" id="qaza-done" class="btn btn-primary"' +
+          (qazaDoneProcessing ? ' disabled' : '') + '>Выполнено</button>'
         : '<span class="qaza-plan-next">дальше</span>') +
       '</div>';
   }
@@ -215,14 +221,28 @@ export function renderQazaPlan() {
 export function onQazaDone(event) {
   const target = event && event.target;
   if (!target || typeof target.closest !== 'function') return;
-  if (!target.closest('#qaza-done')) return;
+  const button = target.closest('#qaza-done');
+  if (!button) return;
+  if (qazaDoneProcessing) return;
 
-  const day = kazaDayFor(new Date());
-  if (!markQazaDone(qazaState, day)) return;
-  renderQazaView();
-  bus.emit('qaza:changed');
+  qazaDoneProcessing = true;
+  button.disabled = true;
 
-  if (day !== toISODate(new Date())) showToast('Каза зачтена во вчерашний день');
+  try {
+    const day = kazaDayFor(new Date());
+    if (!markQazaDone(qazaState, day)) return;
+    renderQazaView();
+    bus.emit('qaza:changed');
+
+    if (day !== toISODate(new Date())) showToast('Каза зачтена во вчерашний день');
+  } finally {
+    // Новый узел кнопки получает disabled из renderQazaPlan(), поэтому
+    // двойной тап не проходит даже после перерисовки. Через паузу оживает.
+    setTimeout(function () {
+      qazaDoneProcessing = false;
+      if (qazaState) renderQazaPlan();
+    }, QAZA_DONE_LOCK_MS);
+  }
 }
 // Отмена работает с тем днём, к которому отнесена верхняя запись (§7):
 // запись, зачтённая вчера, снимается там же, где и легла.
