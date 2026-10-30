@@ -42,29 +42,55 @@ function installFallbackTimers(app) {
   return timers;
 }
 
-test('sync: успешный обмен снимает fallback-таймер', async () => {
-  const app = loadApp({
+const fallbackTimerCases = [
+  {
+    name: 'sync: успешный обмен снимает fallback-таймер',
     fetchImpl: () => Promise.resolve({ ok: true, json: () => Promise.resolve({}) }),
-  });
-  const timers = installFallbackTimers(app);
-
-  const result = await app.context.syncFromCloud();
-
-  assert.equal(result.reachable, true);
-  assert.equal(timers.size, 0, 'таймер остался после успешного обмена');
-});
-
-test('sync: ошибка сети снимает fallback-таймер', async () => {
-  const app = loadApp({
+    run: (app) => app.context.syncFromCloud(),
+    verify: (result, timers) => {
+      assert.equal(result.reachable, true);
+      assert.equal(timers.size, 0, 'таймер остался после успешного обмена');
+    },
+  },
+  {
+    name: 'sync: ошибка сети снимает fallback-таймер',
     fetchImpl: () => Promise.reject(new Error('нет сети')),
+    run: (app) => app.context.syncFromCloud(),
+    verify: (result, timers) => {
+      assert.equal(result.reachable, false);
+      assert.equal(timers.size, 0, 'таймер остался после ошибки обмена');
+    },
+  },
+  {
+    name: 'assistant: успешный ответ снимает fallback-таймер',
+    fetchImpl: () => Promise.resolve({
+      ok: true,
+      json: () => Promise.resolve({ choices: [{ message: { content: '  ответ  ' } }] }),
+    }),
+    run: (app) => app.context.requestAssistantReply(),
+    verify: (reply, timers) => {
+      assert.equal(reply, 'ответ');
+      assert.equal(timers.size, 0, 'таймер остался после ответа ассистента');
+    },
+  },
+  {
+    name: 'assistant: ошибка запроса снимает fallback-таймер',
+    fetchImpl: () => Promise.reject(new TypeError('нет связи')),
+    run: (app) => assert.rejects(() => app.context.requestAssistantReply(), /Нет связи/),
+    verify: (_result, timers) => {
+      assert.equal(timers.size, 0, 'таймер остался после ошибки ассистента');
+    },
+  },
+];
+
+for (const scenario of fallbackTimerCases) {
+  test(scenario.name, async () => {
+    const app = loadApp({ fetchImpl: scenario.fetchImpl });
+    const timers = installFallbackTimers(app);
+    const result = await scenario.run(app);
+    scenario.verify(result, timers);
   });
-  const timers = installFallbackTimers(app);
-
-  const result = await app.context.syncFromCloud();
-
-  assert.equal(result.reachable, false);
-  assert.equal(timers.size, 0, 'таймер остался после ошибки обмена');
-});
+}
 
 test('sync: таймаут по-прежнему прерывает зависший запрос', async () => {
   let seenSignal = null;
@@ -89,30 +115,4 @@ test('sync: таймаут по-прежнему прерывает зависш
   assert.equal(seenSignal.aborted, true, 'сигнал не был прерван');
   assert.equal(result.reachable, false);
   assert.equal(timers.size, 0, 'таймер остался после прерывания');
-});
-
-test('assistant: успешный ответ снимает fallback-таймер', async () => {
-  const app = loadApp({
-    fetchImpl: () => Promise.resolve({
-      ok: true,
-      json: () => Promise.resolve({ choices: [{ message: { content: '  ответ  ' } }] }),
-    }),
-  });
-  const timers = installFallbackTimers(app);
-
-  const reply = await app.context.requestAssistantReply();
-
-  assert.equal(reply, 'ответ');
-  assert.equal(timers.size, 0, 'таймер остался после ответа ассистента');
-});
-
-test('assistant: ошибка запроса снимает fallback-таймер', async () => {
-  const app = loadApp({
-    fetchImpl: () => Promise.reject(new TypeError('нет связи')),
-  });
-  const timers = installFallbackTimers(app);
-
-  await assert.rejects(() => app.context.requestAssistantReply(), /Нет связи/);
-
-  assert.equal(timers.size, 0, 'таймер остался после ошибки ассистента');
 });

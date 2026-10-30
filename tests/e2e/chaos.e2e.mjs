@@ -26,6 +26,7 @@ import { readFile } from 'node:fs/promises';
 import { extname, join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import assert from 'node:assert/strict';
+import { habit } from '../helpers/fixtures.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = resolveRoot(HERE);
@@ -67,7 +68,7 @@ async function step(name, fn) {
   }
 }
 
-async function newPage(browser, { initScript, firebaseHandler } = {}) {
+async function newPage(browser, { initScript, initScriptArg, firebaseHandler } = {}) {
   const context = await browser.newContext({
     viewport: { width: 1200, height: 800 },
     locale: 'ru-RU',
@@ -83,7 +84,10 @@ async function newPage(browser, { initScript, firebaseHandler } = {}) {
     }
     return route.abort();
   });
-  if (initScript) await context.addInitScript(initScript);
+  if (initScript) {
+    if (initScriptArg === undefined) await context.addInitScript(initScript);
+    else await context.addInitScript(initScript, initScriptArg);
+  }
   const page = await context.newPage();
   const errors = [];
   page.on('pageerror', (e) => errors.push(String(e)));
@@ -274,19 +278,21 @@ async function main() {
   });
 
   await step('7. JSON чужой схемы: снимок отвергнут, локальные данные целы', async () => {
+    const seededHabits = [
+      habit(),
+      habit({ id: 'h2', name: 'Зухр' }),
+      habit({ id: 'h6', name: 'Каза', type: 'number', unit: 'раз', goal: 3 }),
+    ];
     const { context, page } = await newPage(browser, {
       // Локальные данные сеем до старта: на первом запуске с пустым локалом
       // и битым, но «победившим» по времени снимком приложение честно
       // показывает пустую таблицу — применять мусор нельзя, дефолты писать
       // тоже (сервер-то не пуст). Здесь проверяем главное: данные, которые
       // УЖЕ есть локально, мусорный снимок не вытесняет.
-      initScript: () => {
-        localStorage.setItem('youplanner.habits', JSON.stringify([
-          { id: 'h1', name: 'Фаджр', type: 'boolean', unit: '', goal: null },
-          { id: 'h2', name: 'Зухр', type: 'boolean', unit: '', goal: null },
-          { id: 'h6', name: 'Каза', type: 'number', unit: 'раз', goal: 3 },
-        ]));
+      initScript: ({ habits }) => {
+        localStorage.setItem('youplanner.habits', JSON.stringify(habits));
       },
+      initScriptArg: { habits: seededHabits },
       // Таймстамп из будущего: снимок «новее» любого локального — проверяем
       // именно защиту валидаторами, а не сравнение времени
       firebaseHandler: (route) => route.fulfill({

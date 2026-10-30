@@ -356,9 +356,9 @@ youplanner.app_bg (затемнение фона; фото фона — Blob в 
 
 ## Тесты
 
-Штатный прогон (без браузера): `npm test` → **57/57** в 10 файлах
+Штатный прогон (без браузера): `npm test` → **64/64** в 12 файлах
 `tests/*.test.mjs` (smoke, bus, backup, sync, core, modules, timers, xss,
-assistant, sw-assets). Покрывают граф модулей и висячие id, шину, бэкапы,
+assistant, sw-assets, sleep, qaza-done). Покрывают граф модулей и висячие id, шину, бэкапы,
 single-flight синхронизации, XSS-экранирование, fallback-таймеры fetch,
 PDF-чанкинг и покрытие `ASSETS` в `sw.js`.
 

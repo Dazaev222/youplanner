@@ -6,8 +6,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadApp } from './helpers/load-app.mjs';
+import { hostilePayload } from './helpers/fixtures.mjs';
 
-const PAYLOAD = '<img src=x onerror="alert(1)">';
+const PAYLOAD = hostilePayload();
 const ESCAPED = '&lt;img src=x onerror=&quot;alert(1)&quot;&gt;';
 
 // Элементы с id из ids получают innerHTML-приёмник, остальные — null:
@@ -39,29 +40,38 @@ function addHostileHabit(app) {
   return habit;
 }
 
-test('renderHabitList экранирует название и единицу', () => {
-  const app = loadApp();
-  addHostileHabit(app);
-  const nodes = capture(app, ['habit-list']);
-  app.context.openModal();
-  assertNoMarkup(nodes['habit-list'].innerHTML);
-});
+const hostileHabitRenderers = [
+  {
+    title: 'renderHabitList экранирует название и единицу',
+    target: 'habit-list',
+    render: (app) => app.context.openModal(),
+  },
+  {
+    title: 'renderHabitsEditList экранирует название и единицу',
+    target: 'habits-edit-list',
+    render: (app) => app.run('appState.habits = loadHabits(); renderHabitsEditList();'),
+  },
+  {
+    title: 'renderDayCards экранирует название и единицу',
+    target: 'day-cards',
+    render: (app) => app.run('appState.habits = loadHabits(); renderDayCards();'),
+  },
+  {
+    title: 'renderStatsHabitsView экранирует название привычки',
+    target: 'stats-habits-list',
+    render: (app) => app.context.renderStatsHabitsView(),
+  },
+];
 
-test('renderHabitsEditList экранирует название и единицу', () => {
-  const app = loadApp();
-  addHostileHabit(app);
-  const nodes = capture(app, ['habits-edit-list']);
-  app.run('appState.habits = loadHabits(); renderHabitsEditList();');
-  assertNoMarkup(nodes['habits-edit-list'].innerHTML);
-});
-
-test('renderDayCards экранирует название и единицу', () => {
-  const app = loadApp();
-  addHostileHabit(app);
-  const nodes = capture(app, ['day-cards']);
-  app.run('appState.habits = loadHabits(); renderDayCards();');
-  assertNoMarkup(nodes['day-cards'].innerHTML);
-});
+for (const scene of hostileHabitRenderers) {
+  test(scene.title, () => {
+    const app = loadApp();
+    addHostileHabit(app);
+    const nodes = capture(app, [scene.target]);
+    scene.render(app);
+    assertNoMarkup(nodes[scene.target].innerHTML);
+  });
+}
 
 test('renderTable экранирует название и единицу', () => {
   const app = loadApp();
@@ -91,12 +101,4 @@ test('renderScheduleView экранирует текст пункта', () => {
   const nodes = capture(app, ['schedule-list']);
   app.context.renderScheduleView();
   assertNoMarkup(nodes['schedule-list'].innerHTML);
-});
-
-test('renderStatsHabitsView экранирует название привычки', () => {
-  const app = loadApp();
-  addHostileHabit(app);
-  const nodes = capture(app, ['stats-habits-list']);
-  app.context.renderStatsHabitsView();
-  assertNoMarkup(nodes['stats-habits-list'].innerHTML);
 });
