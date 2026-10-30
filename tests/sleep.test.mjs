@@ -8,6 +8,20 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadApp } from './helpers/load-app.mjs';
 
+// Годная запись дневника сна: bed '23:00', засыпание 0, подъём '07:00' —
+// плановые 480 минут (сходится по sleepDurationMinutes), факт «встал
+// по плану». Overrides добавляют то, что отличает конкретный день
+function dayEntry(date, overrides) {
+  return Object.assign({
+    date: date,
+    bed: '23:00',
+    fall: 0,
+    wake: '07:00',
+    actualWake: '07:00',
+    sleepMin: 480,
+  }, overrides || {});
+}
+
 const sleepCases = [
   {
     name: 'sleepCycleTimes: шесть циклов и два соседних будильника',
@@ -88,6 +102,96 @@ const sleepCases = [
         context.nearestSleepCycle(context.sleepAnchors('23:30', 15, '06:30')),
         1875,
       );
+    },
+  },
+  {
+    name: 'sleepEntriesInPeriod: excluded и чужие даты не проходят, порядок хранится',
+    run: (context) => {
+      const history = [
+        dayEntry('2026-01-02'),
+        dayEntry('2025-12-25'), // день вне периода
+        dayEntry('2026-01-01', { realWake: '06:00', realSleepMin: 420 }),
+        dayEntry('2026-01-03', { excluded: true }), // «не считать этот день»
+      ];
+      const dates = ['2026-01-01', '2026-01-02', '2026-01-03'];
+      const result = context.sleepEntriesInPeriod(history, dates);
+
+      // Порядок истории сохраняется: 2026-01-02 идёт раньше 2026-01-01
+      assert.deepEqual(
+        Array.from(result, (entry) => entry.date),
+        ['2026-01-02', '2026-01-01'],
+      );
+
+      // Возвращается новый массив, сама история не тронута
+      assert.equal(history.length, 4);
+      assert.notEqual(result, history);
+
+      // history не массив — пустой результат, а не падение
+      assert.deepEqual(Array.from(context.sleepEntriesInPeriod(null, dates)), []);
+      assert.deepEqual(Array.from(context.sleepEntriesInPeriod(undefined, dates)), []);
+      assert.deepEqual(Array.from(context.sleepEntriesInPeriod('не массив', dates)), []);
+
+      // dates не массив или пустой — выбирать не из чего
+      assert.deepEqual(Array.from(context.sleepEntriesInPeriod(history, null)), []);
+      assert.deepEqual(Array.from(context.sleepEntriesInPeriod(history, [])), []);
+    },
+  },
+  {
+    name: 'sleepMinutesByDay: две записи дня складываются, realSleepMin сильнее sleepMin',
+    run: (context) => {
+      const history = [
+        // Две записи одного дня складываются в значение дня, а не затирают
+        dayEntry('2026-01-01'),
+        dayEntry('2026-01-01', { wake: '07:30', sleepMin: 510 }),
+        // realSleepMin задан — в сумму идёт факт, а не план
+        dayEntry('2026-01-02', { realWake: '06:00', realSleepMin: 420 }),
+        // realSleepMin null — «встал по плану», берётся sleepMin
+        dayEntry('2026-01-03', { realWake: null, realSleepMin: null }),
+        // excluded — день не попадает в суммы вовсе
+        dayEntry('2026-01-04', { excluded: true }),
+      ];
+      const dates = ['2026-01-01', '2026-01-02', '2026-01-03', '2026-01-04'];
+      const result = context.sleepMinutesByDay(history, dates);
+
+      assert.deepEqual(Array.from(result), [990, 420, 480, 0]);
+      // Длина результата равна длине dates: у каждого дня периода своя ячейка
+      assert.equal(result.length, dates.length);
+
+      // Дни вне периода — нули, а не обрезанный массив
+      assert.deepEqual(
+        Array.from(context.sleepMinutesByDay(history, ['2026-02-01', '2026-02-02'])),
+        [0, 0],
+      );
+
+      // history не массив — все дни периода по нулю
+      assert.deepEqual(Array.from(context.sleepMinutesByDay('не массив', dates)), [0, 0, 0, 0]);
+
+      // dates не массив — результата нет вовсе
+      assert.deepEqual(Array.from(context.sleepMinutesByDay(history, null)), []);
+    },
+  },
+  {
+    name: 'sleepAverageDurationMin: среднее по фактам и планам, пустое — null',
+    run: (context) => {
+      const entries = [
+        dayEntry('2026-01-01', { realWake: '06:00', realSleepMin: 420 }),
+        dayEntry('2026-01-02'),
+        dayEntry('2026-01-03', { realWake: null, realSleepMin: null }),
+      ];
+      // 420 (факт) + 480 (план) + 480 (план при null realSleepMin) = 1380 / 3
+      assert.equal(context.sleepAverageDurationMin(entries), 460);
+
+      // Округление до целой минуты: (350 + 351) / 2 = 350.5 → 351
+      assert.equal(context.sleepAverageDurationMin([
+        dayEntry('2026-01-01', { wake: '04:50', sleepMin: 350 }),
+        dayEntry('2026-01-02', { wake: '04:51', sleepMin: 351 }),
+      ]), 351);
+
+      // Пустой и не-массив — среднего нет
+      assert.equal(context.sleepAverageDurationMin([]), null);
+      assert.equal(context.sleepAverageDurationMin(null), null);
+      assert.equal(context.sleepAverageDurationMin(undefined), null);
+      assert.equal(context.sleepAverageDurationMin('не массив'), null);
     },
   },
 ];
