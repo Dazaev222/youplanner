@@ -292,11 +292,19 @@
         <button type="button" id="assistant-pdf-indicator"
                 class="assistant-pdf-indicator" hidden
                 aria-label="Убрать текст PDF из чата"></button>
+        <button type="button" id="assistant-image-indicator"
+                class="assistant-pdf-indicator" hidden
+                aria-label="Убрать фото из чата"></button>
         <div class="assistant-input-row">
           <label id="assistant-pdf-btn" class="assistant-pdf-btn"
                  for="assistant-pdf-input" role="button" tabindex="0"
                  aria-label="Прикрепить PDF-файл">📎
             <input type="file" id="assistant-pdf-input" accept="application/pdf,.pdf" hidden>
+          </label>
+          <label id="assistant-image-btn" class="assistant-pdf-btn"
+                 for="assistant-image-input" role="button" tabindex="0"
+                 aria-label="Прикрепить фото">📷
+            <input type="file" id="assistant-image-input" accept="image/*" multiple hidden>
           </label>
           <input type="text" id="assistant-input"
                  placeholder="Спросите что-нибудь…" autocomplete="off"

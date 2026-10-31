@@ -327,6 +327,16 @@ body.view-assistant #app {
   }
 }
 
+/* Фото в пузыре вопроса (Vision): dataUrl уже сжат до 1568 px по длинной
+   стороне, здесь только вписывание в ширину пузыря и скругление */
+.assistant-msg-photo {
+  display: block;
+  max-width: 100%;
+  max-height: 320px;
+  border-radius: 10px;
+  margin-bottom: 6px;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .assistant-msg {
     animation: none;

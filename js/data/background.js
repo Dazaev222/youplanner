@@ -8,6 +8,7 @@
 // не попадает.
 
 import { idbDelete, idbGet, idbPut } from '../core/db.js';
+import { compressImage } from './image.js';
 
 export const BG_IMAGE_KEY = 'app-background-image';   // ключ записи в IDB
 export const BG_PREFS_KEY = 'youplanner.app_bg';     // localStorage: {dim}
@@ -71,16 +72,10 @@ export function autoDimForBitmap(bitmap) {
 
 // --- Сжатие -----------------------------------------------------------------
 
-function canvasToBlob(canvas, type, quality) {
-  return new Promise(function (resolve) {
-    canvas.toBlob(resolve, type, quality);
-  });
-}
-
 // Потолок длинной стороны сжатой копии: длинная сторона экрана
 // в физических пикселях (retina), в разумных пределах. Апскейл меньших
 // картинок не делается — качества не добавит, вес вырастет: фактический
-// масштаб считается в compressBgImage как min(1, target/исходная).
+// масштаб считается внутри compressImage как min(1, maxSide/исходная).
 function targetSide() {
   const screen = typeof window !== 'undefined' && window.screen;
   const dpr = (typeof window !== 'undefined' && window.devicePixelRatio) || 1;
@@ -89,44 +84,18 @@ function targetSide() {
   return Math.min(2048, Math.max(1136, Math.round(longSide * dpr)));
 }
 
-// File → Blob под размер экрана. Пробуем WebP (заметно легче при том же
-// качестве), но Safari старых версий молча отдаёт PNG вместо WebP —
-// проверяем фактический тип и размер, при промахе уходим в JPEG
-// с пошаговым качеством до потолка 800 КБ.
+// File → Blob под размер экрана. Общее сжатие переехало в js/data/image.js
+// (его же использует Vision в ассистенте); здесь — только фоновые параметры:
+// длинная сторона экрана, потолок 800 КБ и замер яркости для ползунка
+// затемнения — до закрытия bitmap внутри compressImage.
 export async function compressBgImage(file) {
-  let bitmap;
-  try {
-    bitmap = await createImageBitmap(file, { imageOrientation: 'from-image' });
-  } catch (e) {
-    // старые Safari не знают опцию — повтор без неё (EXIF у них
-    // разворачивает сам bitmap-декодер)
-    bitmap = await createImageBitmap(file);
-  }
-  const side = targetSide();
-  const maxSide = Math.max(bitmap.width, bitmap.height);
-  const scale = Math.min(1, side / maxSide);
-  const canvas = document.createElement('canvas');
-  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
-  const ctx = canvas.getContext('2d');
-  ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-  const dim = autoDimForBitmap(bitmap);
-  bitmap.close();
-
-  const attempts = [
-    { type: 'image/webp', quality: 0.8 },
-    { type: 'image/jpeg', quality: 0.7 },
-    { type: 'image/jpeg', quality: 0.55 },
-  ];
-  let blob = null;
-  for (const a of attempts) {
-    const candidate = await canvasToBlob(canvas, a.type, a.quality);
-    if (!candidate) continue;
-    blob = candidate;
-    if (candidate.size <= BG_BLOB_MAX && candidate.type === a.type) break;
-  }
-  if (!blob) throw new Error('браузер не смог сжать изображение');
-  return { blob: blob, dim: dim };
+  let dim = BG_DIM_DEFAULT;
+  const compressed = await compressImage(file, {
+    maxSide: targetSide(),
+    maxBytes: BG_BLOB_MAX,
+    inspect: function (bitmap) { dim = autoDimForBitmap(bitmap); },
+  });
+  return { blob: compressed.blob, dim: dim };
 }
 
 // --- Хранение ---------------------------------------------------------------

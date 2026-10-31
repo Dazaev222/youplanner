@@ -18,7 +18,8 @@ import { flushPendingSync, markCloudReady, scheduleSync, settleHabitsAfterSync, 
 import { onFastAdd, onFastDone, onFastEdit, onFastInitCancel, onFastInitSave, renderFastView, resetFastForm } from './ui/fast-view.js';
 import {
   closeAssistantKeyModal, onAssistantChipClick, onAssistantClear,
-  onAssistantFormSubmit, onAssistantKeyCancel,
+  onAssistantFormSubmit, onAssistantImageClear, onAssistantImagePick,
+  onAssistantKeyCancel,
   onAssistantKeySave, onAssistantModelChange, onAssistantPdfClear,
   onAssistantPdfPick, openAssistantKeyModal, renderAssistantView,
 } from './ui/assistant-view.js';
@@ -593,6 +594,16 @@ export function bindEvents() {
   const assistantPdfIndicator = document.getElementById('assistant-pdf-indicator');
   if (assistantPdfIndicator) {
     assistantPdfIndicator.addEventListener('click', onAssistantPdfClear);
+  }
+
+  // Фото (Vision): камера открывает выбор файлов, плашка с именами — сброс
+  const assistantImageInput = document.getElementById('assistant-image-input');
+  if (assistantImageInput) {
+    assistantImageInput.addEventListener('change', onAssistantImagePick);
+  }
+  const assistantImageIndicator = document.getElementById('assistant-image-indicator');
+  if (assistantImageIndicator) {
+    assistantImageIndicator.addEventListener('click', onAssistantImageClear);
   }
 
   // Нижний таб-бар: тот же переключатель разделов, что и у кнопок шапки
