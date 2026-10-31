@@ -222,3 +222,30 @@ test('битый ответ 200 без idToken: null, повтор сразу �
   assert.equal(await context.getAuthToken(), null);
   assert.equal(networkCalls, 1, 'битый ответ дёргает сеть повторно');
 });
+
+// Временный сбой auth-сервера (5xx) — не доказательство смерти refresh-токена.
+// Отказ обмена должен стирать ключ только при 4xx: 5xx значит «сервер не смог»,
+// и живой ключ после него обязан дожить до следующей попытки.
+test('5xx на обмене refresh-токена: живой ключ не стирается, signUp не дёргается', async () => {
+  const signUpCalls = [];
+  const fetchImpl = (url) => {
+    const u = String(url);
+    if (u.indexOf('securetoken.googleapis.com') !== -1) {
+      return Promise.resolve(denied(503));
+    }
+    if (u.indexOf('identitytoolkit.googleapis.com') !== -1) {
+      signUpCalls.push(u);
+      return Promise.resolve(okJson({ idToken: 'tok-x', refreshToken: 'r-x', expiresIn: '3600' }));
+    }
+    return Promise.resolve(okJson({}));
+  };
+  const { sandbox, context } = loadApp({ fetchImpl });
+  sandbox.localStorage.setItem(AUTH_REFRESH_KEY, 'r-live');
+  context.setFirebaseApiKey(KEY);
+
+  assert.equal(await context.getAuthToken(), null, '5xx должен дать null, а не токен');
+  assert.equal(sandbox.localStorage.getItem(AUTH_REFRESH_KEY), 'r-live',
+    'временный сбой сервера стёр живой refresh-токен');
+  assert.equal(signUpCalls.length, 0,
+    'после 5xx нельзя заводить новый аккаунт: токен не доказано, что мёртв');
+});

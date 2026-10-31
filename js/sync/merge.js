@@ -121,7 +121,19 @@ export function mergeHabitsById(localHabits, cloudHabits, cloudWins, opts) {
 // устройстве не должно воскрешаться), при !pending — слияние по полям:
 // поле, которое есть только локально, сохраняется, разошедшиеся значения
 // уходят серверной стороне (её снимок новее нашей последней сверки).
-export function mergeRecordsByDay(localRecords, cloudRecords, cloudWins) {
+//
+// opts.tombstones (необязательно): значения удалённой привычки (поле дня с
+// именем привычки, чьё надгробие уже записано) не привозятся со старого
+// снимка — иначе вычищенные removeHabit записи возвращаются при первой же
+// сверке, и PUT кладёт их обратно на сервер (аудит 2026-10-31). Локальные
+// поля не трогаются: слияние аддитивно и локальное не стирает.
+export function mergeRecordsByDay(localRecords, cloudRecords, cloudWins, opts) {
+  const tombstones = opts && opts.tombstones && typeof opts.tombstones === 'object'
+    && !Array.isArray(opts.tombstones) ? opts.tombstones : null;
+  const dead = function (field) {
+    return tombstones !== null &&
+      Object.prototype.hasOwnProperty.call(tombstones, field);
+  };
   const merged = Object.assign({}, localRecords);
   const dates = Object.keys(cloudRecords);
   for (let i = 0; i < dates.length; i++) {
@@ -129,7 +141,18 @@ export function mergeRecordsByDay(localRecords, cloudRecords, cloudWins) {
     const cloudDay = cloudRecords[date];
     if (!cloudDay || typeof cloudDay !== 'object' || Array.isArray(cloudDay)) continue;
     if (!Object.prototype.hasOwnProperty.call(merged, date)) {
-      merged[date] = cloudDay;
+      if (tombstones === null) {
+        merged[date] = cloudDay;
+        continue;
+      }
+      // Новый день: привозим только значения живых привычек; день, весь
+      // состоящий из значений удалённых, не нужен вовсе
+      const day = {};
+      const fields = Object.keys(cloudDay);
+      for (let j = 0; j < fields.length; j++) {
+        if (!dead(fields[j])) day[fields[j]] = cloudDay[fields[j]];
+      }
+      if (Object.keys(day).length > 0) merged[date] = day;
       continue;
     }
     if (!cloudWins) continue;
@@ -137,6 +160,7 @@ export function mergeRecordsByDay(localRecords, cloudRecords, cloudWins) {
     const fields = Object.keys(cloudDay);
     for (let j = 0; j < fields.length; j++) {
       const field = fields[j];
+      if (dead(field)) continue;
       if (!Object.prototype.hasOwnProperty.call(day, field)) {
         day[field] = cloudDay[field];
         continue;
@@ -307,19 +331,24 @@ export function mergeCloudIntoLocal(local, cloud, opts) {
   // Коллекции с ключами: аддитивное слияние при любом раскладе. При pending —
   // только «заполнение дыр» (cloudWins=false): существующие локально элементы
   // не трогаются, приезжают лишь отсутствующие.
+  // Обеим коллекциям (привычкам и записям) нужны надгробия с двух сторон:
+  // и локальные, и приехавшие с этим снимком — он только что принят к
+  // слиянию, его метки — часть одного решения.
+  const tombstonesForMerge = cloudTombstones
+    ? mergeTombstonesById(local.tombstones, cloudTombstones)
+    : local.tombstones;
   if (validCloudHabits(cloud.habits) && hasData(cloud.habits)) {
-    // Ветке extra видны и локальные надгробия, и приехавшие с этим снимком:
-    // снимок только что принят к слиянию, его метки — часть одного решения
-    const tombstonesForHabits = cloudTombstones
-      ? mergeTombstonesById(local.tombstones, cloudTombstones)
-      : local.tombstones;
     merged.habits = mergeHabitsById(local.habits, cloud.habits, !pending, {
-      tombstones: tombstonesForHabits,
+      tombstones: tombstonesForMerge,
       sectionTs: sectionTsOf(cloud, 'habits', cloudTs),
     });
   }
   if (validCloudRecords(cloud.records) && hasData(cloud.records)) {
-    merged.records = mergeRecordsByDay(local.records, cloud.records, !pending);
+    // Записям надгробия нужны так же, как привычкам: значения удалённой
+    // привычки не привозятся со старого снимка (см. mergeRecordsByDay)
+    merged.records = mergeRecordsByDay(local.records, cloud.records, !pending, {
+      tombstones: tombstonesForMerge,
+    });
   }
 
   if (pending) {
