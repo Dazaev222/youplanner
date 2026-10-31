@@ -381,6 +381,14 @@ export function loadSleep() {
 // время из неё и уходит в историю, — поэтому проверяется и это. Отложенная
 // отправка ставится здесь же: запись входит в снимок узла и в файл копии
 // восьмым разделом (§5)
+// Запись готового объекта без валидации формы и без заводки дневного дня:
+// раздел уже прошёл loadSleep. Событие правки не эмитит — архивация
+// (js/data/archive.js) сообщает об изменении один раз на все свои разделы,
+// чтобы наверх уехал один PUT.
+export function saveSleepRecord(sleep) {
+  if (!sleep || typeof sleep !== 'object') return false;
+  return safeSetItem(SLEEP_KEY, JSON.stringify(sleep));
+}
 export function saveSleep(sleep) {
   if (!sleep || typeof sleep !== 'object') return;
   if (sleepTimeMinutes(sleep.bed) === null) return;

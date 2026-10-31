@@ -1,4 +1,4 @@
-const CACHE = 'youplanner-v27';
+const CACHE = 'youplanner-v28';
 // Иконки — все из manifest.json: отсутствующая в кэше иконка ломала бы
 // офлайн-установку PWA (аудит 2026-10-31: icon-512.png не кэшировался)
 const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon-512.png', './icon.svg',
@@ -29,14 +29,15 @@ const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './ic
   './js/ui/stats-view.js',
   './js/app.js',
   './js/core/bus.js', './js/core/dates.js', './js/core/db.js',
-  './js/core/storage.js', './js/core/dom.js',
+  './js/core/storage.js', './js/core/dom.js', './js/core/debounce.js',
   './js/data/storage.js', './js/data/schedule.js', './js/data/habits.js',
   './js/data/migrations.js', './js/data/records.js', './js/data/qaza.js',
   './js/data/prayer.js', './js/data/fast.js', './js/data/sleep.js',
   './js/data/stats.js', './js/data/backup.js', './js/data/background.js',
+  './js/data/archive.js',
   './js/data/ui.js',
   './js/data/sync.js',
-  './js/sync/state.js', './js/sync/validators.js'];
+  './js/sync/state.js', './js/sync/validators.js', './js/sync/merge.js'];
 
 self.addEventListener('install', function (e) {
   e.waitUntil(caches.open(CACHE).then(function (c) { return c.addAll(ASSETS); }));

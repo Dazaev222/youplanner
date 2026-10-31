@@ -1,3 +1,4 @@
+import { debounce } from '../core/debounce.js';
 import { escapeHtml } from '../core/dom.js';
 import { actualWakeTime, loadSleep, saveSleep, sleepAnchors, sleepCycleLabel, sleepCycleTimes, sleepDurationMinutes, sleepFallMinutes, sleepFormatDuration, sleepTimeMinutes } from '../data/sleep.js';
 // Значение поля экрана. Поля читаются как есть: набор, который видит человек
@@ -227,16 +228,17 @@ export function sleepBarMarkup(bed, fall, wake, cycles) {
   parts.push('</div>');
   return parts.join('');
 }
-// Правка любого поля или галочки: сначала пересчёт, потом запись. Галочка
-// идёт сюда же — она меняет то же решение, а формы на экране нет, отправлять
-// нечего. Сохраняется то, что в полях сейчас, — неполный набор saveSleep
-// отбросит сам. Слушаются оба события полей: колесо времени на телефоне
-// присылает только change
-export function onSleepFieldChange() {
-  syncRealWakeField();
-  const decision = sleepDecision();
-  if (!decision || !decision.ready) return;
-
+// Правка любого поля или галочки: пересчёт и итог — сразу, запись — с
+// задержкой. Аудит 2026-10-31: раньше каждый тик ввода (input на каждое
+// движение колеса времени) перечитывал и перезаписывал весь ключ сна с
+// дневником. Теперь серия правок даёт одну запись — через 500 мс от
+// последнего события, последним решением. Галочка идёт сюда же — она меняет
+// то же решение, а формы на экране нет, отправлять нечего. Слушаются оба
+// события полей: колесо времени на телефоне присылает только change
+const SLEEP_SAVE_DEBOUNCE_MS = 500;
+// Запись решения в хранилище. Неудача saveSleep (хранилище отказало) —
+// полный рендер экрана: поля перечитываются из данных, как раньше.
+function commitSleepDecision(decision) {
   if (!saveSleep({
     bed: decision.bed,
     fall: decision.fall,
@@ -249,8 +251,21 @@ export function onSleepFieldChange() {
   })) {
     renderSleepView();
     syncRealWakeField();
-    return;
   }
+}
+const debouncedSleepSave = debounce(commitSleepDecision, SLEEP_SAVE_DEBOUNCE_MS);
 
+export function onSleepFieldChange() {
+  syncRealWakeField();
+  const decision = sleepDecision();
+  if (!decision || !decision.ready) return;
+
+  // Итог на экране — мгновенно: он считается из полей, запись не ждёт
   renderSleepResult();
+  debouncedSleepSave(decision);
+}
+// Уход со вкладки или с экрана сна: отложенная запись выполняется сразу,
+// чтобы последний ввод не потерялся вместе с закрытой страницей.
+export function flushPendingSleepSave() {
+  debouncedSleepSave.flush();
 }

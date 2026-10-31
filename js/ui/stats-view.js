@@ -1,4 +1,5 @@
 import { escapeHtml } from '../core/dom.js';
+import { fastHistorySince } from '../data/archive.js';
 import { FAST_HISTORY_MIN, fastPeriodStats, loadFast } from '../data/fast.js';
 import { loadHabits } from '../data/habits.js';
 import { loadQazaLog, qazaDayCounts, qazaTotalRemaining } from '../data/qaza.js';
@@ -149,12 +150,15 @@ export function renderStatsFastView() {
   // fastPeriodStats отдаёт значения по дням, суммы done/add и since,
   // view только раскладывает готовое по местам
   const stats = fastPeriodStats(fast, dates);
+  // «История копится с» смотрит и в архив: детализация старше года срезана
+  // в своды (js/data/archive.js), но начало истории — не сегодня минус год
+  const since = fastHistorySince(fast);
 
   summary.innerHTML = statsSummaryMarkup([
     ['remaining', 'Остаток', String(fast.remaining)],
     ['done', 'Возмещено за период', String(stats.done)],
     ['added', 'Добавлено за период', String(stats.added)],
-    ['since', 'История копится с', stats.since === null ? '—' : stats.since],
+    ['since', 'История копится с', since === null ? '—' : since],
   ]);
 
   // Истории мало — вместо графика строка текста: три столбика на всю ширину
@@ -162,7 +166,7 @@ export function renderStatsFastView() {
   if (fast.history.length < FAST_HISTORY_MIN) {
     chart.innerHTML = '';
     chart.hidden = true;
-    note.textContent = 'История копится с ' + (stats.since === null ? '—' : stats.since) +
+    note.textContent = 'История копится с ' + (since === null ? '—' : since) +
       '. Данных пока мало для графика';
     note.hidden = false;
   } else {
