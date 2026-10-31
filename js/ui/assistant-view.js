@@ -10,6 +10,7 @@
 // со снимком данных трекера и последние 20 реплик.
 
 import { handleNetworkError, showErrorToast, showToast } from '../core/dom.js';
+import { compressImage } from '../data/image.js';
 
 // Ключ = доступ ассистента к neuraldeep.ru. Имя ключа — часть каркаса:
 // следующему заходу менять его нельзя без миграции.
@@ -23,7 +24,7 @@ export const ASSISTANT_HISTORY_KEY = 'youplanner.assistant_history';
 const ASSISTANT_API_URL = 'https://api.neuraldeep.ru/v1/chat/completions';
 export const ASSISTANT_MODELS = [
   { id: 'qwen3.6-35b-a3b', label: 'Qwen 3.6 — базовая (все тарифы)' },
-  { id: 'qwen3.8-27b', label: 'Qwen 3.8 — Starter/Pro, зрение' },
+  { id: 'qwen3.8-27b', label: 'Qwen 3.8 — Starter/Pro, зрение', vision: true },
   { id: 'gpt-oss-120b', label: 'GPT-OSS 120B — Starter/Pro, вне РФ' },
 ];
 const ASSISTANT_DEFAULT_MODEL = ASSISTANT_MODELS[0].id;
@@ -75,6 +76,14 @@ export function onAssistantModelChange() {
     // модель — расходник: пережить недоступное хранилище можно
   }
   if (wanted !== value) showToast('Модель: ' + wanted);
+}
+
+// Принимает ли модель изображения. Чистая функция: проверяется тестами.
+export function assistantModelSupportsVision(modelId) {
+  for (let i = 0; i < ASSISTANT_MODELS.length; i++) {
+    if (ASSISTANT_MODELS[i].id === modelId) return ASSISTANT_MODELS[i].vision === true;
+  }
+  return false;
 }
 
 function readHistory() {
@@ -196,9 +205,156 @@ function buildMessages() {
         + 'Если ответа в тексте нет — так и скажи.\n\n' + system;
     }
   }
-  return [{ role: 'system', content: system }].concat(
-    readHistory().slice(-HISTORY_SEND)
+  // Фото прикрепляются по семантике PDF: к каждому запросу, пока не убраны
+  // вручную (уточняющие вопросы видят то же фото). История остаётся текстовой.
+  if (imageContext && imageContext.length) {
+    system = 'Пользователь приложил к вопросу фото ('
+      + imageContext.length + ' шт.): рассмотрите их и опирайтесь на них в ответе.\n\n' + system;
+  }
+  return withVisionAttachments(
+    [{ role: 'system', content: system }].concat(readHistory().slice(-HISTORY_SEND)),
+    imageContext
   );
+}
+
+// --- Vision: фото в чате -----------------------------------------------------
+// Картинки живут в переменной модуля по образцу pdfContext: не в localStorage
+// (base64 раздул бы хранилище), перезагрузка страницы их сбрасывает. В историю
+// диалога попадает только текст вопроса с маркером [фото: имя]; в payload
+// последний user-реплики разворачивается в OpenAI-vision content-массив.
+const ASSISTANT_IMAGE_MAX = 3;        // картинок в одном вопросе
+const IMAGE_MAX_SIDE = 1568;          // рабочий диапазон vision-энкодеров Qwen
+const IMAGE_MAX_BYTES = 400 * 1024;   // base64 раздует в ~1.37× — до ~550 КБ
+// Чистая функция: базовые сообщения + [{dataUrl}] → последний user-реплике
+// добавляются image_url-части. Системный промпт и чужие реплики не трогаются;
+// user-реплики нет — массив возвращается как был. Проверяется тестами.
+export function withVisionAttachments(messages, images) {
+  if (!images || !images.length) return messages;
+  let idx = -1;
+  for (let i = messages.length - 1; i >= 0; i--) {
+    if (messages[i] && messages[i].role === 'user') { idx = i; break; }
+  }
+  if (idx === -1) return messages;
+  const base = messages[idx];
+  const content = [{
+    type: 'text',
+    text: base && typeof base.content === 'string' ? base.content : '',
+  }];
+  for (let i = 0; i < images.length; i++) {
+    if (images[i] && images[i].dataUrl) {
+      content.push({ type: 'image_url', image_url: { url: images[i].dataUrl } });
+    }
+  }
+  const merged = messages.slice();
+  merged[idx] = { role: 'user', content: content };
+  return merged;
+}
+
+let imageContext = null;   // [{ dataUrl, name, bytes }] | null
+let imageCompressing = false;
+
+function blobToDataURL(blob) {
+  return new Promise(function (resolve, reject) {
+    const reader = new FileReader();
+    reader.onload = function () { resolve(String(reader.result)); };
+    reader.onerror = function () {
+      reject(reader.error || new Error('чтение файла не удалось'));
+    };
+    reader.readAsDataURL(blob);
+  });
+}
+
+function setImageIndicator(text) {
+  const el = document.getElementById('assistant-image-indicator');
+  if (!el) return;
+  el.textContent = text || '';
+  el.hidden = !text;
+}
+
+function updateImageIndicator() {
+  if (!imageContext || !imageContext.length) {
+    setImageIndicator('');
+    return;
+  }
+  const parts = [];
+  for (let i = 0; i < imageContext.length; i++) {
+    parts.push(imageContext[i].name + ' · '
+      + Math.max(1, Math.round(imageContext[i].bytes / 1024)) + ' КБ');
+  }
+  setImageIndicator('✕ ' + parts.join(' | ') + ' — нажмите, чтобы убрать');
+}
+
+export function onAssistantImagePick() {
+  const input = document.getElementById('assistant-image-input');
+  const files = input && input.files;
+  // Сброс значения — как у PDF: иначе повторный выбор того же файла не
+  // стреляет change, и камера кажется сломанной
+  if (input) input.value = '';
+  if (!files || !files.length) return;
+  if (imageCompressing) return;
+  compressChatImages(files);
+}
+
+async function compressChatImages(fileList) {
+  const room = ASSISTANT_IMAGE_MAX - (imageContext ? imageContext.length : 0);
+  if (room <= 0) {
+    showErrorToast('Не больше ' + ASSISTANT_IMAGE_MAX
+      + ' фото — уберите лишние по чипу над полем ввода');
+    return;
+  }
+  imageCompressing = true;
+  updateAssistantControls();
+  setImageIndicator('Сжимаю…');
+  const added = [];
+  let limitSkipped = 0;
+  try {
+    for (let i = 0; i < fileList.length; i++) {
+      if (added.length >= room) {
+        limitSkipped = fileList.length - i;
+        break;
+      }
+      const file = fileList[i];
+      try {
+        const compressed = await compressImage(file, {
+          maxSide: IMAGE_MAX_SIDE,
+          maxBytes: IMAGE_MAX_BYTES,
+        });
+        added.push({
+          dataUrl: await blobToDataURL(compressed.blob),
+          name: file.name,
+          bytes: compressed.blob.size,
+        });
+      } catch (e) {
+        console.error('[assistant] сжатие фото не удалось:', e);
+        showErrorToast('Не удалось сжать «' + file.name + '»');
+      }
+    }
+    if (added.length) {
+      imageContext = (imageContext || []).concat(added);
+      updateImageIndicator();
+      showToast('Фото прикреплено к чату'
+        + (added.length > 1 ? ' (' + added.length + ' шт.)' : ''));
+      if (limitSkipped > 0) {
+        showErrorToast('Взяты первые ' + added.length + ' — не больше '
+          + ASSISTANT_IMAGE_MAX + ' фото за раз');
+      }
+    } else {
+      setImageIndicator('');
+    }
+  } finally {
+    imageCompressing = false;
+    updateAssistantControls();
+    if (!imageContext || !imageContext.length) setImageIndicator('');
+  }
+}
+
+export function onAssistantImageClear() {
+  if (imageCompressing) return;
+  if (imageContext && imageContext.length) {
+    imageContext = null;
+    setImageIndicator('');
+    showToast('Фото убраны из чата');
+  }
 }
 
 // --- Ход к API ---------------------------------------------------------------
@@ -727,6 +883,9 @@ export function renderAssistantView() {
   } else {
     openAssistantKeyModal();
   }
+  // Чип фото живёт пока прикреплены снимки: переменная модуля переживает
+  // уход с вкладки и обратно
+  updateImageIndicator();
   renderHistory();
 }
 
@@ -841,8 +1000,27 @@ function appendMessage(kind, text, silent) {
   return msg;
 }
 
-function appendUserMessage(text) {
-  return appendMessage('user', text);
+function appendUserMessage(text, images) {
+  const chat = document.getElementById('assistant-chat');
+  if (!chat) return null;
+  const msg = document.createElement('div');
+  msg.className = 'assistant-msg assistant-msg-user';
+  // Фото — уменьшенные копии прикреплённых файлов: dataUrl уже сжат до
+  // ≤1568 px по длинной стороне, отдельного ресайза не нужно. Текст —
+  // текстовым узлом: реплики пользователя не должны превращаться в разметку.
+  if (images && images.length) {
+    for (let i = 0; i < images.length; i++) {
+      const photo = document.createElement('img');
+      photo.className = 'assistant-msg-photo';
+      photo.src = images[i].dataUrl;
+      photo.alt = 'Прикреплённое фото: ' + images[i].name;
+      msg.appendChild(photo);
+    }
+  }
+  msg.appendChild(document.createTextNode(text));
+  chat.appendChild(msg);
+  msg.scrollIntoView({ block: 'end', behavior: 'smooth' });
+  return msg;
 }
 
 // Точка входа и для формы, и для чипов: у чипа текст сообщения лежит
@@ -860,10 +1038,12 @@ function updateAssistantControls() {
   const input = document.getElementById('assistant-input');
   const send = document.getElementById('assistant-send');
   const pdfBtn = document.getElementById('assistant-pdf-btn');
-  const blocked = assistantBusy || pdfParsing;
+  const imageBtn = document.getElementById('assistant-image-btn');
+  const blocked = assistantBusy || pdfParsing || imageCompressing;
   if (input) input.disabled = assistantBusy;
   if (send) send.disabled = blocked;
   if (pdfBtn) pdfBtn.classList.toggle('is-disabled', blocked);
+  if (imageBtn) imageBtn.classList.toggle('is-disabled', blocked);
 }
 
 function setAssistantBusy(busy) {
@@ -871,12 +1051,17 @@ function setAssistantBusy(busy) {
   updateAssistantControls();
 }
 
-// false — отправка не состоялась (занято/читается PDF/нет ключа), поле не чистится
+// false — отправка не состоялась (занято/читается PDF/сжимается фото/нет
+// ключа), поле не чистится
 export function onAssistantSubmit(text) {
   const message = String(text || '').trim();
   if (!message) return false;
   if (pdfParsing) {
     showErrorToast('PDF ещё читается — повторите отправку через пару секунд');
+    return false;
+  }
+  if (imageCompressing) {
+    showErrorToast('Фото ещё сжимается — повторите отправку через секунду');
     return false;
   }
   if (assistantBusy) return false;
@@ -887,8 +1072,20 @@ export function onAssistantSubmit(text) {
     openAssistantKeyModal();
     return false;
   }
-  appendUserMessage(message);
-  pushHistory('user', message);
+  const images = imageContext ? imageContext.slice() : [];
+  // Фото при модели без зрения не отправляются вовсе: API ответил бы
+  // непонятной ошибкой. Модалка модели уже открыта — переключение рядом.
+  if (images.length && !assistantModelSupportsVision(readAssistantModel())) {
+    showErrorToast('Текущая модель не принимает изображения — переключитесь '
+      + 'на qwen3.8-27b (шестерёнка в шапке)');
+    openAssistantKeyModal();
+    return false;
+  }
+  const names = images.map(function (img) { return img.name; }).join(', ');
+  appendUserMessage(message, images);
+  // В историю — только текст: маркер [фото: …] оставляет диалог читаемым
+  // и на следующих репликах напоминает модели про приложенные снимки
+  pushHistory('user', names ? message + '\n[фото: ' + names + ']' : message);
   runAssistantReply();
   return true;
 }
