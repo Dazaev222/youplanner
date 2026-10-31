@@ -936,20 +936,42 @@ export function renderAssistantView() {
 // поднимается весь экран ассистента (margin-bottom в flex-колонке #app):
 // лента и док остаются видимы, шапка не сдвигается. При закрытой клавиатуре
 // перекрытие нулевое — инлайн-стиль снимается, safe-area CSS возвращается.
+//
+// Тот же overlap ведёт класс body.keyboard-open для CSS (mobile.css): он
+// прячет плавающий таб-бар и снимает запас под него (84px + safe-area),
+// иначе док зависает над клавиатурой с пустой дырой. Порог с гистерезисом:
+// «шум» вьюпорта (сворачивание панели Safari и т.п.) даёт перекрытие до
+// ~100px, самая низкая программная клавиатура (iPhone в landscape) — от
+// ~200px. На Android класс сам не включается: там окно при клавиатуре
+// сжимается целиком, innerHeight догоняет visualViewport и overlap
+// остаётся около нуля.
 let viewportBound = false;
+const KEYBOARD_OPEN_AT = 120;    // перекрытие, с которого клавиатура считается открытой
+const KEYBOARD_CLOSE_BELOW = 60; // ниже — закрытой (гистерезис от дребезга)
 function bindViewportDockFix() {
   if (viewportBound) return;
   const viewport = window.visualViewport;
   if (!viewport) return;   // старые браузеры без API — живут как раньше
   viewportBound = true;
   let lastOverlap = -1;
+  let keyboardOpen = false;
   const apply = function () {
-    const view = document.getElementById('assistant-view');
-    if (!view) return;
     const overlap = Math.round(Math.max(0,
       window.innerHeight - viewport.height - viewport.offsetTop));
     if (overlap === lastOverlap) return;
     lastOverlap = overlap;
+    // Состояние клавиатуры — факт вьюпорта, а не экрана ассистента: класс
+    // ставится на body безотносительно наличия #assistant-view, CSS от него
+    // нейтрален (правила только для телефона и внутри view-экранов)
+    if (!keyboardOpen && overlap >= KEYBOARD_OPEN_AT) {
+      keyboardOpen = true;
+      document.body.classList.add('keyboard-open');
+    } else if (keyboardOpen && overlap < KEYBOARD_CLOSE_BELOW) {
+      keyboardOpen = false;
+      document.body.classList.remove('keyboard-open');
+    }
+    const view = document.getElementById('assistant-view');
+    if (!view) return;
     view.style.marginBottom = overlap > 0 ? overlap + 'px' : '';
   };
   viewport.addEventListener('resize', apply);

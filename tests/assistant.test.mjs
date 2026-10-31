@@ -198,3 +198,92 @@ test('selectPdfChunks: пустой вопрос и пустой список �
   assert.equal(context.selectPdfChunks('вопрос', [], 50000), '');
   assert.equal(context.selectPdfChunks(null, null, 50000), '');
 });
+
+// --- Клавиатура iOS: класс body.keyboard-open (bindViewportDockFix) --------
+// Классом ведёт CSS в mobile.css: прячет таб-бар и снимает запас под него,
+// пока клавиатура открыта. Здесь проверяется сам переключатель: реальный
+// слушатель visualViewport из песочницы, без DOM-дерева — body.classList
+// подменяется на записывающую заглушку, как и весь document в loadApp.
+
+test('keyboard-open: класс ставится по перекрытию вьюпорта и снимается с гистерезисом', () => {
+  const { sandbox, context } = loadApp();
+  const classes = new Set();
+  sandbox.document.body.classList = {
+    add: (c) => classes.add(c),
+    remove: (c) => classes.delete(c),
+    toggle: () => {},
+    contains: (c) => classes.has(c),
+  };
+  const view = { style: {} };
+  sandbox.document.getElementById = (id) => (id === 'assistant-view' ? view : null);
+  const handlers = {};
+  sandbox.window.visualViewport = {
+    height: 800,
+    offsetTop: 0,
+    addEventListener(type, fn) {
+      (handlers[type] = handlers[type] || []).push(fn);
+    },
+  };
+  sandbox.window.innerHeight = 800;
+  context.bindViewportDockFix();
+  // второй вызов не должен ставить параллельный слушатель
+  context.bindViewportDockFix();
+  assert.equal(handlers.resize.length, 1, 'слушатель resize ставится один раз');
+  const resize = handlers.resize[0];
+  assert.ok(resize, 'слушатель visualViewport.resize должен существовать');
+
+  // закрытая клавиатура: перекрытия нет — ни класса, ни подъёма
+  resize();
+  assert.ok(!classes.has('keyboard-open'), 'без перекрытия класса быть не должно');
+  assert.equal(view.style.marginBottom, '');
+
+  // клавиатура открылась: iOS не сжимает окно, перекрытие 340px
+  sandbox.window.visualViewport.height = 460;
+  resize();
+  assert.ok(classes.has('keyboard-open'), 'перекрытие 340px — класс должен ставиться');
+  assert.equal(view.style.marginBottom, '340px', 'экран поднимается на перекрытие');
+
+  // гистерезис: перекрытие 90px (шум вьюпорта) не гасит уже открытый класс
+  sandbox.window.visualViewport.height = 710;
+  resize();
+  assert.ok(classes.has('keyboard-open'), 'в мёртвой зоне класс держится');
+  assert.equal(view.style.marginBottom, '90px');
+
+  // клавиатура закрылась: класс снят, стиль вернулся к safe-area CSS
+  sandbox.window.visualViewport.height = 800;
+  resize();
+  assert.ok(!classes.has('keyboard-open'), 'при закрытии класс снимается');
+  assert.equal(view.style.marginBottom, '');
+});
+
+test('keyboard-open: на Android (окно сжимается целиком) класс не ставится', () => {
+  const { sandbox, context } = loadApp();
+  const classes = new Set();
+  sandbox.document.body.classList = {
+    add: (c) => classes.add(c),
+    remove: (c) => classes.delete(c),
+    toggle: () => {},
+    contains: (c) => classes.has(c),
+  };
+  const view = { style: {} };
+  sandbox.document.getElementById = (id) => (id === 'assistant-view' ? view : null);
+  const handlers = {};
+  sandbox.window.visualViewport = {
+    height: 800,
+    offsetTop: 0,
+    addEventListener(type, fn) {
+      (handlers[type] = handlers[type] || []).push(fn);
+    },
+  };
+  sandbox.window.innerHeight = 800;
+  context.bindViewportDockFix();
+  const resize = handlers.resize[0];
+
+  // Android: клавиатура на 340px сжимает и окно, и visualViewport
+  sandbox.window.innerHeight = 460;
+  sandbox.window.visualViewport.height = 460;
+  resize();
+  assert.ok(!classes.has('keyboard-open'),
+    'перекрытия нет — класс не должен ставиться');
+  assert.equal(view.style.marginBottom, '', 'подъём тоже не нужен');
+});
