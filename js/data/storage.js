@@ -7,4 +7,6 @@ export const STORAGE_KEYS = {
   tasks: 'youplanner.tasks',
   schedule: 'youplanner.schedule',
   migrations: 'youplanner.migrations',
+  // Месячные сводки историй старше года (js/data/archive.js)
+  archive: 'youplanner.archive',
 };

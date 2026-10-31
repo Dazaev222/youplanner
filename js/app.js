@@ -3,6 +3,7 @@ import { getWeekStart, toISODate } from './core/dates.js';
 import { cssEscape, handleNetworkError, showErrorToast, showToast, syncSheetToKeyboard } from './core/dom.js';
 import { compressBgImage, loadBgBlob, loadBgDim, resetBg, saveBgBlob, saveBgDim } from './data/background.js';
 import { applyBackup, buildBackup, parseBackup } from './data/backup.js';
+import { archiveHistories } from './data/archive.js';
 import { loadHabits } from './data/habits.js';
 import { migrateDropTasks } from './data/migrations.js';
 import { QAZA_HABIT_ID, loadQaza } from './data/qaza.js';
@@ -28,7 +29,7 @@ import { onPrayerGeo, onPrayerMadhhabChange, onPrayerManualSave, onPrayerMethodC
 import { ensureQazaState, onQazaAddPick, onQazaAddSubmit, onQazaDone, onQazaStartChange, onQazaUndo, qazaCellMarkup, renderQazaView, setQazaState } from './ui/qaza-view.js';
 import { applyScreen } from './ui/router.js';
 import { onScheduleAddSubmit, onScheduleEditListClick, renderScheduleEditView, renderScheduleView } from './ui/schedule-view.js';
-import { onSleepFieldChange, renderSleepView } from './ui/sleep-view.js';
+import { flushPendingSleepSave, onSleepFieldChange, renderSleepView } from './ui/sleep-view.js';
 import { appState, isMainDayView, isMobileView, ui } from './ui/state.js';
 import { closeStatsMenu, isStatsMenuOpen, isStatsView, openStatsMenu, renderStatsCategory, renderStatsFastView, renderStatsHabitView, renderStatsHabitsView, renderStatsQazaView, renderStatsSleepView, renderStatsView, setStatsHabitId } from './ui/stats-view.js';
 /* YouPlanner — точка сборки интерфейса (app.js).
@@ -174,6 +175,10 @@ export function init() {
       settleHabitsAfterSync(result);
       markCloudReady();
       migrateDropTasks();
+      // Первый проход архивации (js/data/archive.js): локальные истории
+      // старше года срезаются в своды до отправки — наверх уходит уже
+      // обрезанная копия. Повторные проходы делает подписчик sync:applied.
+      archiveHistories();
       // Накопленную правку забирает отправка, и приоритет локального на этом
       // исчерпан: оставленный флаг запирал бы применение серверных снимков
       // до конца сеанса.
@@ -313,9 +318,14 @@ export function bindEvents() {
   }
 
   // Экран «Цикл сна»: возврат туда, откуда вошли, и пересчёт при правке любого
-  // поля. Слушаются оба события — колесо времени на телефоне присылает только change
+  // поля. Слушаются оба события — колесо времени на телефоне присылает только
+  // change. Возврат выполняет отложенную запись сна сразу: экран закрывается,
+  // и последний ввод не должен потеряться
   const sleepBack = document.getElementById('sleep-back');
-  if (sleepBack) sleepBack.addEventListener('click', function () { switchAppView(sleepReturnView); });
+  if (sleepBack) sleepBack.addEventListener('click', function () {
+    flushPendingSleepSave();
+    switchAppView(sleepReturnView);
+  });
 
   ['sleep-bed', 'sleep-fall', 'sleep-wake'].forEach(function (id) {
     const field = document.getElementById(id);
@@ -718,6 +728,9 @@ export function bindEvents() {
   document.addEventListener('visibilitychange', function () {
     if (document.visibilityState === 'hidden') {
       flushPendingSync();
+      // Отложенная запись сна — та же история: страница могут закрыть раньше
+      // 500-мс таймера ввода (js/ui/sleep-view.js)
+      flushPendingSleepSave();
       return;
     }
     syncFromCloud();
@@ -1097,25 +1110,36 @@ bus.on('qaza:changed', function () {
   updateQazaCells();
   updateRowCircle(QAZA_HABIT_ID);
 });
+// Точечная перерисовка после чужих данных (аудит 2026-10-31): раньше синк
+// на каждое применение перерисовывал все вкладки, включая скрытые. Теперь
+// перерисовывается только видимый экран: скрытые собираются заново при входе
+// через ROUTE_RENDER, как уже живут статистика и сон. Перерисовка — только
+// экранов, чьи данные реально приезжают в снимке; schedule-edit и stats
+// остаются ленивыми, как и были.
+function renderAfterRemoteData() {
+  switch (currentView) {
+    case 'main': renderMainView(); return;
+    case 'qaza': renderQazaView(); return;
+    case 'prayer': renderPrayerView(); return;
+    case 'fast': renderFastView(); return;
+    case 'schedule': renderScheduleView(); return;
+  }
+}
 bus.on('data:replaced', function () {
   appState.habits = loadHabits();
-  setQazaState(loadQaza());
-  renderMainView();
-  renderQazaView();
-  renderPrayerView();
-  renderFastView();
+  setQazaState(loadQaza(true));
+  // Файл копии мог привезти полные истории: срезаем старше года
+  archiveHistories();
+  renderAfterRemoteData();
 });
 bus.on('sync:applied', function () {
   // сначала состояние (его раньше обновлял сам слой синхронизации),
-  // затем перерисовка — экраны читают appState и qazaState
+  // затем архивация принесённых снимком историй и перерисовка —
+  // экраны читают appState и qazaState
   appState.habits = loadHabits();
   setQazaState(loadQaza(true));
-  renderMainView();
-  renderQazaView();
-  renderPrayerView();
-  renderFastView();
-  const sw = document.getElementById('schedule-view');
-  if (sw && !sw.hidden) renderScheduleView();
+  archiveHistories();
+  renderAfterRemoteData();
 });
 bus.on('storage:error', function () {
   showToast('Не удалось сохранить: хранилище переполнено');

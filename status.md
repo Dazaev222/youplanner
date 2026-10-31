@@ -7,7 +7,7 @@
 - Папка: `C:\Users\Admin\Desktop\youplanner-new`
 - Код: `index.html` (разметка) + `styles/` (CSS по секциям) + `js/`
   (ES-модули: `core/`, `data/`, `sync/`, `ui/`, `vendor/`); сборки нет.
-- PWA: `manifest.json`, `sw.js` (кэш `youplanner-v26`), иконки.
+- PWA: `manifest.json`, `sw.js` (кэш `youplanner-v28`), иконки.
 - Документация: `README.md`, `Spec.md`, `status.md`.
 - Репозиторий: https://github.com/Dazaev222/youplanner
 - Сайт: https://dazaev222.github.io/youplanner/
@@ -76,6 +76,21 @@
   и импорт в файл, PWA на iPhone.
 
 ## Заходы
+
+- 2026-10-31 — Архитектурные фиксы: гонка бэкапов двух устройств закрыта
+  слиянием снимков перед PUT (js/sync/merge.js: коллекции — привычки по id,
+  записи по датам, дни сна, тройки журнала каза — сливаются аддитивно;
+  цельные разделы qaza/prayer/fast/schedule/скаляры сна — LWW по меткам
+  sectionTs из снимка, при pending-правке — только «заполнение дыр»);
+  запись сна под debounce 500 мс (js/core/debounce.js, js/ui/sleep-view.js:
+  пересчёт итога мгновенно, запись — от последнего ввода, flush при уходе
+  со вкладки/экрана); sync:applied и data:replaced перерисовывают только
+  видимый экран (js/app.js: скрытые собираются при входе через ROUTE_RENDER,
+  заодно data:replaced дорисовывает расписание); архивация историй старше
+  года в месячные своды (js/data/archive.js, ключ youplanner.archive:
+  сон/ураза/журнал каза/записи дней, граница — начало месяца 11 месяцев
+  назад, проход идемпотентен, «История копится с» читает архив).
+  Тесты 110 → 145 (debounce, sync-merge, archive), chaos 7/7, SW v28.
 
 - 2026-10-31 — Транзакционность и кэш: applyCloudData и applyBackup стали
   «всё или ничего» — снимок целиком валидируется в stage, предыдущие
@@ -377,7 +392,8 @@
 
 youplanner.habits, records, qaza, sync.ts, mainView, stats.period,
 prayer, migrations, youplanner.qaza.fast, youplanner.qaza.log,
-youplanner.schedule, youplanner.sleep, youplanner.api_key,
+youplanner.schedule, youplanner.sleep, youplanner.archive (месячные
+своды историй старше года), youplanner.api_key,
 youplanner.assistant_model,
 youplanner.assistant_history (ключи ассистента — только устройство),
 youplanner.app_bg (затемнение фона; фото фона — Blob в IndexedDB).
@@ -385,11 +401,12 @@ youplanner.app_bg (затемнение фона; фото фона — Blob в 
 ## Тесты
 
 Штатный прогон (без браузера): `npm test` → **90/90** в 14 файлах
-`tests/*.test.mjs` (smoke, bus, backup, sync, core, modules, timers, xss,
-assistant, sw-assets, sleep, qaza-done, schedule, fast). Покрывают граф
-модулей и висячие id, шину, бэкапы, single-flight синхронизации,
-XSS-экранирование, fallback-таймеры fetch, PDF-чанкинг и покрытие
-`ASSETS` в `sw.js`.
+`tests/*.test.mjs` (smoke, bus, backup, sync, sync-merge, archive, debounce,
+core, modules, timers, xss, assistant, sw-assets, sleep, qaza-done,
+schedule, fast, records, firebase-auth). Покрывают граф модулей и висячие
+id, шину, бэкапы, single-flight синхронизации и слияние снимков,
+архивацию историй, debounce, XSS-экранирование, fallback-таймеры fetch,
+PDF-чанкинг и покрытие `ASSETS` в `sw.js`.
 
 Браузерный chaos-E2E: `node tests/e2e/chaos.e2e.mjs` → **7/7** (Playwright,
 внешняя сеть заблокирована, Firebase — заглушка): недоступный Firebase,

@@ -1,6 +1,7 @@
 import { PRAYER_MADHHABS, PRAYER_METHODS } from '../data/prayer.js';
 import { NAMAZ_ORDER, QAZA_VERSION, validQazaLogDate } from '../data/qaza.js';
 import { SLEEP_MAX_MINUTES, sleepDurationMinutes, sleepFallMinutes, sleepTimeMinutes } from '../data/sleep.js';
+import { ARCHIVE_VERSION } from '../data/archive.js';
 
 
 // Раздел с данными: непустой список или непустой объект.
@@ -114,5 +115,29 @@ export function validCloudSchedule(data) {
   if (!data || typeof data !== 'object' || Array.isArray(data)) return false;
   if (!Array.isArray(data.weekday) || !Array.isArray(data.weekend) ||
       !Array.isArray(data.fasting) || !Array.isArray(data.physical)) return false;
+  return true;
+}
+// Архив: месячные сводки историй (js/data/archive.js). Форма: четыре раздела,
+// у каждого — карта месяцев 'YYYY-MM' с объектами-суммами; у fast может быть
+// since — дата начала срезанной истории. Проверка формы, не содержимого:
+// сводки производные, пересчитываются заново при каждой архивации.
+export function validCloudArchive(archive) {
+  if (!archive || typeof archive !== 'object' || Array.isArray(archive)) return false;
+  if (archive.version !== ARCHIVE_VERSION) return false;
+  const parts = ['sleep', 'fast', 'qaza', 'records'];
+  for (let i = 0; i < parts.length; i++) {
+    const part = archive[parts[i]];
+    if (!part || typeof part !== 'object' || Array.isArray(part)) return false;
+    if (!part.months || typeof part.months !== 'object' || Array.isArray(part.months)) return false;
+    const months = Object.keys(part.months);
+    for (let j = 0; j < months.length; j++) {
+      if (!/^\d{4}-\d{2}$/.test(months[j])) return false;
+      const value = part.months[months[j]];
+      if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    }
+  }
+  const since = archive.fast.since;
+  if (since !== undefined && since !== null &&
+      (typeof since !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(since))) return false;
   return true;
 }

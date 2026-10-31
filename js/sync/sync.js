@@ -1,4 +1,5 @@
 import { bus } from '../core/bus.js';
+import { ARCHIVE_KEY, loadArchive } from '../data/archive.js';
 import { FAST_KEY, FAST_VERSION, loadFast, validFastHistory } from '../data/fast.js';
 import { getAuthToken } from '../data/firebase-auth.js';
 import { DEFAULT_HABITS, defaultHabit, loadHabits, saveHabits } from '../data/habits.js';
@@ -11,7 +12,8 @@ import { SLEEP_KEY, loadSleep, validSleepHistory } from '../data/sleep.js';
 import { STORAGE_KEYS } from '../data/storage.js';
 import { BACKUP_LIMIT, FIREBASE_BACKUPS_URL, FIREBASE_URL, SYNC_DEBOUNCE_MS, SYNC_TS_KEY } from '../data/sync.js';
 import { clearSyncPending, markSyncPending, normalizing, saveNormalized, syncPending, syncTs } from './state.js';
-import { hasData, validCloudFast, validCloudHabits, validCloudPrayer, validCloudQaza, validCloudQazaLog, validCloudRecords, validCloudSchedule, validCloudSleep } from './validators.js';
+import { mergeCloudIntoLocal } from './merge.js';
+import { hasData, validCloudArchive, validCloudFast, validCloudHabits, validCloudPrayer, validCloudQaza, validCloudQazaLog, validCloudRecords, validCloudSchedule, validCloudSleep } from './validators.js';
 export let syncTimer = null;
 // Сетевой таймаут обменов. Без него зависшее соединение (сеть отдаёт TCP,
 // но не отвечает) держит syncExchange открытым вечно: правки встают в
@@ -232,6 +234,13 @@ export function applyCloudData(data, ts) {
     if (validCloudSchedule(data.schedule)) {
       stage.push({ key: STORAGE_KEYS.schedule, value: JSON.stringify(data.schedule) });
     }
+    // Архив — месячные сводки историй (js/data/archive.js). Раздел заменяет
+    // локальный целиком: сводки производные, месяцы пересчитываются заново
+    // при каждой архивации. Раздела в снимке нет — локальный архив не
+    // трогается: снимок старой версии не должен обнулять то, чего не знает.
+    if (validCloudArchive(data.archive)) {
+      stage.push({ key: ARCHIVE_KEY, value: JSON.stringify(data.archive) });
+    }
 
     // Нечего применять: прежний код с cloudApplied=false не писал метку
     // и не эмитил — выходим с тем же наблюдаемым результатом (undefined)
@@ -407,6 +416,17 @@ export async function syncToCloudNow() {
     previous = null;
   }
 
+  // Гонка бэкапов двух устройств (аудит 2026-10-31): PUT затирает узел
+  // целиком, и правки, которые другое устройство записало после нашей
+  // последней сверки, гибли бы молча. Пока серверный снимок новее последней
+  // сверки, он сливается с локальным состоянием и слияние применяется себе:
+  // наверх уходит объединение, а не перезапись (js/sync/merge.js). Равные
+  // метки — снимок уже виден локально, слияние не нужно.
+  const cloudTs = previous ? Number(previous.updatedAt) || 0 : 0;
+  if (previous && cloudTs > syncTs()) {
+    applyMergedFromCloud(previous);
+  }
+
   try {
     const response = await fetchWithTimeout(FIREBASE_URL + '.json', {
       method: 'PUT',
@@ -451,11 +471,108 @@ export function syncBody(ts, previous) {
       // не может: loadSleep() возвращает либо полную запись, либо null.
       sleep: loadSleep() || null,
       schedule: loadSchedule(),
+      // Архив — сводки старше года (js/data/archive.js): второе устройство
+      // получает суммы срезанной детализации вместе со снимком.
+      archive: loadArchive() || null,
+      // Метки свежести по разделам для слияния (js/sync/merge.js): PUT пишет
+      // все разделы разом, поэтому все метки равны времени отправки. Раздел
+      // чужого снимка применяется, только если его метка строго новее нашей
+      // последней сверки; в снимках до введения меток роль играет updatedAt.
+      sectionTs: {
+        habits: ts,
+        records: ts,
+        qaza: ts,
+        prayer: ts,
+        fast: ts,
+        qazaLog: ts,
+        sleep: ts,
+        schedule: ts,
+      },
       updatedAt: ts,
     });
   } finally {
     syncing = false;
   }
+}
+// Ключ хранилища для раздела слияния. null — раздел без своего ключа
+// (таких в слитом снимке быть не должно).
+function mergeSectionKey(section) {
+  switch (section) {
+    case 'habits': return STORAGE_KEYS.habits;
+    case 'records': return STORAGE_KEYS.records;
+    case 'qaza': return QAZA_STORAGE_KEY;
+    case 'prayer': return PRAYER_KEY;
+    case 'fast': return FAST_KEY;
+    case 'qazaLog': return QAZA_LOG_KEY;
+    case 'sleep': return SLEEP_KEY;
+    case 'schedule': return STORAGE_KEYS.schedule;
+    case 'archive': return ARCHIVE_KEY;
+  }
+  return null;
+}
+// Слияние облачного снимка с локальным состоянием и запись изменившихся
+// разделов (гонка двух устройств, см. syncToCloudNow). Те же три фазы, что
+// у applyCloudData: сбор stage без записей, снимок прежнего состояния,
+// запись с откатом. Разделы, которые слияние не меняло, не пишутся вовсе:
+// sync:applied и перерисовка — только на реальные изменения. Пишем прямо
+// в хранилище: saveX поставили бы отправку на каждый раздел, а здесь вся
+// порция уезжает текущим PUT.
+function applyMergedFromCloud(previous) {
+  const local = {
+    habits: loadHabits(),
+    records: loadRecords(),
+    qaza: loadQaza(true),
+    prayer: loadPrayer() || {},
+    fast: loadFast() || null,
+    qazaLog: loadQazaLog() || null,
+    sleep: loadSleep() || null,
+    schedule: loadSchedule(),
+    archive: loadArchive(),
+  };
+  const merged = mergeCloudIntoLocal(local, previous, {
+    pending: syncPending,
+    localTs: syncTs(),
+  });
+  if (!merged) return;
+
+  const stage = [];
+  const sections = Object.keys(merged);
+  for (let i = 0; i < sections.length; i++) {
+    const section = sections[i];
+    const key = mergeSectionKey(section);
+    if (!key) continue;
+    const before = local[section] === undefined ? null : local[section];
+    const after = merged[section] === undefined ? null : merged[section];
+    if (JSON.stringify(before) === JSON.stringify(after)) continue;
+    stage.push({ key: key, value: JSON.stringify(after), section: section });
+  }
+  if (stage.length === 0) return;
+
+  const appliedLog = [];
+  for (let i = 0; i < stage.length; i++) {
+    const previousValue = localStorage.getItem(stage[i].key);
+    appliedLog.push({
+      key: stage[i].key,
+      previous: previousValue,
+      had: previousValue !== null,
+      written: false,
+    });
+  }
+  for (let i = 0; i < stage.length; i++) {
+    try {
+      localStorage.setItem(stage[i].key, stage[i].value);
+    } catch (e) {
+      rollbackAppliedKeys(appliedLog, 'applyMergedFromCloud');
+      bus.emit('storage:error');
+      return;
+    }
+    appliedLog[i].written = true;
+    if (stage[i].section === 'records') invalidateRecordsCache();
+  }
+  // Слияние уже в хранилище: подписчик sync:applied перечитает состояние,
+  // запустит архивацию (снимок мог принести старую детализацию) и перерисует
+  // видимый экран
+  bus.emit('sync:applied');
 }
 // Кладёт в отдельный узел бэкапов копию того, что сейчас лежит на сервере:
 // запись затирает чужой снимок, и без копии его не вернуть. Свежая версия

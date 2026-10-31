@@ -1,4 +1,5 @@
 import { bus } from '../core/bus.js';
+import { ARCHIVE_KEY, loadArchive } from './archive.js';
 import { FAST_KEY, loadFast, validFastHistory } from './fast.js';
 import { loadHabits } from './habits.js';
 import { PRAYER_KEY, loadPrayer } from './prayer.js';
@@ -7,7 +8,7 @@ import { invalidateRecordsCache, loadRecords } from './records.js';
 import { loadSchedule } from './schedule.js';
 import { SLEEP_KEY, SLEEP_MAX_MINUTES, loadSleep, sleepDurationMinutes, sleepTimeMinutes, validSleepHistory } from './sleep.js';
 import { STORAGE_KEYS } from './storage.js';
-import { validCloudSchedule } from '../sync/validators.js';
+import { validCloudArchive, validCloudSchedule } from '../sync/validators.js';
 // Версия формата резервной копии. Растёт, если меняется состав полей файла:
 // версия 2 добавила раздел tasks, версия 3 — раздел prayer, версия 4 —
 // время у привычки и уровень у записи (§8), версия 5 — раздел fast (§11x),
@@ -51,6 +52,13 @@ export function buildBackup() {
   // bed, wake или fall битым и отверг бы собственную копию.
   const sleep = loadSleep();
   if (sleep) backup.sleep = sleep;
+
+  // Архив — месячные сводки старше года (js/data/archive.js). Раздел
+  // необязательный, как fast/qazaLog/sleep: архива нет — и раздела в файле
+  // нет, читатели старых копий его просто пропустят. Формат файла от этого
+  // не ломается, версия остаётся 11.
+  const archive = loadArchive();
+  if (archive) backup.archive = archive;
 
   return backup;
 }
@@ -160,6 +168,11 @@ export function parseBackup(text) {
     if (data.sleep.history) data.sleep.history = validSleepHistory(data.sleep.history);
   }
 
+  // Раздел archive необязателен; если он есть — проверяется формой
+  // (validCloudArchive): сводки — производные данные, битый архив не должен
+  // попадать в хранилище и подменять рабочий.
+  if (data.archive !== undefined && !validCloudArchive(data.archive)) return null;
+
   return data;
 }
 // Откат уже записанных ключей после сбоя записи посреди применения копии.
@@ -244,6 +257,11 @@ export function applyBackup(data) {
   // текущее расписание остаётся: импорт его не стирает.
   if (data.schedule && validCloudSchedule(data.schedule)) {
     stage.push({ key: STORAGE_KEYS.schedule, value: JSON.stringify(data.schedule) });
+  }
+  // Архив заменяется целиком, как расписание: сводки производные. Раздела
+  // в файле нет — текущий архив остаётся: импорт его не стирает.
+  if (data.archive && validCloudArchive(data.archive)) {
+    stage.push({ key: ARCHIVE_KEY, value: JSON.stringify(data.archive) });
   }
 
   // ── Фаза 2: снимок предыдущего состояния каждого ключа stage ──
