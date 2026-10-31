@@ -1,4 +1,4 @@
-const CACHE = 'youplanner-v29';
+const CACHE = 'youplanner-v30';
 // Иконки — все из manifest.json: отсутствующая в кэше иконка ломала бы
 // офлайн-установку PWA (аудит 2026-10-31: icon-512.png не кэшировался)
 const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon-512.png', './icon.svg',

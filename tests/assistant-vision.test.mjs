@@ -17,12 +17,34 @@ const vision = await import('../js/ui/assistant-view.js');
 
 // ── Каталог моделей ─────────────────────────────────────────────────────────
 
-test('флаг vision: только qwen3.8-27b, чужой id — false', () => {
+test('флаг vision: всё семейство qwen, gpt-oss и чужие id — без зрения', () => {
   assert.equal(vision.assistantModelSupportsVision('qwen3.8-27b'), true);
-  assert.equal(vision.assistantModelSupportsVision('qwen3.6-35b-a3b'), false);
+  assert.equal(vision.assistantModelSupportsVision('qwen3.6-35b-a3b'), true);
+  // Модель владельца из баг-репорта iPhone (2026-10-31): qwen-семейство
+  // распознаётся по префиксу даже вне каталога
+  assert.equal(vision.assistantModelSupportsVision('qwen3.6f.p'), true);
   assert.equal(vision.assistantModelSupportsVision('gpt-oss-120b'), false);
   assert.equal(vision.assistantModelSupportsVision('нет-такой'), false);
   assert.equal(vision.assistantModelSupportsVision(undefined), false);
+});
+
+// ── snapshotPickedFiles: файлы снимаются ДО сброса input.value ─────────────
+
+test('snapshotPickedFiles снимает массивоподобный FileList в массив', () => {
+  // Живой FileList после input.value = '' опустошается на месте (спека,
+  // SameObject) — именно поэтому камера «молчала»; контракт: обработчик
+  // работает со снимком, а не со ссылкой на список
+  const fake = { 0: 'файл-1', 1: 'файл-2', length: 2 };
+  const snapshot = vision.snapshotPickedFiles(fake);
+  assert.deepEqual(snapshot, ['файл-1', 'файл-2']);
+  fake[0] = 'изменён-после-снимка';
+  assert.equal(snapshot[0], 'файл-1', 'снимок не должен быть живой ссылкой');
+});
+
+test('snapshotPickedFiles: пустой и отсутствующий список — пустой массив', () => {
+  assert.deepEqual(vision.snapshotPickedFiles({ length: 0 }), []);
+  assert.deepEqual(vision.snapshotPickedFiles(null), []);
+  assert.deepEqual(vision.snapshotPickedFiles(undefined), []);
 });
 
 // ── withVisionAttachments ───────────────────────────────────────────────────
@@ -119,13 +141,26 @@ test('buildMessages: без фото payload остаётся текстовым
 test('onAssistantSubmit: фото + модель без зрения — отправка не состоялась', async () => {
   const app = loadApp();
   app.sandbox.localStorage.setItem('youplanner.api_key', 'test-key');
+  // gpt-oss-120b — единственная в каталоге модель без зрения (qwen-семейство
+  // принято со зрением, баг-репорт iPhone 2026-10-31)
+  app.sandbox.localStorage.setItem('youplanner.assistant_model', 'gpt-oss-120b');
   app.run('imageContext = [{ dataUrl: "data:image/jpeg;base64,AAA", name: "a.jpg", bytes: 1024 }];');
 
-  // Дефолтная модель qwen3.6-35b-a3b — без зрения
   const accepted = app.context.onAssistantSubmit('Что на фото?');
 
   assert.equal(accepted, false, 'отправка при модели без зрения должна отсекаться');
   assert.equal(app.run('readHistory().length'), 0, 'вопрос осел в истории');
+});
+
+test('onAssistantSubmit: фото + модель со зрением (qwen3.6) уходит как текстовый вопрос', async () => {
+  const app = loadApp();
+  app.sandbox.localStorage.setItem('youplanner.api_key', 'test-key');
+  app.sandbox.localStorage.setItem('youplanner.assistant_model', 'qwen3.6-35b-a3b');
+
+  const accepted = app.context.onAssistantSubmit('Что на фото?');
+
+  assert.equal(accepted, true, 'qwen-модели со зрением не должны отсекаться');
+  assert.equal(app.run('readHistory().length'), 1);
 });
 
 test('onAssistantSubmit: текст без фото уходит как раньше', async () => {
