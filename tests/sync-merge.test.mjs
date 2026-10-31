@@ -324,6 +324,71 @@ test('syncToCloudNow: снимок сервера новее — PUT уезжа�
   assert.equal(app.run('globalThis.__applied'), 1, 'sync:applied не эмитился на слиянии');
 });
 
+// ── B.2: повторный GET непосредственно перед PUT ────────────────────────────
+// Гонка двух устройств: между первым GET (внутри backupCloudSnapshot) и PUT
+// другое устройство успевает отправить свой снимок — PUT без повторной сверки
+// затирает его безвозвратно. Ожидание: перед PUT ещё один GET; если снимок
+// изменился, слияние повторяется со свежим снимком, и наверх уезжает уже
+// объединение с чужой правкой.
+
+test('syncToCloudNow: снимок изменился после первого GET — слияние повторяется, PUT несёт свежее', async () => {
+  const oldSnapshot = baseCloud();
+  const freshSnapshot = baseCloud();
+  // Чужой PUT успел между нашими двумя GET: метка свежее, раздел records
+  // получил день, которого не было в первом снимке
+  const freshTs = CLOUD_TS + 1000;
+  freshSnapshot.updatedAt = freshTs;
+  Object.keys(freshSnapshot.sectionTs).forEach(function (key) {
+    freshSnapshot.sectionTs[key] = freshTs;
+  });
+  freshSnapshot.records['2026-10-26'] = { h3: true };
+
+  const calls = [];
+  let mainGetIndex = 0;
+  const fetchImpl = function (url, opts) {
+    const options = opts || {};
+    const method = options.method || 'GET';
+    calls.push({ url: String(url), method, body: options.body });
+    if (method === 'GET' && String(url).includes('backups')) {
+      return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve([]); } });
+    }
+    if (method === 'GET') {
+      mainGetIndex += 1;
+      const snapshot = mainGetIndex === 1 ? oldSnapshot : freshSnapshot;
+      return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve(snapshot); } });
+    }
+    return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve({}); } });
+  };
+  fetchImpl.mainPut = function () {
+    for (let i = 0; i < calls.length; i++) {
+      const call = calls[i];
+      if (call.method === 'PUT' && call.url.includes('firebaseio.com') && !call.url.includes('backups')) return call;
+    }
+    return null;
+  };
+  fetchImpl.mainGetCount = function () {
+    return calls.filter(function (c) {
+      return c.method === 'GET' && c.url.includes('firebaseio.com') && !c.url.includes('backups');
+    }).length;
+  };
+
+  const app = loadApp({ fetchImpl: fetchImpl });
+  const seed = baseLocal();
+  app.sandbox.localStorage.setItem('youplanner.habits', JSON.stringify(seed.habits));
+  app.sandbox.localStorage.setItem('youplanner.records', JSON.stringify(seed.records));
+  app.sandbox.localStorage.setItem('youplanner.sync.ts', String(LOCAL_TS));
+
+  await app.context.syncToCloudNow();
+
+  assert.equal(fetchImpl.mainGetCount(), 2, 'повторный GET перед PUT не состоялся');
+  const put = fetchImpl.mainPut();
+  assert.ok(put, 'PUT не состоялся');
+  const body = JSON.parse(put.body);
+  assert.deepEqual(Object.keys(body.records).sort(),
+    ['2026-10-20', '2026-10-25', '2026-10-26'],
+    'PUT должен нести слияние со свежим снимком: день 2026-10-26 приехал вторым GET и не должен быть затёрт');
+});
+
 test('syncToCloudNow: сервер не новее — слияния нет, PUT уходит как раньше', async () => {
   const previous = baseCloud();
   previous.updatedAt = LOCAL_TS;

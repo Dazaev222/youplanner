@@ -117,46 +117,70 @@ export function qazaTotalRemaining(qaza) {
   }
   return sum;
 }
-// Состояние каза. При отсутствии ключа или битом JSON пишет начальные данные.
-// История обрезается до сегодняшнего дня: стек нужен только для отмены,
-// поэтому он не растёт бесконечно.
+// Состояние каза. Отсутствие ключа — первый запуск: начальные данные
+// пишутся сразу (init кладёт стартовую очередь до первого показа, пустой
+// сервер заполняется своей копией). Битый JSON — другое дело: запись дефолта
+// поверх него цементировала бы дефолт и сбрасывала счётчик лет накоплений.
+// Политика loadFast (js/data/fast.js): чтение ничего не пишет, свежий
+// дефолт возвращается как временное состояние (UI работает), а валидный
+// облачный раздел при следующей сверке перезапишет битый ключ
+// (applyCloudData, js/sync/sync.js). История обрезается до сегодняшнего
+// дня: стек нужен только для отмены, поэтому он не растёт бесконечно.
 export function loadQaza(skipSave = false) {
   // День каза: до Фаджра это ещё вчера, поэтому и журнал хранит вчерашние
   // записи — иначе выполнение, сделанное ночью, нечем было бы отменить (§7)
   const today = kazaDayFor(new Date());
+
+  let raw = null;
   try {
-    const raw = localStorage.getItem(QAZA_STORAGE_KEY);
-    if (!raw) throw new Error('нет данных');
-    const parsed = JSON.parse(raw);
-    if (!parsed || typeof parsed !== 'object') throw new Error('не объект');
-
-    const qaza = copyQaza(parsed);
-
-    // Состояние прежней версии ставило стартовый курсор на Фаджр, который уже
-    // выполнен. Правим только нетронутую очередь: если выполнения есть, курсор
-    // осмысленный и трогать его нельзя.
-    if (parsed.version === 1 && qaza.history.length === 0) {
-      qaza.cursor = QAZA_DEFAULT_CURSOR;
-    }
-
-    qaza.history = qaza.history.filter(function (entry) {
-      return entry.date === today;
-    });
-
-    // Курсор обязан указывать на намаз с остатком > 0
-    normalizeQazaCursor(qaza);
-
-    if (!skipSave) {
-      saveNormalized(function () { saveQaza(qaza); });
-    }
-    return qaza;
+    raw = localStorage.getItem(QAZA_STORAGE_KEY);
   } catch (e) {
+    raw = null;   // хранилище недоступно — живём как при первом запуске
+  }
+
+  // Нет ключа — первый запуск: дефолт пишется, это не временное состояние
+  if (!raw) {
     const fresh = copyQaza(DEFAULT_QAZA);
     if (!skipSave) {
       saveNormalized(function () { saveQaza(fresh); });
     }
     return fresh;
   }
+
+  let parsed = null;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    parsed = null;   // битый JSON — ниже вернётся временный дефолт
+  }
+
+  // Битые данные (не распарсилось или не объект): хранилище не трогаем,
+  // данные важнее дефолта. copyQaza дальше разбирает любой объект без
+  // бросков — защитные проверки уже внутри
+  if (!parsed || typeof parsed !== 'object') {
+    return copyQaza(DEFAULT_QAZA);
+  }
+
+  const qaza = copyQaza(parsed);
+
+  // Состояние прежней версии ставило стартовый курсор на Фаджр, который уже
+  // выполнен. Правим только нетронутую очередь: если выполнения есть, курсор
+  // осмысленный и трогать его нельзя.
+  if (parsed.version === 1 && qaza.history.length === 0) {
+    qaza.cursor = QAZA_DEFAULT_CURSOR;
+  }
+
+  qaza.history = qaza.history.filter(function (entry) {
+    return entry.date === today;
+  });
+
+  // Курсор обязан указывать на намаз с остатком > 0
+  normalizeQazaCursor(qaza);
+
+  if (!skipSave) {
+    saveNormalized(function () { saveQaza(qaza); });
+  }
+  return qaza;
 }
 export function saveQaza(qaza) {
   if (!safeSetItem(QAZA_STORAGE_KEY, JSON.stringify(qaza))) return false;

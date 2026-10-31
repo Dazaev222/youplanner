@@ -2,7 +2,7 @@ import { bus } from '../core/bus.js';
 import { ARCHIVE_KEY, loadArchive } from '../data/archive.js';
 import { FAST_KEY, FAST_VERSION, loadFast, validFastHistory } from '../data/fast.js';
 import { getAuthToken } from '../data/firebase-auth.js';
-import { DEFAULT_HABITS, defaultHabit, loadHabits, saveHabits } from '../data/habits.js';
+import { DEFAULT_HABITS, defaultHabit, loadHabits, loadTombstones, pruneResolvedTombstones, saveHabits } from '../data/habits.js';
 import { markMigration, migratePressHabit } from '../data/migrations.js';
 import { PRAYER_KEY, loadPrayer } from '../data/prayer.js';
 import { QAZA_LOG_KEY, QAZA_LOG_VERSION, QAZA_STORAGE_KEY, loadQaza, loadQazaLog, validQazaLogEntries } from '../data/qaza.js';
@@ -12,8 +12,8 @@ import { SLEEP_KEY, loadSleep, validSleepHistory } from '../data/sleep.js';
 import { STORAGE_KEYS } from '../data/storage.js';
 import { BACKUP_LIMIT, FIREBASE_BACKUPS_URL, FIREBASE_URL, SYNC_DEBOUNCE_MS, SYNC_TS_KEY } from '../data/sync.js';
 import { clearSyncPending, markSyncPending, normalizing, saveNormalized, syncPending, syncTs } from './state.js';
-import { mergeCloudIntoLocal } from './merge.js';
-import { hasData, validCloudArchive, validCloudFast, validCloudHabits, validCloudPrayer, validCloudQaza, validCloudQazaLog, validCloudRecords, validCloudSchedule, validCloudSleep } from './validators.js';
+import { mergeCloudIntoLocal, mergeTombstonesById } from './merge.js';
+import { hasData, validCloudArchive, validCloudFast, validCloudHabits, validCloudPrayer, validCloudQaza, validCloudQazaLog, validCloudRecords, validCloudSchedule, validCloudSleep, validCloudTombstones } from './validators.js';
 export let syncTimer = null;
 // Сетевой таймаут обменов. Без него зависшее соединение (сеть отдаёт TCP,
 // но не отвечает) держит syncExchange открытым вечно: правки встают в
@@ -150,6 +150,7 @@ export function applyCloudData(data, ts) {
       qazaLog: loadQazaLog() || null,
       sleep: loadSleep() || null,
       schedule: loadSchedule(),
+      tombstones: loadTombstones(),
     };
 
     // ── Фаза 1: валидация всех разделов, сбор stage без записей ──
@@ -240,6 +241,18 @@ export function applyCloudData(data, ts) {
     // трогается: снимок старой версии не должен обнулять то, чего не знает.
     if (validCloudArchive(data.archive)) {
       stage.push({ key: ARCHIVE_KEY, value: JSON.stringify(data.archive) });
+    }
+    // Надгробия удалённых привычек (B.3): раздел необязателен — старые
+    // снимки без него применяются как раньше. Заменять локальные надгробия
+    // серверными нельзя: ещё не отправленная метка удаления исчезла бы,
+    // и привычка воскресла бы при следующем слиянии. Поэтому — слияние
+    // по max(ts) (mergeTombstonesById), аддитивное в обе стороны.
+    const cloudTombstones = validCloudTombstones(data.tombstones);
+    if (cloudTombstones && hasData(cloudTombstones)) {
+      stage.push({
+        key: STORAGE_KEYS.tombstones,
+        value: JSON.stringify(mergeTombstonesById(local.tombstones, cloudTombstones)),
+      });
     }
 
     // Нечего применять: прежний код с cloudApplied=false не писал метку
@@ -332,6 +345,10 @@ function adoptServerHabitsIfLocalEmpty(data) {
   if (!Array.isArray(data.habits) || !hasData(data.habits)) return;
   if (hasData(loadHabits())) return;
   localStorage.setItem(STORAGE_KEYS.habits, JSON.stringify(data.habits));
+  // Привычки вернулись в список — их надгробия (если чудом остались)
+  // больше не нужны: висящая метка блокировала бы привоз этой привычки
+  // на других устройствах
+  pruneResolvedTombstones();
   // Список только что сменился, а DOM остался прежним: обновление
   // состояния и перерисовку делает подписчик sync:applied (§11v)
   bus.emit('sync:applied');
@@ -365,6 +382,11 @@ export async function syncFromCloud() {
     // settleHabitsAfterSync сеять офлайн-дефолты поверх рабочих данных.
     if (applyCloudData(data, serverTs) === false) {
       cloudReachable = false;
+    } else {
+      // Снимок применён: привычки, вернувшиеся в списке, надгробий не
+      // заслужили — иначе метки уезжали бы наверх при каждой отправке
+      // и блокировали привоз этой привычки на других устройствах
+      pruneResolvedTombstones();
     }
     return { reachable: true, serverEmpty: false };
   } catch (e) {
@@ -427,6 +449,33 @@ export async function syncToCloudNow() {
     applyMergedFromCloud(previous);
   }
 
+  // Вторая гонка того же обмена (B.2): между первым GET и PUT устройство B
+  // может отправить свой снимок — PUT без повторной сверки стёр бы правки B
+  // безвозвратно. Поэтому непосредственно перед PUT — ещё один GET; снимок
+  // изменился (метка updatedAt или байты JSON) — слияние повторяется со
+  // свежим снимком, и наверх уезжает уже объединение с чужой правкой.
+  // Однократного повтора достаточно: обмен инициируется кнопкой или
+  // дебаунсом 1,5 с, окно гонки — миллисекунды, а каждый лишний круг —
+  // лишняя секунда задержки и лишний шанс новой гонки.
+  let fresh = null;
+  try {
+    fresh = await fetchCloudNode();
+  } catch (e) {
+    // Повторное чтение не удалось: PUT уходит как раньше, по первому снимку —
+    // это прежнее поведение обмена, слияние выше уже защитило от старой гонки
+    fresh = null;
+  }
+  if (fresh && snapshotDiffers(fresh, previous)) {
+    const freshTs = Number(fresh.updatedAt) || 0;
+    if (freshTs > syncTs()) {
+      applyMergedFromCloud(fresh);
+    }
+    // Тело PUT строится по последнему виденному снимку: запасной путь
+    // «серверные привычки при пустом локальном списке» должен видеть
+    // свежий сервер, а не тот, что был двумя запросами назад
+    previous = fresh;
+  }
+
   try {
     const response = await fetchWithTimeout(FIREBASE_URL + '.json', {
       method: 'PUT',
@@ -444,6 +493,16 @@ export async function syncToCloudNow() {
     // и syncBody перестаёт беречь серверные привычки при пустом локальном списке.
     cloudReachable = false;
   }
+}
+// Отличаются ли два снимка сервера. Метка updatedAt — быстрый путь: чужой PUT
+// всегда пишет свою метку. Совпадение меток (два устройства уложились в одну
+// миллисекунду) проверяется побайтово: содержимое могло разойтись при равной
+// метке, а лишнее слияние дешевле потерянной правки.
+function snapshotDiffers(a, b) {
+  const aTs = Number(a && a.updatedAt) || 0;
+  const bTs = Number(b && b.updatedAt) || 0;
+  if (aTs !== bTs) return true;
+  return JSON.stringify(a) !== JSON.stringify(b);
 }
 // Тело PUT. Привычки берём локальные — кроме одного случая: сверка ни разу
 // не дошла до сервера, а список у нас пуст. Пустой список здесь значит
@@ -474,10 +533,17 @@ export function syncBody(ts, previous) {
       // Архив — сводки старше года (js/data/archive.js): второе устройство
       // получает суммы срезанной детализации вместе со снимком.
       archive: loadArchive() || null,
+      // Надгробия удалённых привычек (js/data/habits.js): след удаления,
+      // из-за которого аддитивное слияние не воскресит привычку. Пустой
+      // объект уезжает как есть — раздел необязательный, получатель пустоту
+      // просто пропустит.
+      tombstones: loadTombstones(),
       // Метки свежести по разделам для слияния (js/sync/merge.js): PUT пишет
       // все разделы разом, поэтому все метки равны времени отправки. Раздел
       // чужого снимка применяется, только если его метка строго новее нашей
       // последней сверки; в снимках до введения меток роль играет updatedAt.
+      // Метка tombstones при слиянии не участвует (max(ts) безусловно), но
+      // стоит в общем ряду, чтобы карта разделов оставалась полной.
       sectionTs: {
         habits: ts,
         records: ts,
@@ -487,6 +553,7 @@ export function syncBody(ts, previous) {
         qazaLog: ts,
         sleep: ts,
         schedule: ts,
+        tombstones: ts,
       },
       updatedAt: ts,
     });
@@ -507,6 +574,7 @@ function mergeSectionKey(section) {
     case 'sleep': return SLEEP_KEY;
     case 'schedule': return STORAGE_KEYS.schedule;
     case 'archive': return ARCHIVE_KEY;
+    case 'tombstones': return STORAGE_KEYS.tombstones;
   }
   return null;
 }
@@ -528,6 +596,7 @@ function applyMergedFromCloud(previous) {
     sleep: loadSleep() || null,
     schedule: loadSchedule(),
     archive: loadArchive(),
+    tombstones: loadTombstones(),
   };
   const merged = mergeCloudIntoLocal(local, previous, {
     pending: syncPending,
@@ -569,10 +638,25 @@ function applyMergedFromCloud(previous) {
     appliedLog[i].written = true;
     if (stage[i].section === 'records') invalidateRecordsCache();
   }
+  // Слитый список мог вернуть удалённые привычки (чужая правка победила
+  // надгробие): их метки снимаются, иначе уехали бы наверх при этом же PUT
+  pruneResolvedTombstones();
   // Слияние уже в хранилище: подписчик sync:applied перечитает состояние,
   // запустит архивацию (снимок мог принести старую детализацию) и перерисует
   // видимый экран
   bus.emit('sync:applied');
+}
+// Обычное чтение узла данных без копии в бэкапы. Возвращает объект снимка
+// или null, если узел пуст; при ошибке сети бросает — вызывающий решает,
+// критична ли ему ошибка (backupCloudSnapshot глотает, повторный GET перед
+// PUT в syncToCloudNow переводит обмен в прежний односнимочный режим).
+// Токен и таймаут — в общей обёртке fetchWithTimeout.
+async function fetchCloudNode() {
+  const response = await fetchWithTimeout(FIREBASE_URL + '.json');
+  if (!response.ok) throw new Error('нет ответа');
+  const previous = await response.json();
+  if (!previous || typeof previous !== 'object') return null;
+  return previous;
 }
 // Кладёт в отдельный узел бэкапов копию того, что сейчас лежит на сервере:
 // запись затирает чужой снимок, и без копии его не вернуть. Свежая версия
@@ -586,10 +670,8 @@ function applyMergedFromCloud(previous) {
 // платило тремя сетевыми кругами вместо двух (GET+GET → PUT).
 export async function backupCloudSnapshot() {
   try {
-    const response = await fetchWithTimeout(FIREBASE_URL + '.json');
-    if (!response.ok) throw new Error('нет ответа');
-    const previous = await response.json();
-    if (!previous || typeof previous !== 'object') return null;
+    const previous = await fetchCloudNode();
+    if (!previous) return null;
 
     // Снимки старой схемы могли тащить вложенный backups от прежнего
     // расположения: в новую историю его не кладём, иначе копии

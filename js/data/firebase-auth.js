@@ -113,6 +113,15 @@ function saveRefreshToken(refreshToken) {
   }
 }
 
+// Знакомому устройству — обмен refresh-токена, новому — signUp. Отдельная
+// функция: повтор после отказа обмена зовёт её же, URL не дублируется.
+function signUpPost() {
+  return authPost(
+    'https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=' + encodeURIComponent(FIREBASE_WEB_API_KEY),
+    { returnSecureToken: true },
+  );
+}
+
 // Свежий токен из сети: обмен сохранённого refresh-токена либо заведение
 // анонимного аккаунта signUp'ом. Бросает при любой неудаче — глотает
 // getAuthToken() ниже.
@@ -130,11 +139,22 @@ async function requestFreshToken() {
       'https://securetoken.googleapis.com/v1/token?key=' + encodeURIComponent(FIREBASE_WEB_API_KEY),
       { grant_type: 'refresh_token', refresh_token: refreshToken },
     );
+    if (!response.ok) {
+      // Сервер отклонил обмен (400 INVALID_REFRESH_TOKEN): токен протух или
+      // отозван, и хранить его дальше значило бы умирать вечно — синк без
+      // токена не поднимался бы никогда. Ключ стирается, запрос повторяется
+      // один раз свежим signUp'ом: заводится новый анонимный аккаунт, данные
+      // это не затрагивает. Сетевой сбой сюда не попадает: бросок await выше
+      // уходит в getAuthToken() до этой ветки, живой токен не стирается.
+      try {
+        localStorage.removeItem(AUTH_REFRESH_KEY);
+      } catch (e) {
+        // глотаем: недоступное хранилище не мешает signUp-повтору
+      }
+      response = await signUpPost();
+    }
   } else {
-    response = await authPost(
-      'https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=' + encodeURIComponent(FIREBASE_WEB_API_KEY),
-      { returnSecureToken: true },
-    );
+    response = await signUpPost();
   }
   if (!response.ok) throw new Error('auth-сервер ответил ' + response.status);
   const parsed = parseAuthResponse(await response.json());

@@ -104,17 +104,135 @@ export function updateHabit(id, patch) {
   }
   return null;
 }
+// ── Надгробия удалённых привычек (tombstones) ───────────────────────────────
+// Слияние снимков (js/sync/merge.js) аддитивно: привычка, которой нет
+// локально, но она есть на сервере, привозится обратно — и удаление,
+// сделанное на этом устройстве, отменялось бы каждой сверкой. Надгробие
+// { habitId: ts } говорит слиянию: «эту привычку здесь удалили в момент ts».
+// Пишется до удаления списка: между удалением и отправкой сервер ещё старый,
+// и только надгробие не даёт ветке extra вернуть привычку при первом же
+// обмене. Число ограничено (TOMBSTONES_LIMIT): привычек за жизнь устройства
+// заведутся десятки, лимит — защита от раздувания ключа чужим мусором.
+export const TOMBSTONES_LIMIT = 500;
+// Максимальная длина id в надгробии: настоящие id короткие ('h' + base36),
+// длинный ключ — мусор, место в лимите ему отдавать нельзя.
+const TOMBSTONE_ID_MAX_LENGTH = 128;
+
+// Оставляет только годные записи: ключ — непустая строка разумной длины,
+// значение — конечное число не меньше нуля (метка Date.now()). Мусор
+// отбрасывается по записи, а не роняет весь раздел: один битый элемент
+// не должен отменять синхронизацию остальных надгробий. Значение обязано
+// быть числом по типу: мягкое приведение превратило бы null и '' в 0 —
+// надгробие «с самого начала времён», блокирующее привоз привычки вечно.
+export function sanitizeTombstones(tombstones) {
+  if (!tombstones || typeof tombstones !== 'object' || Array.isArray(tombstones)) return {};
+  const clean = {};
+  const ids = Object.keys(tombstones);
+  for (let i = 0; i < ids.length && Object.keys(clean).length < TOMBSTONES_LIMIT; i++) {
+    const id = ids[i];
+    if (typeof id !== 'string' || id === '' || id.length > TOMBSTONE_ID_MAX_LENGTH) continue;
+    const ts = tombstones[id];
+    if (typeof ts !== 'number' || !Number.isFinite(ts) || ts < 0) continue;
+    clean[id] = ts;
+  }
+  return clean;
+}
+
+// Читает надгробия. Отсутствие ключа и битый JSON — «надгробий нет», как у
+// loadHabits: пустое значение не должно ломать ни удаление, ни слияние.
+export function loadTombstones() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEYS.tombstones);
+    if (!raw) return {};
+    return sanitizeTombstones(JSON.parse(raw));
+  } catch (e) {
+    return {};
+  }
+}
+
+// Прямая запись без событий и без safeSetItem: надгробие — служебная метка,
+// её провал не должен ни ронять удаление, ни показывать тост о квоте.
+// Место в хранилище освобождает само удаление привычки, идущее следом.
+// Опустошение (последняя метка снята) стирает и ключ: «надгробий нет»
+// выражается отсутствием ключа, а не пустым объектом — иначе пустые
+// надгробия плодили бы ключ у каждого устройства.
+function saveTombstonesRaw(tombstones) {
+  try {
+    if (Object.keys(tombstones).length === 0) {
+      localStorage.removeItem(STORAGE_KEYS.tombstones);
+    } else {
+      localStorage.setItem(STORAGE_KEYS.tombstones, JSON.stringify(tombstones));
+    }
+    return true;
+  } catch (e) {
+    return false;
+  }
+}
+
+// Отмечает удаление привычки в момент ts. Повторное удаление того же id
+// (после воскрешения чужой правкой) перезаписывает метку свежей — верна
+// последняя, а не первая.
+export function writeTombstone(id, ts) {
+  const tombstones = loadTombstones();
+  tombstones[id] = ts;
+  return saveTombstonesRaw(sanitizeTombstones(tombstones));
+}
+
+// Снимает надгробие: привычка с этим id снова в списке. Вызывается, когда
+// удаление не состоялось (откат в removeHabit) и когда привычка вернулась
+// со снимком или из копии (pruneResolvedTombstones) — надгробие висящей
+// в воздухе меткой уезжать на сервер не должно.
+export function clearTombstone(id) {
+  const tombstones = loadTombstones();
+  if (!Object.prototype.hasOwnProperty.call(tombstones, id)) return;
+  delete tombstones[id];
+  saveTombstonesRaw(tombstones);
+}
+
+// Убирает надгробия привычек, снова присутствующих в списке. После возврата
+// привычки со снимком метка больше не нужна: без очистки она уезжала бы
+// наверх при каждой отправке и блокировала бы привоз привычки на других
+// устройствах, пока метка раздела habits не переросла её.
+export function pruneResolvedTombstones() {
+  const tombstones = loadTombstones();
+  const ids = Object.keys(tombstones);
+  if (ids.length === 0) return;
+  const habits = loadHabits();
+  const present = {};
+  for (let i = 0; i < habits.length; i++) {
+    const h = habits[i];
+    if (h && h.id != null) present[h.id] = true;
+  }
+  let changed = false;
+  for (let i = 0; i < ids.length; i++) {
+    if (!present[ids[i]]) continue;
+    delete tombstones[ids[i]];
+    changed = true;
+  }
+  if (changed) saveTombstonesRaw(tombstones);
+}
+
 // Удаляет привычку и вычищает все её значения из записей.
 // true — только если сохранены и привычки, и записи; при провале записи
 // привычек на диске пробуем вернуть список как был (best-effort).
 export function removeHabit(id) {
+  // Надгробие пишется ДО удаления списка: привычка без метки исчезает из
+  // списка, и аддитивное слияние с ещё старым сервером вернуло бы её при
+  // первом же обмене. Запись best-effort: провал метки (квота) не отменяет
+  // удаление — без надгробия привычка может воскреснуть, но удаление-то
+  // человек сделал.
+  const tombstoneWritten = writeTombstone(id, Date.now());
   const habitsSnapshot = JSON.parse(JSON.stringify(loadHabits()));
   const habits = habitsSnapshot.filter(function (h) { return h.id !== id; });
   // Глубокая копия снимка: filter выше даёт новый массив, но объекты привычек
   // в нём общие со снимком, а восстановление нужно независимое.
   const habitsRestore = JSON.parse(JSON.stringify(habitsSnapshot));
 
-  if (!saveHabits(habits)) return false;
+  if (!saveHabits(habits)) {
+    // Удаление не состоялось — привычка осталась, метка ей не положена
+    if (tombstoneWritten) clearTombstone(id);
+    return false;
+  }
 
   const records = loadRecords();
   const recordsSnapshot = JSON.parse(JSON.stringify(records));
@@ -141,6 +259,8 @@ export function removeHabit(id) {
     // привычек уже записан без неё — возвращаем его к снимку. Если и это
     // не удалось, всё равно возвращаем false (best-effort).
     saveHabits(habitsRestore);
+    // Привычка вернулась в список — надгробие снимаем, она не удалена
+    if (tombstoneWritten) clearTombstone(id);
     return false;
   }
   bus.emit('data:changed');

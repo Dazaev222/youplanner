@@ -44,6 +44,14 @@ export function loadApp({ fetchImpl } = {}) {
       observe() {}
       disconnect() {}
     },
+    // Заглушка для timeoutGuard (assistant-view, firebase-auth, sync): в
+    // песочнице нет ни AbortSignal, ни AbortController, и реальный guard
+    // падал бы ReferenceError до вызова fetch — сетевые тесты не доходили
+    // бы до своей заглушки
+    AbortController: class AbortControllerStub {
+      constructor() { this.signal = { aborted: false }; }
+      abort() { this.signal.aborted = true; }
+    },
     fetch: fetchImpl || (() => Promise.reject(new Error('нет сети (тест)'))),
     console,
     setTimeout,
