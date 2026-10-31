@@ -165,7 +165,7 @@ function normalizeMonthsPart(part) {
 
 function normalizeArchive(parsed) {
   const archive = {
-    version: parsed.version === ARCHIVE_VERSION ? ARCHIVE_VERSION : ARCHIVE_VERSION,
+    version: ARCHIVE_VERSION,
     sleep: normalizeMonthsPart(parsed.sleep),
     fast: normalizeMonthsPart(parsed.fast),
     qaza: normalizeMonthsPart(parsed.qaza),

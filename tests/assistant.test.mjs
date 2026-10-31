@@ -10,6 +10,10 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadApp } from './helpers/load-app.mjs';
+// С этапа D.5 нарезка и поиск по PDF живут в отдельном модуле; песочница
+// отдаёт их как и прежде (все модули конкатенируются), прямой ESM-импорт
+// дополнительно закрепляет публичные экспорты нового файла.
+import { chunkPdfText, pdfQueryTokens, selectPdfChunks } from '../js/ui/assistant-pdf.js';
 
 // Абзац заданной длины с маркером внутри: 'абзац 007: слово ...'
 function paragraph(n, marker, filler) {
@@ -18,6 +22,19 @@ function paragraph(n, marker, filler) {
   while (out.length < n) out += word + ' ';
   return out.trim();
 }
+
+test('assistant-pdf: нарезка и поиск экспортируются новым модулем напрямую', () => {
+  assert.equal(typeof chunkPdfText, 'function');
+  assert.equal(typeof pdfQueryTokens, 'function');
+  assert.equal(typeof selectPdfChunks, 'function');
+  // Два абзаца по 1250 символов: каждый больше CHUNK_MIN, вместе не влезают
+  // в CHUNK_SIZE — режутся ровно на два фрагмента с сохранением порядка
+  const chunks = chunkPdfText(paragraph(1250, 'А-1') + '\n\n' + paragraph(1250, 'А-2'));
+  assert.equal(chunks.length, 2, 'фрагментов: ' + chunks.length);
+  assert.ok(chunks[0].indexOf('А-1') === 0, 'первый фрагмент — первый абзац');
+  assert.ok(chunks[1].indexOf('А-2') === 0, 'второй фрагмент — второй абзац');
+  assert.deepEqual(pdfQueryTokens('что про напоминания'), ['напоминания']);
+});
 
 test('chunkPdfText: пустой и короткий текст — деградация без сюрпризов', () => {
   const { context } = loadApp();

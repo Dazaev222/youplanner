@@ -75,7 +75,7 @@ export function saveFast(fast) {
 // Общий помощник: одно событие в историю. Это растущий массив, а не стек:
 // он не чистится по датам и нужен целиком разделу «Статистика» (§5).
 // Интерфейс историю не читает — только пишет.
-export function appendFastHistory(fast, count, source) {
+function appendFastHistory(fast, count, source) {
   if (!fast || !Array.isArray(fast.history)) return;
   fast.history.push({ date: toISODate(new Date()), count: count, source: source });
 }

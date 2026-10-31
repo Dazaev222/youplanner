@@ -34,49 +34,147 @@ export function closeModal() {
   // После добавления привычки список на экране «Привычки» устарел
   renderHabitsEditList();
 }
-// Список привычек в модалке. События делегированы на #habit-list.
-export function renderHabitList() {
-  const list = document.getElementById('habit-list');
+// Общие для обоих списков вычисления строки: блокировка типа (каза — всегда,
+// остальные — когда по привычке уже есть записи), подсказка и строковое
+// значение цели. Раньше этот блок был скопирован в два построителя дословно.
+function habitRowFields(habit) {
+  // У каза тип задаётся вкладкой «Каза-намазы» и заблокирован всегда;
+  // у остальных — только если по привычке уже есть записи
+  const isQaza = habit.id === QAZA_HABIT_ID;
+  const locked = isQaza || hasRecords(habit.id);
+  const lockedTitle = isQaza
+    ? 'Тип каза задаётся вкладкой «Каза-намазы»'
+    : 'Тип нельзя изменить: по привычке уже есть записи';
+  return {
+    isQaza: isQaza,
+    lockedAttr: locked
+      ? ' disabled title="' + escapeHtml(lockedTitle) + '"'
+      : '',
+    goalValue: habit.goal === null || habit.goal === undefined
+      ? '' : String(habit.goal),
+  };
+}
+
+// Единый построитель списков привычек: модалка (#habit-list) и экран
+// «Привычки» (#habits-edit-list) идут по одному appState.habits и отличаются
+// только разметкой строки — вариант приходит параметром (механизм тот же,
+// что у EDIT_ROW_SELECTORS ниже).
+function renderHabitRows(listId, rowMarkup) {
+  const list = document.getElementById(listId);
   if (!list) return;
 
   let html = '';
   for (let i = 0; i < appState.habits.length; i++) {
-    const habit = appState.habits[i];
-    // У каза тип задаётся вкладкой «Каза-намазы» и заблокирован всегда;
-    // у остальных — только если по привычке уже есть записи
-    const isQaza = habit.id === QAZA_HABIT_ID;
-    const locked = isQaza || hasRecords(habit.id);
-    const lockedTitle = isQaza
-      ? 'Тип каза задаётся вкладкой «Каза-намазы»'
-      : 'Тип нельзя изменить: по привычке уже есть записи';
-    const lockedAttr = locked
-      ? ' disabled title="' + escapeHtml(lockedTitle) + '"'
-      : '';
-    const goalValue = habit.goal === null || habit.goal === undefined
-      ? '' : String(habit.goal);
-
-    html += '<li data-habit-id="' + escapeHtml(habit.id) + '">' +
-      '<input type="text" class="habit-edit-name" value="' + escapeHtml(habit.name) +
-      '" aria-label="Название">' +
-      '<select class="habit-type"' + lockedAttr + ' aria-label="Тип">' +
-      typeOptionsMarkup(habit.type) + '</select>' +
-      '<input type="text" class="habit-edit-unit" value="' + escapeHtml(habit.unit || '') +
-      '" placeholder="Ед." aria-label="Единица измерения">' +
-      '<input type="number" class="habit-edit-goal" min="1" step="1" value="' +
-      escapeHtml(goalValue) + '" placeholder="Цель" aria-label="Цель">' +
-      // Время — только у привычек с уровнями: оно задаёт окно «вовремя»
-      (isLevelHabit(habit.id)
-        ? '<input type="time" class="habit-edit-time" value="' +
-          escapeHtml(habit.time || '') + '" aria-label="Время">'
-        : '') +
-      '<button type="button" class="btn btn-secondary habit-save">Сохранить</button>' +
-      // У каза кнопки удаления нет: удалив привычку, синхронизацию не восстановить
-      (isQaza ? '' : '<button type="button" class="btn btn-danger habit-delete">Удалить</button>') +
-      '</li>';
+    html += rowMarkup(appState.habits[i]);
   }
 
   list.innerHTML = html;
 }
+
+// Строка модалки: инлайн-поля редактирования
+function modalHabitRow(habit) {
+  const row = habitRowFields(habit);
+
+  return '<li data-habit-id="' + escapeHtml(habit.id) + '">' +
+    '<input type="text" class="habit-edit-name" value="' + escapeHtml(habit.name) +
+    '" aria-label="Название">' +
+    '<select class="habit-type"' + row.lockedAttr + ' aria-label="Тип">' +
+    typeOptionsMarkup(habit.type) + '</select>' +
+    '<input type="text" class="habit-edit-unit" value="' + escapeHtml(habit.unit || '') +
+    '" placeholder="Ед." aria-label="Единица измерения">' +
+    '<input type="number" class="habit-edit-goal" min="1" step="1" value="' +
+    escapeHtml(row.goalValue) + '" placeholder="Цель" aria-label="Цель">' +
+    // Время — только у привычек с уровнями: оно задаёт окно «вовремя»
+    (isLevelHabit(habit.id)
+      ? '<input type="time" class="habit-edit-time" value="' +
+        escapeHtml(habit.time || '') + '" aria-label="Время">'
+      : '') +
+    '<button type="button" class="btn btn-secondary habit-save">Сохранить</button>' +
+    // У каза кнопки удаления нет: удалив привычку, синхронизацию не восстановить
+    (row.isQaza ? '' : '<button type="button" class="btn btn-danger habit-delete">Удалить</button>') +
+    '</li>';
+}
+
+// Строка-аккордеон экрана «Привычки»: поля раскрываются тапом по заголовку
+function editHabitRow(habit) {
+  const row = habitRowFields(habit);
+  const isNumber = habit.type === 'number';
+  const numberHidden = isNumber ? '' : ' hidden';
+
+  return '<li class="habit-row-edit" data-habit-id="' + escapeHtml(habit.id) + '">' +
+    '<button type="button" class="habit-row-head">' +
+      '<span class="habit-row-name">' + escapeHtml(habit.name) + '</span>' +
+      '<span class="habit-row-type">' + escapeHtml(habitTypeLabel(habit.type)) + '</span>' +
+      '<span class="habit-row-chevron">›</span>' +
+    '</button>' +
+    '<div class="habit-row-body">' +
+      '<label><span>Название</span>' +
+        '<input type="text" class="edit-name" value="' + escapeHtml(habit.name) + '">' +
+      '</label>' +
+      '<label><span>Тип</span>' +
+        '<select class="edit-type"' + row.lockedAttr + '>' +
+        typeOptionsMarkup(habit.type) + '</select>' +
+      '</label>' +
+      '<label class="edit-number-field"' + numberHidden + '><span>Единица измерения</span>' +
+        '<input type="text" class="edit-unit" value="' + escapeHtml(habit.unit || '') +
+        '" placeholder="Ед.">' +
+      '</label>' +
+      '<label class="edit-number-field"' + numberHidden + '><span>Цель</span>' +
+        '<input type="number" class="edit-goal" min="1" step="1" value="' +
+        escapeHtml(row.goalValue) + '" placeholder="Цель">' +
+      '</label>' +
+      // Время — только у привычек с уровнями: оно задаёт окно «вовремя»
+      (isLevelHabit(habit.id)
+        ? '<label class="edit-time-field"><span>Время</span>' +
+          '<input type="time" class="edit-time" value="' +
+          escapeHtml(habit.time || '') + '">' +
+          '</label>'
+        : '') +
+      '<p class="form-error" role="alert"></p>' +
+      '<div class="habit-row-actions">' +
+        '<button type="button" class="btn btn-primary edit-save">Сохранить</button>' +
+        // У каза удаления нет: удалив привычку, синхронизацию не восстановить
+        (row.isQaza ? '' : '<button type="button" class="btn btn-danger edit-delete">Удалить</button>') +
+      '</div>' +
+    '</div>' +
+    '</li>';
+}
+
+// Список привычек в модалке. События делегированы на #habit-list.
+export function renderHabitList() {
+  renderHabitRows('habit-list', modalHabitRow);
+}
+
+// --- Общая логика кнопок строки (модалка и экран «Привычки») -----------------
+
+// Подтверждённое удаление: окно, удаление, перечитывание состояния.
+// false — пользователь отменил или удаление не удалось.
+function removeHabitConfirmed(habitId, habit) {
+  if (!window.confirm('Удалить привычку «' + habit.name + '» и все её записи?')) return false;
+  if (!removeHabit(habitId)) return false;
+  appState.habits = loadHabits();
+  return true;
+}
+
+// Сборка patch из данных строки: время — только у привычек с уровнями
+// (поле пустое — время не задано), тип — только у привычки без записей.
+// Экспортируется для tests/habits-edit.test.mjs.
+export function buildHabitPatch(habitId, data) {
+  const patch = { name: data.name.trim(), unit: data.unit, goal: data.goal };
+  // Время есть только у привычек с уровнями: поле пустое — время не задано
+  if (isLevelHabit(habitId)) patch.time = data.time;
+  // Тип меняем только у привычки без записей
+  if (!hasRecords(habitId)) patch.type = data.type;
+  return patch;
+}
+
+// Запись patch и перечитывание состояния. false — обновление не прошло.
+function saveHabitPatch(habitId, patch) {
+  if (!updateHabit(habitId, patch)) return false;
+  appState.habits = loadHabits();
+  return true;
+}
+
 // Делегированный обработчик кнопок «Сохранить» и «Удалить» в списке
 export function onHabitListClick(event) {
   const target = event.target;
@@ -90,9 +188,7 @@ export function onHabitListClick(event) {
   if (!habit) return;
 
   if (target.closest('.habit-delete')) {
-    if (!window.confirm('Удалить привычку «' + habit.name + '» и все её записи?')) return;
-    if (!removeHabit(habitId)) return;
-    appState.habits = loadHabits();
+    if (!removeHabitConfirmed(habitId, habit)) return;
     setFormError('');
     renderHabitList();
     renderMainView();
@@ -106,80 +202,16 @@ export function onHabitListClick(event) {
       setFormError(result.error);
       return;
     }
-    const patch = { name: data.name.trim(), unit: data.unit, goal: data.goal };
-    // Время есть только у привычек с уровнями: поле пустое — время не задано
-    if (isLevelHabit(habitId)) patch.time = data.time;
-    // Тип меняем только у привычки без записей
-    if (!hasRecords(habitId)) patch.type = data.type;
-
-    if (!updateHabit(habitId, patch)) return;
-    appState.habits = loadHabits();
+    if (!saveHabitPatch(habitId, buildHabitPatch(habitId, data))) return;
     setFormError('');
     renderHabitList();
     renderMainView();
   }
 }
+
 // Строки-аккордеоны: поля раскрываются тапом по заголовку
 export function renderHabitsEditList() {
-  const list = document.getElementById('habits-edit-list');
-  if (!list) return;
-
-  let html = '';
-  for (let i = 0; i < appState.habits.length; i++) {
-    const habit = appState.habits[i];
-    const isQaza = habit.id === QAZA_HABIT_ID;
-    const locked = isQaza || hasRecords(habit.id);
-    const lockedTitle = isQaza
-      ? 'Тип каза задаётся вкладкой «Каза-намазы»'
-      : 'Тип нельзя изменить: по привычке уже есть записи';
-    const lockedAttr = locked
-      ? ' disabled title="' + escapeHtml(lockedTitle) + '"'
-      : '';
-    const isNumber = habit.type === 'number';
-    const numberHidden = isNumber ? '' : ' hidden';
-    const goalValue = habit.goal === null || habit.goal === undefined
-      ? '' : String(habit.goal);
-
-    html += '<li class="habit-row-edit" data-habit-id="' + escapeHtml(habit.id) + '">' +
-      '<button type="button" class="habit-row-head">' +
-        '<span class="habit-row-name">' + escapeHtml(habit.name) + '</span>' +
-        '<span class="habit-row-type">' + escapeHtml(habitTypeLabel(habit.type)) + '</span>' +
-        '<span class="habit-row-chevron">›</span>' +
-      '</button>' +
-      '<div class="habit-row-body">' +
-        '<label><span>Название</span>' +
-          '<input type="text" class="edit-name" value="' + escapeHtml(habit.name) + '">' +
-        '</label>' +
-        '<label><span>Тип</span>' +
-          '<select class="edit-type"' + lockedAttr + '>' +
-          typeOptionsMarkup(habit.type) + '</select>' +
-        '</label>' +
-        '<label class="edit-number-field"' + numberHidden + '><span>Единица измерения</span>' +
-          '<input type="text" class="edit-unit" value="' + escapeHtml(habit.unit || '') +
-          '" placeholder="Ед.">' +
-        '</label>' +
-        '<label class="edit-number-field"' + numberHidden + '><span>Цель</span>' +
-          '<input type="number" class="edit-goal" min="1" step="1" value="' +
-          escapeHtml(goalValue) + '" placeholder="Цель">' +
-        '</label>' +
-        // Время — только у привычек с уровнями: оно задаёт окно «вовремя»
-        (isLevelHabit(habit.id)
-          ? '<label class="edit-time-field"><span>Время</span>' +
-            '<input type="time" class="edit-time" value="' +
-            escapeHtml(habit.time || '') + '">' +
-            '</label>'
-          : '') +
-        '<p class="form-error" role="alert"></p>' +
-        '<div class="habit-row-actions">' +
-          '<button type="button" class="btn btn-primary edit-save">Сохранить</button>' +
-          // У каза удаления нет: удалив привычку, синхронизацию не восстановить
-          (isQaza ? '' : '<button type="button" class="btn btn-danger edit-delete">Удалить</button>') +
-        '</div>' +
-      '</div>' +
-      '</li>';
-  }
-
-  list.innerHTML = html;
+  renderHabitRows('habits-edit-list', editHabitRow);
 }
 // Ошибка показывается внутри раскрытой строки — форма модалки здесь не видна
 export function setRowError(item, message) {
@@ -212,9 +244,7 @@ export function onHabitsEditClick(event) {
   if (!habit) return;
 
   if (target.closest('.edit-delete')) {
-    if (!window.confirm('Удалить привычку «' + habit.name + '» и все её записи?')) return;
-    if (!removeHabit(habitId)) return;
-    appState.habits = loadHabits();
+    if (!removeHabitConfirmed(habitId, habit)) return;
     renderHabitsEditList();
     renderMainView();
     return;
@@ -227,14 +257,7 @@ export function onHabitsEditClick(event) {
       setRowError(item, result.error);
       return;
     }
-    const patch = { name: data.name.trim(), unit: data.unit, goal: data.goal };
-    // Время есть только у привычек с уровнями: поле пустое — время не задано
-    if (isLevelHabit(habitId)) patch.time = data.time;
-    // Тип меняем только у привычки без записей
-    if (!hasRecords(habitId)) patch.type = data.type;
-
-    if (!updateHabit(habitId, patch)) return;
-    appState.habits = loadHabits();
+    if (!saveHabitPatch(habitId, buildHabitPatch(habitId, data))) return;
     renderHabitsEditList();
     renderMainView();
   }

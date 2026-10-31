@@ -230,7 +230,7 @@ export function loadQazaLog() {
 }
 // Запись ключа. Журнал не чистится по датам и не обрезается: ограничения
 // размера нет, как у истории уразы (§5).
-export function saveQazaLog(log) {
+function saveQazaLog(log) {
   if (!log || !validQazaLogDate(log.since)) return;
 
   if (!safeSetItem(QAZA_LOG_KEY, JSON.stringify({
@@ -293,7 +293,7 @@ export function qazaLogDoneByDay(log) {
 // стека: если страница открыта через полночь, в журнале остаются записи прошлого
 // дня, и длина стека дала бы завышенный счётчик.
 // Ручные добавления пропусков в счётчик не входят: намаз не выполнен, а вспомнен.
-export function qazaDoneCount(qaza, date) {
+function qazaDoneCount(qaza, date) {
   let count = 0;
   for (let i = 0; i < qaza.history.length; i++) {
     const entry = qaza.history[i];

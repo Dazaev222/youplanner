@@ -10,7 +10,7 @@ import { hasData } from '../sync/validators.js';
 // Какие разовые правки устройство уже прошло. Отметка нужна затем, чтобы
 // правка не повторялась на каждой загрузке: иначе удалённую привычку
 // возвращал бы каждый старт, а не только первый.
-export function loadMigrations() {
+function loadMigrations() {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.migrations);
     if (!raw) return {};
@@ -21,7 +21,7 @@ export function loadMigrations() {
     return {};
   }
 }
-export function migrationDone(name) {
+function migrationDone(name) {
   return loadMigrations()[name] === true;
 }
 export function markMigration(name) {

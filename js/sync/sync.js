@@ -10,6 +10,7 @@ import { invalidateRecordsCache, loadRecords } from '../data/records.js';
 import { loadSchedule } from '../data/schedule.js';
 import { SLEEP_KEY, loadSleep, validSleepHistory } from '../data/sleep.js';
 import { STORAGE_KEYS } from '../data/storage.js';
+import { rollbackStagedKeys } from '../core/storage.js';
 import { BACKUP_LIMIT, FIREBASE_BACKUPS_URL, FIREBASE_URL, SYNC_DEBOUNCE_MS, SYNC_TS_KEY } from '../data/sync.js';
 import { clearSyncPending, markSyncPending, normalizing, saveNormalized, syncPending, syncTs } from './state.js';
 import { mergeCloudIntoLocal, mergeTombstonesById } from './merge.js';
@@ -76,40 +77,6 @@ export let cloudReady = false;
 // недоступном сервере, а пустая таблица должна отличать «не загрузили»
 // от «человек всё удалил» (§13).
 export let cloudReachable = false;
-// Откат уже записанных ключей после сбоя записи посреди применения снимка
-// (применяют и applyCloudData, и applyBackup в js/data/backup.js — помощник
-// продублирован там, потому что data-слой не импортирует sync-слой целиком).
-// Порядок важен: сначала стираются новые ключи (которых раньше не было) —
-// так освобождается место, из-за нехватки которого всё началось; только
-// потом восстанавливаются прежние значения. Каждый ключ откатывается под
-// своим try: сбой одного не должен оставить неоткаченными остальные.
-// Если откатить не удалось — console.error с перечнем ключей: данные
-// в хранилище целее всего, о смешанном состоянии надо хотя бы крикнуть.
-function rollbackAppliedKeys(appliedLog, source) {
-  const failed = [];
-  for (let i = 0; i < appliedLog.length; i++) {
-    const entry = appliedLog[i];
-    if (!entry.written || entry.had) continue;
-    try {
-      localStorage.removeItem(entry.key);
-    } catch (e) {
-      failed.push(entry.key);
-    }
-  }
-  for (let i = 0; i < appliedLog.length; i++) {
-    const entry = appliedLog[i];
-    if (!entry.written || !entry.had) continue;
-    try {
-      localStorage.setItem(entry.key, entry.previous);
-    } catch (e) {
-      failed.push(entry.key);
-    }
-  }
-  if (failed.length > 0) {
-    console.error(source + ': откат не удался, ключи в смешанном состоянии:',
-      failed.join(', '));
-  }
-}
 // Применяет данные с сервера. Пишем прямо в localStorage: saveHabits/saveQaza
 // поставили бы отправку и вернули бы на сервер только что полученное.
 // Пустой раздел на сервере не затирает непустой локальный: это след неполного
@@ -122,7 +89,7 @@ function rollbackAppliedKeys(appliedLog, source) {
 //   1) валидация всех разделов и сбор stage — пар «ключ, готовая строка» —
 //      без единой записи в хранилище;
 //   2) снимок предыдущего состояния каждого ключа stage;
-//   3) запись; первая ошибка — откат уже записанных ключей (rollbackAppliedKeys).
+//   3) запись; первая ошибка — откат уже записанных ключей (rollbackStagedKeys).
 // Предсказать квоту localStorage заранее нельзя: navigator.storage.estimate
 // считает совсем другое (кэш и диски, а не лимит ключей), у строк своя цена
 // в UTF-16 — поэтому гарантией целостности служит откат фаз 2–3, а не
@@ -287,8 +254,8 @@ export function applyCloudData(data, ts) {
         localStorage.setItem(appliedLog[i].key, appliedLog[i].value);
       } catch (e) {
         // QuotaExceededError или любая другая ошибка записи: применённое
-        // до сбоя откатывается целиком (см. rollbackAppliedKeys)
-        rollbackAppliedKeys(appliedLog, 'applyCloudData');
+        // до сбоя откатывается целиком (см. rollbackStagedKeys)
+        rollbackStagedKeys(appliedLog, 'applyCloudData');
         // Практика сообщения о квоте в проекте одна: safeSetItem эмитит
         // storage:error, тост показывает подписчик в app.js. Метка не
         // двигается и sync:applied не эмится: хранилище осталось ровно
@@ -508,7 +475,7 @@ function snapshotDiffers(a, b) {
 // не дошла до сервера, а список у нас пуст. Пустой список здесь значит
 // «не загрузили», а не «привычек нет», и PUT стёр бы серверные привычки,
 // которых мы просто не видели. Тогда отправляем серверные (§13).
-export function syncBody(ts, previous) {
+function syncBody(ts, previous) {
   syncing = true;
   try {
     let habits = loadHabits();
@@ -631,7 +598,7 @@ function applyMergedFromCloud(previous) {
     try {
       localStorage.setItem(stage[i].key, stage[i].value);
     } catch (e) {
-      rollbackAppliedKeys(appliedLog, 'applyMergedFromCloud');
+      rollbackStagedKeys(appliedLog, 'applyMergedFromCloud');
       bus.emit('storage:error');
       return;
     }

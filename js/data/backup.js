@@ -8,6 +8,7 @@ import { invalidateRecordsCache, loadRecords } from './records.js';
 import { loadSchedule } from './schedule.js';
 import { SLEEP_KEY, SLEEP_MAX_MINUTES, loadSleep, sleepDurationMinutes, sleepTimeMinutes, validSleepHistory } from './sleep.js';
 import { STORAGE_KEYS } from './storage.js';
+import { rollbackStagedKeys } from '../core/storage.js';
 import { validCloudArchive, validCloudSchedule } from '../sync/validators.js';
 // Версия формата резервной копии. Растёт, если меняется состав полей файла:
 // версия 2 добавила раздел tasks, версия 3 — раздел prayer, версия 4 —
@@ -174,42 +175,6 @@ export function parseBackup(text) {
 
   return data;
 }
-// Откат уже записанных ключей после сбоя записи посреди применения копии.
-// Та же схема, что у applyCloudData (js/sync/sync.js, rollbackAppliedKeys) —
-// помощник продублирован с собственным именем, потому что data-слой не
-// импортирует sync-слой целиком, а песочница тестов склеивает модули
-// в один скрипт, где повторное объявление затирало бы первое.
-// Порядок важен: сначала стираются новые ключи (которых раньше не
-// было) — так освобождается место, из-за нехватки которого всё началось;
-// только потом восстанавливаются прежние значения. Каждый ключ откатывается
-// под своим try: сбой одного не должен оставить неоткаченными остальные.
-// Если откатить не удалось — console.error с перечнем ключей: данные
-// в хранилище целее всего, о смешанном состоянии надо хотя бы крикнуть.
-function rollbackBackupWrites(appliedLog, source) {
-  const failed = [];
-  for (let i = 0; i < appliedLog.length; i++) {
-    const entry = appliedLog[i];
-    if (!entry.written || entry.had) continue;
-    try {
-      localStorage.removeItem(entry.key);
-    } catch (e) {
-      failed.push(entry.key);
-    }
-  }
-  for (let i = 0; i < appliedLog.length; i++) {
-    const entry = appliedLog[i];
-    if (!entry.written || !entry.had) continue;
-    try {
-      localStorage.setItem(entry.key, entry.previous);
-    } catch (e) {
-      failed.push(entry.key);
-    }
-  }
-  if (failed.length > 0) {
-    console.error(source + ': откат не удался, ключи в смешанном состоянии:',
-      failed.join(', '));
-  }
-}
 // Замена локальных данных копией. Пишем в localStorage напрямую: saveHabits и
 // saveQaza поставили бы по отправке на каждый ключ, а нужен один PUT на замену.
 // Раздела qaza в файле может не быть — тогда очередь остаётся текущей.
@@ -285,8 +250,8 @@ export function applyBackup(data) {
       localStorage.setItem(appliedLog[i].key, appliedLog[i].value);
     } catch (e) {
       // QuotaExceededError или любая другая ошибка записи: применённое
-      // до сбоя откатывается целиком (см. rollbackBackupWrites)
-      rollbackBackupWrites(appliedLog, 'applyBackup');
+      // до сбоя откатывается целиком (см. rollbackStagedKeys)
+      rollbackStagedKeys(appliedLog, 'applyBackup');
       // Тот же сигнал квоты, что у safeSetItem: подписчик storage:error
       // в app.js покажет тост. События замены (data:changed/data:replaced)
       // не эмитятся: данные не менялись, перерисовывать нечего
