@@ -190,8 +190,28 @@ function saveTombstonesRaw(tombstones) {
 // Отмечает удаление привычки в момент ts. Повторное удаление того же id
 // (после воскрешения чужой правкой) перезаписывает метку свежей — верна
 // последняя, а не первая.
+//
+// Лимит вытесняет самые СТАРЫЕ метки, а не свежую: sanitizeTombstones
+// режет по порядку ключей, и на переполнении не влезла бы именно новая
+// метка — только что удалённая привычка воскресла бы при первом же слиянии
+// (аудит 2026-10-31). Вытеснение по минимуму ts: надгробие долгой давности
+// менее всего способно понадобиться.
 export function writeTombstone(id, ts) {
   const tombstones = loadTombstones();
+  if (!Object.prototype.hasOwnProperty.call(tombstones, id)) {
+    while (Object.keys(tombstones).length >= TOMBSTONES_LIMIT) {
+      let oldestId = null;
+      let oldestTs = Infinity;
+      const ids = Object.keys(tombstones);
+      for (let i = 0; i < ids.length; i++) {
+        if (tombstones[ids[i]] < oldestTs) {
+          oldestTs = tombstones[ids[i]];
+          oldestId = ids[i];
+        }
+      }
+      delete tombstones[oldestId];
+    }
+  }
   tombstones[id] = ts;
   return saveTombstonesRaw(sanitizeTombstones(tombstones));
 }

@@ -1,7 +1,7 @@
 import { bus } from '../core/bus.js';
 import { ARCHIVE_KEY, loadArchive } from './archive.js';
 import { FAST_KEY, loadFast, validFastHistory } from './fast.js';
-import { loadHabits } from './habits.js';
+import { loadHabits, pruneResolvedTombstones } from './habits.js';
 import { PRAYER_KEY, loadPrayer } from './prayer.js';
 import { QAZA_LOG_KEY, QAZA_STORAGE_KEY, loadQaza, loadQazaLog, validQazaLogDate, validQazaLogEntries } from './qaza.js';
 import { invalidateRecordsCache, loadRecords } from './records.js';
@@ -263,6 +263,12 @@ export function applyBackup(data) {
     // при последующем откате кэш просто перечитает прежнюю строку
     if (appliedLog[i].key === STORAGE_KEYS.records) invalidateRecordsCache();
   }
+
+  // Копия вернула привычки в список (аудит 2026-10-31): их надгробия,
+  // оставшиеся от прошлых удалений, больше не отвечают за факт — без снятия
+  // метки уезжали бы наверх при каждой отправке и блокировали бы привоз
+  // этой привычки на других устройствах
+  pruneResolvedTombstones();
 
   // Слой данных не трогает состояние интерфейса и рендеры: замена данных
   // целиком — событие data:replaced, подписчик в проводке обновит appState,

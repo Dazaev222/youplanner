@@ -352,3 +352,71 @@ test('buildBackup не включает tombstones — версия формат
   assert.equal('tombstones' in backup, false,
     'надгробия попали в файловую копию — разбор старых версий сломается');
 });
+
+// ── Аудит 2026-10-31: дыры надгробий, найденные adversarial-прогонами ───────
+
+test('applyBackup возвращает привычку из копии и снимает её надгробие', () => {
+  const app = loadApp();
+  seedTwoHabits(app.sandbox);
+  // Копия ДО удаления: в файле обе привычки и их записи
+  const backupText = JSON.stringify(app.context.buildBackup());
+
+  assert.equal(app.context.removeHabit('h2'), true);
+  assert.ok(app.sandbox.localStorage.getItem('youplanner.tombstones'), 'надгробие не записано');
+
+  // Восстановление из файловой копии: привычка возвращается — надгробие
+  // больше не отвечает за факт, и висящей меткой уезжать наверх не должно
+  assert.equal(app.context.applyBackup(app.context.parseBackup(backupText)), true);
+
+  assert.deepEqual(JSON.parse(app.sandbox.localStorage.getItem('youplanner.habits')).map(function (h) { return h.id; }),
+    ['h1', 'h2'], 'копия не вернула привычку');
+  assert.equal(app.sandbox.localStorage.getItem('youplanner.tombstones'), null,
+    'надгробие пережило восстановление из копии: метка уедет на сервер и будет мешать слияниям');
+});
+
+test('mergeCloudIntoLocal: записи удалённой привычки не воскресают из старого снимка', () => {
+  const local = baseLocal();
+  // Локально привычка h9 удалена (надгробие свежее снимка), её записи вычищены
+  local.tombstones = { h9: DELETE_TS };
+  local.records = { '2026-10-20': { h1: true, h2: 3 } };
+  const cloud = baseCloud();
+  // Снимок старее удаления: sectionTs меньше надгробия, в разделах — и h9, и его записи
+  cloud.updatedAt = DELETE_TS - 1000;
+  cloud.sectionTs = {
+    habits: DELETE_TS - 1000, records: DELETE_TS - 1000, qaza: CLOUD_TS, prayer: CLOUD_TS,
+    fast: CLOUD_TS, qazaLog: CLOUD_TS, sleep: CLOUD_TS, schedule: CLOUD_TS,
+  };
+  cloud.habits = [habit(), habit({ id: 'h9' })];
+  cloud.records = {
+    '2026-10-20': { h1: true, h2: 3, h9: 7 },
+    '2026-10-25': { h9: 2 },
+  };
+  const merged = merge(local, cloud);
+
+  assert.deepEqual(merged.habits.map(function (h) { return h.id; }), ['h1'],
+    'привычка h9 вернулась, хотя надгробие новее снимка');
+  assert.deepEqual(merged.records['2026-10-20'], { h1: true, h2: 3 },
+    'значения удалённой привычки воскресли из старого снимка');
+  assert.equal(merged.records['2026-10-25'], undefined,
+    'день из старого снимка привёз только удалённую привычку — день не нужен');
+  // Записи живых привычек при этом сливаются как раньше
+  assert.deepEqual(merged.records['2026-10-21'], undefined,
+    'локальные записи не должны пропасть');
+});
+
+test('writeTombstone при лимите вытесняет самую старую метку, а не отбрасывает свежую', () => {
+  const app = loadApp();
+  const big = {};
+  for (let i = 0; i < TOMBSTONES_LIMIT; i++) big['hz' + i] = 1000 + i;
+  app.sandbox.localStorage.setItem('youplanner.tombstones', JSON.stringify(big));
+
+  assert.equal(app.context.writeTombstone('hNEW', 999999), true);
+
+  const tombstones = app.context.loadTombstones();
+  assert.equal(tombstones.hNEW, 999999,
+    'свежее надгробие не записано: только что удалённая привычка воскреснет при первом же слиянии');
+  assert.equal(Object.keys(tombstones).length, TOMBSTONES_LIMIT, 'лимит не держится');
+  assert.equal(tombstones.hz0, undefined, 'самая старая метка должна быть вытеснена');
+  assert.equal(tombstones['hz' + (TOMBSTONES_LIMIT - 1)], 1000 + TOMBSTONES_LIMIT - 1,
+    'свежие метки не должны теряться');
+});
