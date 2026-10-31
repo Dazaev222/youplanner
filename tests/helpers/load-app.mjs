@@ -55,6 +55,13 @@ export function loadApp({ fetchImpl } = {}) {
 
   const context = vm.createContext(sandbox);
   vm.runInContext(getAppJs(), context, { filename: 'youplanner-app.js' });
+  // Ключ Firebase из исходника не должен доходить до тестов: песочница
+  // стартует в состоянии «аутентификация не настроена», и сетевые заглушки
+  // (timers, sync) не получают лишних identitytoolkit-вызовов. Тесты,
+  // которым нужен токен, подставляют свой ключ setFirebaseApiKey() явно.
+  if (typeof context.setFirebaseApiKey === 'function') {
+    context.setFirebaseApiKey('');
+  }
   return {
     sandbox,
     context,

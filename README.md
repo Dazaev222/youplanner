@@ -130,15 +130,16 @@ JSON чужой схемы от сервера. Внешняя сеть блок
 сетевой попыткой на каждый обмен.
 
 Три шага владельца (до них правила базы публичные — приложение работает
-как раньше):
+как раньше). Шаги 1–2 выполнены 2026-10-31: Anonymous включён (пробный
+signUp прошёл), ключ вписан в `js/data/firebase-auth.js`:
 
-1. Firebase Console → Authentication → Sign-in method → включить Anonymous.
-2. Project settings → General → Web API Key вписать в
-   `js/data/firebase-auth.js` (ключ web-приложений не секрет).
+1. ~~Firebase Console → Authentication → Sign-in method → включить Anonymous~~ ✅.
+2. ~~Project settings → General → Web API Key вписать в
+   `js/data/firebase-auth.js`~~ ✅ (ключ web-приложений не секрет).
 3. Realtime Database → Rules → вставить содержимое `database.rules.json`
    → Publish — **отдельно для обоих инстансов**: основного
    `youplanner-d8aaea12-60e6-4ac9-973c-46c19b387cd9` и соседнего
-   `youplanner-d8aaea12-60e6-4ac9-973c-46c19b387cd9-backups`.
+   `youplanner-d8aaea12-60e6-4ac9-973c-46c19b387cd9-backups`. ← **осталось**
 
 Проверка после шагов — `node tests/e2e/firebase-rules.e2e.mjs` (чистый node,
 без playwright): проба PUT без auth обязана получить 401/403 на обоих

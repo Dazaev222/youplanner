@@ -17,9 +17,9 @@
 // Console (Project settings → General): ключ web-приложений не секрет —
 // он идентифицирует проект, а не пользователя, и свободно живёт в клиентском
 // коде. Пустая строка = аутентификация выключена целиком, сеть не дёргается.
-// let, а не const: setFirebaseApiKey() ниже переписывает ключ из тестов
-// и конфигурации, не редактируя исходник.
-export let FIREBASE_WEB_API_KEY = '';
+// let, а не const: setFirebaseApiKey() ниже переписывает ключ из тестов,
+// не редактируя исходник.
+export let FIREBASE_WEB_API_KEY = 'AIzaSyDux6B8kQ7jmZ_txjxlb2KRHhURawuivTk';
 
 // Refresh-токен устройства. Сознательно НЕ в STORAGE_KEYS (js/data/storage.js):
 // как api_key ассистента, это локальная механика устройства, а не данные
