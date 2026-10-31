@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "ticktick-ui-skills": {
+      "source": "ihlamury/design-skills",
+      "sourceType": "github",
+      "skillPath": "skills/ticktick/SKILL.md",
+      "computedHash": "169a2e0321ec9d7e894da26b2b22ee046ccce1aa736370cd72446504cbd04cbf"
+    }
+  }
+}
