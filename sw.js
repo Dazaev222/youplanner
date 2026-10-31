@@ -20,6 +20,8 @@ const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './ic
   // vision и API-клиент слиты в assistant-media.js, этап Y1)
   './js/ui/assistant-pdf.js',
   './js/ui/assistant-media.js',
+  // Кнопка «Анализ привычек»: снимок статистики в реплику чата
+  './js/ui/assistant-analysis.js',
   './js/ui/prayer-view.js',
   './js/ui/fast-view.js',
   './js/ui/sleep-view.js',

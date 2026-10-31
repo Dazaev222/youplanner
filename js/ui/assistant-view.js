@@ -33,6 +33,7 @@ import { QAZA_LOG_KEY, QAZA_STORAGE_KEY } from '../data/qaza.js';
 import { SLEEP_KEY } from '../data/sleep.js';
 import { STORAGE_KEYS } from '../data/storage.js';
 import { postAssistantChat } from './assistant-media.js';
+import { buildHabitsAnalysisRequest } from './assistant-analysis.js';
 import {
   PDF_MAX_CHARS,
   getPdfContext,
@@ -1038,9 +1039,15 @@ export function onAssistantInputKeydown(event) {
   // Shift+Enter при выключенном тумблере: только preventDefault, без действий
 }
 
-// Чипы делегированы по контейнеру: текст команды — в data-chip.
+// Чипы делегированы по контейнеру: текст команды — в data-chip. Кнопка
+// «Анализ привычек» (data-action="analysis") вместо статического текста
+// шлёт реплику, собранную из живой статистики (assistant-analysis.js)
 export function onAssistantChipClick(event) {
   const chip = event.target.closest('.assistant-chip');
   if (!chip) return;
+  if (chip.getAttribute('data-action') === 'analysis') {
+    onAssistantSubmit(buildHabitsAnalysisRequest());
+    return;
+  }
   onAssistantSubmit(chip.getAttribute('data-chip'));
 }

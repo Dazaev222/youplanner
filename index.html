@@ -308,6 +308,10 @@
         <button type="button" class="assistant-chip" data-chip="Сводка недели">Сводка недели</button>
         <button type="button" class="assistant-chip" data-chip="Что я пропускаю?">Что я пропускаю?</button>
         <button type="button" class="assistant-chip" data-chip="Как дела с каза?">Как дела с каза?</button>
+        <!-- Кнопка анализа: реплику собирает buildHabitsAnalysisRequest()
+             из живой статистики (assistant-analysis.js), перехват по
+             data-action в onAssistantChipClick -->
+        <button type="button" class="assistant-chip" data-action="analysis">Анализ привычек</button>
       </div>
       <form id="assistant-form" novalidate>
         <button type="button" id="assistant-pdf-indicator"
