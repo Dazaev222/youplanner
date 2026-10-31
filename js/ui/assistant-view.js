@@ -598,6 +598,16 @@ let assistantGeneration = 0;
 // большой PDF ещё читался, уходил в API вообще без текста файла — модель
 // честно отвечала «в отрывке нет содержания». Ввод текста при разборе PDF
 // остаётся доступным: печатать можно, отправится после.
+// Отложенная реплика (баг 1 из iPhone-теста Vision, 2026-11-01): отправка
+// во время сжатия фото больше не отбивается ошибкой «ещё сжимается» — текст
+// встаёт в очередь и уходит сам, когда сжатие закончится (flush в
+// updateAssistantControls, его зовёт compressChatImages в finally).
+// Тост с ошибкой загрузки теперь честный: только при реальной неудаче
+// обработки фото, а не как ложная тревога при уже ушедшем ответе.
+let pendingSubmitText = null;
+let pendingSubmitAt = 0;
+const PENDING_SUBMIT_LIMIT_MS = 35000;
+
 function updateAssistantControls() {
   const input = document.getElementById('assistant-input');
   const send = document.getElementById('assistant-send');
@@ -608,6 +618,23 @@ function updateAssistantControls() {
   if (send) send.disabled = blocked;
   if (pdfBtn) pdfBtn.classList.toggle('is-disabled', blocked);
   if (imageBtn) imageBtn.classList.toggle('is-disabled', blocked);
+  // Flush очереди: сжатие закончилось и запрос в полёте не идёт
+  if (pendingSubmitText && !isImageCompressing() && !assistantBusy
+      && !isPdfParsing()) {
+    const text = pendingSubmitText;
+    pendingSubmitText = null;
+    if (Date.now() - pendingSubmitAt > PENDING_SUBMIT_LIMIT_MS) {
+      // Зависшее сжатие: текст возвращаем в поле, решение за владельцем
+      if (input) input.value = text;
+      showErrorToast('Фото обрабатывались слишком долго — отправьте реплику '
+        + 'ещё раз');
+      return;
+    }
+    if (!onAssistantSubmit(text)) {
+      // Не ушла (нет ключа и т.п.) — возвращаем текст в поле, не теряем
+      if (input) input.value = text;
+    }
+  }
 }
 
 function setAssistantBusy(busy) {
@@ -625,8 +652,13 @@ export function onAssistantSubmit(text) {
     return false;
   }
   if (isImageCompressing()) {
-    showErrorToast('Фото ещё сжимается — повторите отправку через секунду');
-    return false;
+    // Баг 1 (iPhone-тест Vision): вместо отказа «ещё сжимается» реплика
+    // встаёт в очередь и уходит сама после сжатия (flush в
+    // updateAssistantControls). Поле чистим — текст уже пойман в очередь.
+    pendingSubmitText = message;
+    pendingSubmitAt = Date.now();
+    showToast('Фото обрабатываются — реплика уйдёт сразу после сжатия');
+    return true;
   }
   if (assistantBusy) return false;
   // Ключ проверяется ДО приёма реплики: без него запрос всё равно не уйдёт,

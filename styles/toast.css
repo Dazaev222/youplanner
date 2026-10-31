@@ -1,26 +1,34 @@
 /* --- Тост ---------------------------------------------------------------- */
-/* Плашка-подсказка поверх всех шторок.
-   Фон — из --text, текст — нейтрально-светлый: плашка контрастна палитре и
-   новых цветов в неё не заводит (§9). Кликов тост не ловит: это подсказка, а
-   не кнопка, — и потому не мешает нажимать то, что под ним. Отступ считается
-   от верха клавиатуры, как у шторок: тост показывается при открытой форме, а
-   fixed на iOS остался бы за клавиатурой. */
+/* Плашка-подсказка поверх всех шторок. iPhone-тест Vision (баг 2,
+   2026-11-01): плашка наезжала на таб-бар и была нечитаемой. Теперь она
+   поднята над таб-баром с учётом safe-area, крупнее, с полупрозрачным
+   фоном и blur в стиле iOS; закрывается тапом и свайпом вверх, поэтому
+   pointer-events включён (раньше был none намеренно). */
 #toast {
   position: fixed;
   left: 50%;
-  bottom: calc(var(--keyboard-offset, 0px) + 96px);
+  /* Над таб-баром: безопасная зона iPhone + высота панели + запас */
+  bottom: calc(var(--keyboard-offset, 0px) + env(safe-area-inset-bottom, 0px)
+    + 96px);
   z-index: 150;
   max-width: calc(100vw - 32px);
-  padding: 12px 18px;
-  border-radius: var(--radius-md);
+  padding: 14px 20px;
+  border-radius: 16px;
+  /* iOS-плашка: полупрозрачный тёмный фон и размытие того, что под ней.
+     color-mix с фолбэком: старые Safari остаются на плотном фоне. */
   background: var(--text);
+  background: color-mix(in srgb, var(--text) 78%, transparent);
+  -webkit-backdrop-filter: blur(14px) saturate(1.4);
+  backdrop-filter: blur(14px) saturate(1.4);
   color: var(--surface-muted);
-  font-size: 14px;
-  line-height: 1.35;
+  /* 16px: с 14px формулировки причин на iPhone читались плохо */
+  font-size: 16px;
+  line-height: 1.4;
   text-align: center;
   box-shadow: var(--shadow);
   transform: translateX(-50%);
-  pointer-events: none;
+  pointer-events: auto;
+  cursor: pointer;
   animation: toast-in .18s ease-out;
 }
 
@@ -33,4 +41,3 @@
     opacity: 0;
   }
 }
-

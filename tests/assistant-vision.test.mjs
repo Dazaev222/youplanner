@@ -741,3 +741,26 @@ test('10 фото за раз: прикрепляются первые 3, пов
   assert.ok(els.toast.textContent.indexOf('Не больше 3') !== -1,
     'нет тоста про лимит: «' + els.toast.textContent + '»');
 });
+
+test('onAssistantSubmit: реплика во время сжатия фото уходит сразу после него (баг 1)', async () => {
+  const fetchCalls = [];
+  const app = loadApp({
+    fetchImpl: (url, opts) => { fetchCalls.push({ url, opts }); return Promise.resolve(okReply('ответ')); },
+  });
+  app.sandbox.localStorage.setItem('youplanner.api_key', 'test-key');
+  app.sandbox.localStorage.setItem('youplanner.assistant_model', 'qwen3.6-35b-a3b');
+  app.run('imageContext = [{ dataUrl: "data:image/jpeg;base64,AAA", name: "a.jpg", bytes: 1024 }];');
+  app.run('imageCompressing = true;');
+
+  const accepted = app.context.onAssistantSubmit('Что на фото?');
+
+  assert.equal(accepted, true, 'реплика принимается в очередь, а не отбивается ошибкой');
+  assert.equal(fetchCalls.length, 0, 'запрос не уходит, пока фото сжимается');
+
+  app.run('imageCompressing = false;');   // сжатие закончилось
+  app.run('updateAssistantControls();');  // …контролы обновились — flush очереди
+  await new Promise((r) => setTimeout(r, 0));
+  assert.equal(fetchCalls.length, 1, 'отложенная реплика ушла после сжатия');
+  assert.equal(app.run('readHistory().length'), 2,
+    'в истории вопрос и ответ: реплика ушла один раз, без дубля');
+});

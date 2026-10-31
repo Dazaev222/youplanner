@@ -18,38 +18,75 @@ export function cssEscape(value) {
   }
   return String(value).replace(/["\\]/g, '\\$&');
 }
-// Плашка-подсказка поверх шторок. 3,5 с: два коротких предложения прочитать
-// можно, а заслонить следующий шаг она не успевает. Повторный вызов перезапускает
-// отсчёт, а не копит таймеры: последнее слово важнее прежнего.
+// Плашка-подсказка поверх шторок. 3,5 с для подсказок; ошибки держатся 6 с.
+// Повторный вызов перезапускает отсчёт, а не копит таймеры: последнее слово
+// важнее прежнего. Тост закрывается тапом и свайпом вверх (баг 2 из
+// теста Vision на iPhone): pointer-events включён в toast.css.
 export let toastTimer = null;
+
+function hideToast() {
+  const toast = document.getElementById('toast');
+  if (toast) toast.hidden = true;
+  if (toastTimer) {
+    clearTimeout(toastTimer);
+    toastTimer = null;
+  }
+}
+
+function armToast(ms) {
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(function () {
+    const toast = document.getElementById('toast');
+    if (toast) toast.hidden = true;
+    toastTimer = null;
+  }, ms);
+}
+
+// Слушатели жестов ставятся один раз на живой элемент #toast.
+let toastGesturesBound = false;
+function bindToastGestures() {
+  if (toastGesturesBound) return;
+  const toast = document.getElementById('toast');
+  if (!toast || typeof toast.addEventListener !== 'function') return;
+  toastGesturesBound = true;
+  toast.addEventListener('click', hideToast);
+  let touchStartY = null;
+  toast.addEventListener('touchstart', function (e) {
+    touchStartY = e.touches[0].clientY;
+  }, { passive: true });
+  toast.addEventListener('touchmove', function (e) {
+    if (touchStartY !== null && e.touches[0].clientY < touchStartY - 30) {
+      touchStartY = null;
+      hideToast();
+    }
+  }, { passive: true });
+}
+
 export function showToast(message) {
   const toast = document.getElementById('toast');
   if (!toast) return;
+  bindToastGestures();
   toast.textContent = message;
   toast.hidden = false;
-  if (toastTimer) clearTimeout(toastTimer);
-  toastTimer = setTimeout(function () {
-    toast.hidden = true;
-    toastTimer = null;
-  }, 3500);
+  armToast(3500);
 }
 
 // Тост об ошибке: тот же единственный элемент #toast, но одинаковый текст
 // не перезаписывается заново — только продлевается отсчёт скрытия. Иначе
 // цепочка одинаковых сбоев (три Enter во время чтения PDF) каждый раз
-// «зажигает» плашку заново, и она кажется мигающей.
+// «зажигает» плашку заново, и она кажется мигающей. Ошибке 6 с: длинные
+// формулировки причин не успевают прочитать за 3,5 с (баг 2, iPhone).
 export function showErrorToast(message) {
   const toast = document.getElementById('toast');
   if (!toast) return;
+  bindToastGestures();
   if (!toast.hidden && toast.textContent === message) {
-    if (toastTimer) clearTimeout(toastTimer);
-    toastTimer = setTimeout(function () {
-      toast.hidden = true;
-      toastTimer = null;
-    }, 3500);
+    armToast(6000);
     return;
   }
-  showToast(message);
+  toast.textContent = message;
+  toast.hidden = false;
+  armToast(6000);
 }
 
 // Единый текст сетевого сбоя и единая точка его показа. display(message) —
@@ -81,4 +118,47 @@ export function syncSheetToKeyboard() {
     window.innerHeight - window.visualViewport.height
     - window.visualViewport.offsetTop);
   document.documentElement.style.setProperty('--keyboard-offset', offset + 'px');
+}
+
+// Отложенный вызов: серия быстрых событий даёт один вызов функции — после
+// паузы wait мс от последнего события. Мгновенную часть отклика (пересчёт
+// итога на экране) вызывающий делает сам, сюда попадает только дорогая
+// запись: хранилище, сеть. Жило отдельным файлом (js/core/debounce.js),
+// потребителем был только js/ui/sleep-view.js — слито сюда (этап Y4).
+//
+// flush() — выполнить отложенный вызов прямо сейчас (уход со вкладки,
+// закрытие экрана: страница может исчезнуть раньше таймера). cancel() —
+// снять отложенный вызов без выполнения. Когда отложенного вызова нет,
+// обе операции — тихий no-op.
+export function debounce(fn, wait) {
+  let timer = null;
+  let lastArgs = null;
+
+  function invoke() {
+    timer = null;
+    const args = lastArgs;
+    lastArgs = null;
+    fn.apply(null, args);
+  }
+
+  function debounced() {
+    lastArgs = arguments;
+    if (timer) clearTimeout(timer);
+    timer = setTimeout(invoke, wait);
+  }
+
+  debounced.flush = function () {
+    if (!timer) return;
+    clearTimeout(timer);
+    invoke();
+  };
+
+  debounced.cancel = function () {
+    if (!timer) return;
+    clearTimeout(timer);
+    timer = null;
+    lastArgs = null;
+  };
+
+  return debounced;
 }
