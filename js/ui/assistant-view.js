@@ -2,7 +2,8 @@
 //
 // С этапа D.5 файл — оркестратор экрана: состояние (ключ/модель/история),
 // рендер ленты, модалка ключа и обработчики. Подсистемы вынесены в модули:
-// js/ui/assistant-pdf.js — чтение PDF и умная нарезка,
+// js/ui/assistant-pdf.js — чтение PDF, умная нарезка и скан-фолбэк (страницы
+// скана рендерятся в картинки и уходят в Vision как фото),
 // js/ui/assistant-vision.js — фото в чате,
 // js/ui/assistant-api.js — HTTP-клиент (fetch с таймаутом).
 // Публичная поверхность файла не менялась: app.js и тесты импортируют отсюда.
@@ -26,6 +27,7 @@ import { postAssistantChat } from './assistant-api.js';
 import {
   PDF_MAX_CHARS,
   getPdfContext,
+  getPdfPageImages,
   isPdfParsing,
   parsePdf,
   resetPdfContext,
@@ -252,10 +254,19 @@ function buildMessages() {
   }
   // Фото прикрепляются по семантике PDF: к каждому запросу, пока не убраны
   // вручную (уточняющие вопросы видят то же фото). История остаётся текстовой.
-  const images = getImageContext();
-  if (images && images.length) {
+  // К фото добавляются страницы PDF-скана (фолбэк assistant-pdf.js): уходят
+  // тем же vision-путём, что и фото, — одним массивом в последнюю user-реплику.
+  const photos = getImageContext() || [];
+  const scanPages = getPdfPageImages() || [];
+  const images = photos.concat(scanPages);
+  if (photos.length) {
     system = 'Пользователь приложил к вопросу фото ('
-      + images.length + ' шт.): рассмотрите их и опирайтесь на них в ответе.\n\n' + system;
+      + photos.length + ' шт.): рассмотрите их и опирайтесь на них в ответе.\n\n' + system;
+  }
+  if (scanPages.length) {
+    system = 'PDF-файл пользователя — скан без текстового слоя: приложены '
+      + 'изображения его первых ' + scanPages.length + ' страниц. '
+      + 'Рассмотрите их как текст документа и отвечайте по ним.\n\n' + system;
   }
   return withVisionAttachments(
     [{ role: 'system', content: system }].concat(readHistory().slice(-HISTORY_SEND)),
@@ -323,9 +334,11 @@ export function onAssistantPdfPick() {
 
 export function onAssistantPdfClear() {
   if (isPdfParsing()) return;
-  if (getPdfContext()) {
+  // У скана текстового контекста нет, но страницы-изображения убирать нужно
+  // так же, как текст у обычного PDF
+  if (getPdfContext() || getPdfPageImages()) {
     resetPdfContext();
-    showToast('Текст PDF убран из чата');
+    showToast('PDF убран из чата');
   }
 }
 
@@ -623,8 +636,10 @@ export function onAssistantSubmit(text) {
     openAssistantKeyModal();
     return false;
   }
-  const attached = getImageContext();
-  const images = attached ? attached.slice() : [];
+  // Фото пользователя и страницы PDF-скана под одним гейтом зрения: скану
+  // без vision-модели так же бессмысленно уходить в API, как фото
+  const attached = (getImageContext() || []).concat(getPdfPageImages() || []);
+  const images = attached.slice();
   // Фото при модели без зрения не отправляются вовсе: API ответил бы
   // непонятной ошибкой. Модалка модели уже открыта — переключение рядом.
   if (images.length && !assistantModelSupportsVision(readAssistantModel())) {

@@ -13,7 +13,7 @@ import { loadApp } from './helpers/load-app.mjs';
 // С этапа D.5 нарезка и поиск по PDF живут в отдельном модуле; песочница
 // отдаёт их как и прежде (все модули конкатенируются), прямой ESM-импорт
 // дополнительно закрепляет публичные экспорты нового файла.
-import { chunkPdfText, pdfQueryTokens, selectPdfChunks } from '../js/ui/assistant-pdf.js';
+import { chunkPdfText, pdfHasTextLayer, pdfQueryTokens, selectPdfChunks } from '../js/ui/assistant-pdf.js';
 
 // Абзац заданной длины с маркером внутри: 'абзац 007: слово ...'
 function paragraph(n, marker, filler) {
@@ -27,6 +27,10 @@ test('assistant-pdf: нарезка и поиск экспортируются �
   assert.equal(typeof chunkPdfText, 'function');
   assert.equal(typeof pdfQueryTokens, 'function');
   assert.equal(typeof selectPdfChunks, 'function');
+  // Скан-фолбэк: решение «есть ли у PDF текстовый слой» — тоже публичный экспорт
+  assert.equal(typeof pdfHasTextLayer, 'function');
+  assert.equal(pdfHasTextLayer('а'.repeat(40), 2), true, '40 симв. на 2 стр. — слой есть');
+  assert.equal(pdfHasTextLayer('1\n2', 2), false, 'по номеру на страницу — скан');
   // Два абзаца по 1250 символов: каждый больше CHUNK_MIN, вместе не влезают
   // в CHUNK_SIZE — режутся ровно на два фрагмента с сохранением порядка
   const chunks = chunkPdfText(paragraph(1250, 'А-1') + '\n\n' + paragraph(1250, 'А-2'));
@@ -207,6 +211,57 @@ test('pdfScannedWarning: предупреждает только при полу
   const warning = context.pdfScannedWarning(20, 13);
   assert.ok(typeof warning === 'string' && warning.includes('13 из 20'),
     'в предупреждении нет чисел страниц: ' + warning);
+});
+
+// --- Скан-фолбэк: решение «есть ли у PDF текстовый слой» ---------------------
+// У файла без текстового слоя (скан) первые страницы рендерятся в картинки
+// и уходят в Vision тем же путём, что и фото. Проверяется сама чистая
+// функция решения, а не pdf.js: порог — среднее число символов на страницу
+// (обоснование — у константы в js/ui/assistant-pdf.js).
+
+test('pdfHasTextLayer: пустота и номера страниц — скан, обычный текст — нет', () => {
+  const { context } = loadApp();
+  // getTextContent не дал ничего
+  assert.equal(context.pdfHasTextLayer('', 12), false);
+  assert.equal(context.pdfHasTextLayer('  \n ', 12), false);
+  assert.equal(context.pdfHasTextLayer(null, 12), false);
+  // Скан с нумерацией: «1\n2\n…\n200» — около трёх символов на страницу
+  const numbered = [];
+  for (let i = 1; i <= 200; i++) numbered.push(String(i));
+  assert.equal(context.pdfHasTextLayer(numbered.join('\n'), 200), false,
+    'документ из одних номеров страниц — скан');
+  // Настоящий текст: даже скромные 200 символов на страницу проходят
+  assert.equal(context.pdfHasTextLayer(paragraph(200), 1), true);
+});
+
+test('pdfHasTextLayer: порог 20 символов на страницу — границы и полускан', () => {
+  const { context } = loadApp();
+  // Граница: ровно 20 симв./стр. — слой есть, на символ меньше — уже скан
+  assert.equal(context.pdfHasTextLayer('а'.repeat(20 * 10), 10), true);
+  assert.equal(context.pdfHasTextLayer('а'.repeat(20 * 10 - 1), 10), false);
+  // Полускан: половина страниц с текстом, половина пустые — среднее высокое,
+  // фолбэк не нужен (это путь pdfScannedWarning, текст важнее картинок)
+  const halfScan = [];
+  for (let i = 0; i < 10; i++) halfScan.push(i % 2 === 0 ? paragraph(400, 'Т-' + i) : '');
+  assert.equal(context.pdfHasTextLayer(halfScan.join('\n'), 10), true);
+  // Почти целиком скан: одна текстовая страница на двести — среднее ниже
+  // порога, фолбэк включается даже при ненулевом тексте
+  let rare = paragraph(900, 'ЕДИНСТВЕННАЯ');
+  for (let i = 1; i <= 199; i++) rare += '\n' + i;
+  assert.equal(context.pdfHasTextLayer(rare, 200), false);
+  // Страниц не прочитано — решаем по самому факту текста
+  assert.equal(context.pdfHasTextLayer('Немного текста', 0), true);
+  assert.equal(context.pdfHasTextLayer('', 0), false);
+});
+
+test('resetPdfContext: страницы скана сбрасываются вместе с текстовым контекстом', () => {
+  const app = loadApp();
+  app.run('pdfPageImages = [{ dataUrl: "data:image/jpeg;base64,QQ==", '
+    + 'name: "скан.pdf — стр. 1", bytes: 2048 }];');
+  assert.equal(app.context.getPdfPageImages().length, 1, 'страницы скана не прикрепились');
+  app.context.resetPdfContext();
+  assert.equal(app.context.getPdfPageImages(), null,
+    'страницы скана пережили сброс PDF — убранный скан остался бы в чате');
 });
 
 test('selectPdfChunks: пустой вопрос и пустой список — без падений', () => {

@@ -136,6 +136,68 @@ test('buildMessages: без фото payload остаётся текстовым
   assert.equal(last.content, 'Привет');
 });
 
+// ── PDF-скан: страницы как изображения (фолбэк js/ui/assistant-pdf.js) ──────
+// У скана текстового слоя нет, поэтому assistant-pdf.js рендерит первые
+// страницы в картинки и кладёт их в pdfPageImages. Контракт: они уходят к
+// модели ТЕМ ЖЕ путём, что и фото, — одним vision-массивом в последнюю
+// user-реплику, рядом с пользовательскими снимками.
+
+test('buildMessages: страницы PDF-скана уходят тем же vision-путём, что и фото', async () => {
+  const app = loadApp();
+  app.sandbox.localStorage.setItem('youplanner.assistant_history', JSON.stringify([
+    { role: 'user', content: 'Что в документе?' },
+  ]));
+  app.run('imageContext = [{ dataUrl: "data:image/jpeg;base64,QQ==", name: "снимок.jpg", bytes: 1024 }];');
+  app.run('pdfPageImages = ['
+    + '{ dataUrl: "data:image/jpeg;base64,Qg==", name: "скан.pdf — стр. 1", bytes: 2048 },'
+    + '{ dataUrl: "data:image/jpeg;base64,Qw==", name: "скан.pdf — стр. 2", bytes: 2048 }];');
+
+  const messages = app.context.buildMessages();
+  const system = messages[0].content;
+  assert.ok(system.indexOf('скан без текстового слоя') !== -1,
+    'в системном промпте нет пометки про скан: ' + system.slice(0, 200));
+  assert.ok(system.indexOf('приложил к вопросу фото (1 шт.)') !== -1,
+    'фото-пометка потерялась, когда рядом страницы скана');
+  const last = messages[messages.length - 1];
+  assert.equal(last.role, 'user');
+  assert.ok(Array.isArray(last.content), 'скан-страницы не развернуты в vision-массив');
+  const urls = last.content.filter((p) => p.type === 'image_url');
+  assert.equal(urls.length, 3, 'должны уйти и фото, и обе страницы скана');
+  assert.equal(urls[0].image_url.url, 'data:image/jpeg;base64,QQ==', 'порядок: сначала фото');
+  assert.equal(urls[1].image_url.url, 'data:image/jpeg;base64,Qg==', 'потом страницы скана');
+  assert.equal(urls[2].image_url.url, 'data:image/jpeg;base64,Qw==');
+});
+
+test('buildMessages: только скан без фото — payload тоже vision-массив', async () => {
+  const app = loadApp();
+  app.sandbox.localStorage.setItem('youplanner.assistant_history', JSON.stringify([
+    { role: 'user', content: 'Что в документе?' },
+  ]));
+  app.run('pdfPageImages = [{ dataUrl: "data:image/jpeg;base64,Qg==", '
+    + 'name: "скан.pdf — стр. 1", bytes: 2048 }];');
+
+  const messages = app.context.buildMessages();
+  const last = messages[messages.length - 1];
+  assert.ok(Array.isArray(last.content), 'страницы скана не попали в запрос');
+  assert.equal(last.content.filter((p) => p.type === 'image_url').length, 1);
+});
+
+test('onAssistantSubmit: страницы скана при модели без зрения отсекаются, как фото', async () => {
+  const fetchCalls = [];
+  const app = loadApp({
+    fetchImpl: (url, opts) => { fetchCalls.push({ url, opts }); return Promise.resolve(okReply('ответ')); },
+  });
+  app.sandbox.localStorage.setItem('youplanner.api_key', 'test-key');
+  app.sandbox.localStorage.setItem('youplanner.assistant_model', 'gpt-oss-120b');
+  app.run('pdfPageImages = [{ dataUrl: "data:image/jpeg;base64,QQ==", '
+    + 'name: "скан.pdf — стр. 1", bytes: 2048 }];');
+
+  assert.equal(app.context.onAssistantSubmit('Что в документе?'), false,
+    'скан при модели без зрения не должен уходить в API');
+  assert.equal(fetchCalls.length, 0, 'заблокированный запрос ушёл в сеть');
+  assert.equal(app.run('readHistory().length'), 0, 'вопрос осел в истории при отказе');
+});
+
 // ── Гейтинг: фото при модели без зрения не отпускаются ────────────────────
 
 test('onAssistantSubmit: фото + модель без зрения — отправка не состоялась', async () => {

@@ -8,8 +8,14 @@
 // Здесь же — умная нарезка длинных документов на фрагменты (чанки) и поиск
 // по ним: chunkPdfText / pdfQueryTokens / selectPdfChunks — чистые функции,
 // их проверяет tests/assistant.test.mjs.
+//
+// И — фолбэк для сканов: у файла без текстового слоя первые страницы
+// рендерятся в canvas и сжимаются через общий compressImage, а к запросу
+// уходят тем же vision-путём, что и фото в чате (assistant-vision.js).
 
 import { showErrorToast, showToast } from '../core/dom.js';
+import { canvasToBlob, compressImage } from '../data/image.js';
+import { IMAGE_MAX_BYTES, IMAGE_MAX_SIDE, blobToDataURL } from './assistant-vision.js';
 
 // Потолок страниц 200: файлы «100+ страниц» из сценария тестирования раньше
 // резались на 30-й странице, и модель видела четверть документа. 200 страниц
@@ -55,11 +61,20 @@ function vendorPdfUrl(file) {
 
 let pdfContext = null;   // { name, pages, text, chunks } | null
 let pdfParsing = false;
+// Страницы PDF-скана ({ dataUrl, name, bytes } | null) — тот же формат, что
+// у фото в assistant-vision.js: buildMessages склеивает оба списка и уходит
+// в withVisionAttachments одним массивом. Живут рядом с pdfContext (переменная
+// модуля, не localStorage — base64 хранилище раздул бы) и сбрасываются вместе.
+let pdfPageImages = null;
 
 // Состояние читает ассистент-оркестратор (assistant-view.js): сборка запроса
 // идёт с PDF-контекстом, отправка и скрепка гаснут, пока файл читается.
 export function getPdfContext() {
   return pdfContext;
+}
+
+export function getPdfPageImages() {
+  return pdfPageImages;
 }
 
 export function isPdfParsing() {
@@ -79,6 +94,8 @@ function setPdfIndicator(text) {
 
 export function resetPdfContext() {
   pdfContext = null;
+  // Страницы скана — часть того же вложения: PDF убран, картинки убраны
+  pdfPageImages = null;
   setPdfIndicator('');
 }
 // Текст страницы с сохранением переносов строк: item.hasEOL — перевод строки
@@ -124,6 +141,45 @@ export function pdfScannedWarning(pages, blankPages) {
   return 'Внимание: ' + blankPages + ' из ' + pages + ' страниц без текста — '
     + 'похоже, часть книги сканы, ассистент увидит только страницы с текстом';
 }
+
+// --- Скан-фолбэк: страницы вместо текста -------------------------------------
+// pdf.js OCR не умеет: у сканированного документа getTextContent отдаёт
+// пустоту или номера страниц. Раньше такой файл отклонялся с тостом «В PDF
+// не найдено текста», и ассистент оставался без документа вовсе. Теперь при
+// отсутствии текстового слоя первые страницы рендерятся в canvas, сжимаются
+// общим compressImage и прикрепляются к запросу как изображения — тем же
+// путём, что и фото в чате.
+
+// Решение «есть ли у PDF текстовый слой» — чистая функция, проверяется
+// тестами. Порог — СРЕДНЕЕ число символов на страницу: скан отдаёт с
+// getTextContent только артефакты (номер страницы — 1–4 символа, иногда
+// колонтитул), то есть единицы символов на страницу, а самая бедная
+// настоящая текстовая страница (титульный лист, разделитель главы) несёт
+// десятки. 20 символов/страницу лежат посередине с десятикратным запасом
+// в обе стороны: книга-скан с нумерацией даёт ~3 симв./стр., документ из
+// одних заголовков — заведомо больше 20. Среднее по документу, а не проверка
+// первых страниц: обложка и титул бывают сканами и у обычных файлов (это
+// уже умеют pdfIsBlankPage / pdfScannedWarning), а фолбэк нужен целиком
+// сканированной книге — у неё беден КАЖДЫЙ лист.
+const PDF_TEXT_LAYER_MIN_CHARS_PER_PAGE = 20;
+
+export function pdfHasTextLayer(text, pages) {
+  const clean = String(text || '').trim();
+  if (!clean) return false;
+  // Ни одной прочитанной страницы — решаем по самому факту текста
+  if (!pages || pages < 1) return true;
+  // Целочисленное сравнение вместо деления: length >= pages × порог
+  return clean.length >= pages * PDF_TEXT_LAYER_MIN_CHARS_PER_PAGE;
+}
+
+// Сколько страниц скана рендерим в картинки. 4 — середина диапазона 3–5:
+// у сканов (справка, договор, письмо) суть почти всегда в начале, но первые
+// листы часто съедают обложка и титульник; при этом каждая страница —
+// картинка ~1568 px (сотни КБ base64 даже после сжатия), и их число напрямую
+// раздувает payload и рассеивает внимание модели. Больше пяти не берём:
+// глубину скан-фолбэка всё равно не накрыть — это способ познакомить модель
+// с документом, а не прочитать книгу целиком.
+const PDF_SCAN_RENDER_PAGES = 4;
 
 // --- Нарезка и поиск по фрагментам -------------------------------------------
 
@@ -326,11 +382,60 @@ function pdfSpreadPick(chunks, budget) {
   return picked;
 }
 
+// Рендер первых страниц скана в сжатые dataURL для Vision. Каждая страница:
+// pdf.js рисует её в canvas, затем общий compressImage (js/data/image.js)
+// гонит кадр по своей лестнице WebP → JPEG до потолка размера. Ошибка одной
+// страницы (битый объект, нехватка памяти) не роняет остальные: частичный
+// фолбэк лучше пустого.
+async function renderPdfScanPages(doc, docPages, fileName) {
+  const images = [];
+  // Один canvas на все страницы: присваивание width/height очищает его, а
+  // растр ~1568 px — это ~3.5 Мпикс (~14 МБ памяти); четыре отдельных canvas
+  // в очереди GC на iPhone держали бы десятки мегабайт разом
+  const canvas = document.createElement('canvas');
+  for (let i = 1; i <= Math.min(PDF_SCAN_RENDER_PAGES, docPages); i++) {
+    try {
+      const page = await doc.getPage(i);
+      // Масштаб считается от базового вьюпорта (scale 1) так, чтобы длинная
+      // сторона растра вышла на IMAGE_MAX_SIDE — тот же рабочий диапазон
+      // vision-энкодеров, что у фото в чате. Для A4 это масштаб ~1.86:
+      // рендер плотнее «как есть», распознаваемость выше.
+      const base = page.getViewport({ scale: 1 });
+      const scale = IMAGE_MAX_SIDE / Math.max(base.width, base.height);
+      const viewport = page.getViewport({ scale: scale });
+      canvas.width = Math.max(1, Math.round(viewport.width));
+      canvas.height = Math.max(1, Math.round(viewport.height));
+      const ctx = canvas.getContext('2d');
+      await page.render({ canvasContext: ctx, viewport: viewport }).promise;
+      // Промежуточный PNG без потерь: выбор WebP/JPEG и потолок размера —
+      // забота compressImage, здесь кадр нужен как есть
+      const raw = await canvasToBlob(canvas, 'image/png');
+      if (!raw) throw new Error('canvas не отдал PNG-кадр');
+      const compressed = await compressImage(raw, {
+        maxSide: IMAGE_MAX_SIDE,
+        maxBytes: IMAGE_MAX_BYTES,
+      });
+      images.push({
+        dataUrl: await blobToDataURL(compressed.blob),
+        // Имя страницы попадает в маркер [фото: …] истории и в чип вложений
+        name: fileName + ' — стр. ' + i,
+        bytes: compressed.blob.size,
+      });
+      page.cleanup();
+    } catch (e) {
+      console.error('[assistant] страница скана ' + i + ' не отрендерилась:', e);
+    }
+  }
+  return images;
+}
+
 // Разбор выбранного файла. refreshControls — колбэк ассистента
 // (updateAssistantControls): гасит/возвращает скрепку и кнопку отправки,
 // пока идёт чтение. pdf.js нужен только здесь, поэтому импортируется динамически.
 export async function parsePdf(file, refreshControls) {
   pdfParsing = true;
+  // Новый файл заменяет прежний: страницы-сканы старого вложения тоже
+  pdfPageImages = null;
   if (refreshControls) refreshControls();
   setPdfIndicator('Читаю ' + file.name + '…');
   try {
@@ -375,12 +480,37 @@ export async function parsePdf(file, refreshControls) {
     console.log('[assistant] PDF ' + file.name + ': страниц в файле ' + docPages
       + ', прочитано ' + pages + ', символов ' + text.length
       + (chunks ? ', фрагментов ' + chunks.length : ''));
-    await doc.destroy();
-    if (!finalText.trim()) {
-      resetPdfContext();
-      showErrorToast('В PDF не найдено текста — возможно, это сканы');
+
+    // Скан-детектор срабатывает ДО destroy(): рендеру страниц нужен живой
+    // документ. Решение — по порогу pdfHasTextLayer, подробности у константы.
+    if (!pdfHasTextLayer(text, pages)) {
+      console.log('[assistant] PDF ' + file.name + ': текстового слоя нет ('
+        + text.length + ' симв. на ' + pages + ' стр.) — страницы скана '
+        + 'уходят в Vision как изображения');
+      setPdfIndicator('Готовлю страницы скана ' + file.name + '…');
+      const scanImages = await renderPdfScanPages(doc, docPages, file.name);
+      await doc.destroy();
+      if (scanImages.length) {
+        // pdfContext сознательно не создаётся: добытый со скана текст —
+        // артефакты (номера страниц, колонтитулы), в промпте он был бы мусором
+        pdfPageImages = scanImages;
+        setPdfIndicator('✕ ' + file.name + ' · скан: страницы как изображения ('
+          + scanImages.length + ' шт.) — нажмите, чтобы убрать');
+        showToast('В PDF нет текстового слоя — передаю страницы как изображения ('
+          + scanImages.length + ' шт.)');
+      } else {
+        // Ни одна страница не отрендерилась (старый браузер, нехватка
+        // памяти) — прежнее честное сообщение вместо немого успеха
+        resetPdfContext();
+        showErrorToast('В PDF не найдено текста — возможно, это сканы');
+      }
       return;
     }
+
+    await doc.destroy();
+    // Пустой текст сюда больше не доходит: старый путь «В PDF не найдено
+    // текста» заменён скан-фолбэком выше — pdfHasTextLayer отфильтровал
+    // и пустоту, и документы из одних номеров страниц
     // «Полускан»: больше половины страниц без текста. Разбор при этом
     // успешен — текстовые страницы прочитаны, поэтому предупреждение идёт
     // ПОСЛЕ успеха: это ограничение файла, а не ошибка чтения

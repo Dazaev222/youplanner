@@ -13,8 +13,11 @@ import { showErrorToast, showToast } from '../core/dom.js';
 import { compressImage } from '../data/image.js';
 
 const ASSISTANT_IMAGE_MAX = 3;        // картинок в одном вопросе
-const IMAGE_MAX_SIDE = 1568;          // рабочий диапазон vision-энкодеров Qwen
-const IMAGE_MAX_BYTES = 400 * 1024;   // base64 раздует в ~1.37× — до ~550 КБ
+// Размер и потолок экспортируются: те же правила сжатия использует фолбэк
+// PDF-сканов (js/ui/assistant-pdf.js) — страницы скана идут к модели на
+// равных с фото и должны попадать в тот же рабочий диапазон энкодера.
+export const IMAGE_MAX_SIDE = 1568;          // рабочий диапазон vision-энкодеров Qwen
+export const IMAGE_MAX_BYTES = 400 * 1024;   // base64 раздует в ~1.37× — до ~550 КБ
 
 let imageContext = null;   // [{ dataUrl, name, bytes }] | null
 let imageCompressing = false;
@@ -55,7 +58,10 @@ export function assistantWithVisionAttachments(messages, images) {
   return merged;
 }
 
-function blobToDataURL(blob) {
+// Blob → dataURL. Экспортируется: тот же путь к base64 использует фолбэк
+// PDF-сканов (assistant-pdf.js) — vision-вложение всегда dataURL, где бы
+// Blob ни был получен.
+export function blobToDataURL(blob) {
   return new Promise(function (resolve, reject) {
     const reader = new FileReader();
     reader.onload = function () { resolve(String(reader.result)); };

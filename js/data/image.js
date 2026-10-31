@@ -7,7 +7,9 @@
 // EXIF-поворот решается createImageBitmap('from-image'); старые Safari опцию
 // не знают — повтор без неё (там bitmap-декодер разворачивает сам).
 
-function canvasToBlob(canvas, type, quality) {
+// Экспортируется: кроме лестницы ниже, фолбэк PDF-сканов (assistant-pdf.js)
+// кодирует им промежуточный PNG-кадр отрендеренной страницы.
+export function canvasToBlob(canvas, type, quality) {
   return new Promise(function (resolve) {
     canvas.toBlob(resolve, type, quality);
   });
