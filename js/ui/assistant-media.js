@@ -1,4 +1,19 @@
-// Vision: фото в чате ассистента (вынесено из assistant-view.js, этап D.5).
+// Медиа-подсистемы ассистента: HTTP-клиент и фото/сжатие vision-вложений.
+// Оба модуля выносились из assistant-view.js на этапе D.5 (assistant-api.js
+// и assistant-vision.js), потребителей у них двое — assistant-view.js и
+// assistant-pdf.js, — поэтому слиты в один файл (этап Y1).
+//
+// --- HTTP-клиент -------------------------------------------------------------
+//
+// Один ход к OpenAI-совместимому эндпоинту neuraldeep.ru: успех — строка
+// ответа, любая ошибка — отвергнутый промис с готовым текстом для пузыря
+// чата. 401/403 помечены в тексте, чтобы ассистент поднял модалку ключа.
+//
+// Сборка payload (модель, системный промпт с данными трекера) и чтение
+// ключа остаются в assistant-view.js: это состояние ассистента, клиенту
+// они приходят аргументами.
+//
+// --- Фото в чате (Vision) ----------------------------------------------------
 //
 // Картинки живут в переменной модуля по образцу pdfContext: не в localStorage
 // (base64 раздул бы хранилище), перезагрузка страницы их сбрасывает. В историю
@@ -9,8 +24,130 @@
 // остаются в assistant-view.js: там делегированные события, каталог моделей
 // и updateAssistantControls, который передаётся сюда колбэком.
 
-import { showErrorToast, showToast } from '../core/dom.js';
+import { handleNetworkError, showErrorToast, showToast } from '../core/dom.js';
 import { compressImage } from '../data/image.js';
+
+// --- HTTP-клиент -------------------------------------------------------------
+
+// OpenAI-совместимый эндпоинт neuraldeep.ru. Список моделей — каталог
+// NeuralDeep (llms.txt); живёт в assistant-view.js рядом с модалкой настроек.
+const ASSISTANT_API_URL = 'https://api.neuraldeep.ru/v1/chat/completions';
+// 60 секунд: длинные ответы reasoning-моделей (qwen/gpt-oss думают вслух)
+// не успевали в 30, и запрос рвался по таймауту на «Нет связи»
+const REQUEST_TIMEOUT_MS = 60000;
+
+function friendlyError(status) {  if (status === 401 || status === 403) {
+    return 'Ключ не принят сервисом (ошибка ' + status
+      + '). Проверьте ключ через шестерёнку в шапке.';
+  }
+  if (status === 429) {
+    return 'Сервис отвечает «слишком много запросов» (429). Попробуйте через минуту.';
+  }
+  if (status >= 500) {
+    return 'Сервис нейросети сейчас недоступен (ошибка ' + status + '). Попробуйте позже.';
+  }
+  return 'Сервис вернул неожиданный ответ (ошибка ' + status + ').';
+}
+
+// AbortSignal.timeout появился в Safari только в 15.4: на старых iPhone
+// его вызов кидал TypeError, и каждый запрос мгновенно падал в «Нет связи».
+// Ручной контроллер работает везде, поэтому подстраховываем им. Таймер
+// возвращается вместе с сигналом: короткий ответ иначе оставлял бы его
+// жить до истечения таймаута. timedOut() различает истёкший таймаут:
+// в ручной ветке fetch отвергается AbortError (не TimeoutError), и без
+// этого флага таймаут на старых Safari выдавался за «нет связи».
+function timeoutGuard(ms) {
+  if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) {
+    return {
+      signal: AbortSignal.timeout(ms),
+      cancel: function () {},
+      timedOut: function () { return false; },
+    };
+  }
+  let fired = false;
+  const controller = new AbortController();
+  const timer = setTimeout(function () {
+    fired = true;
+    controller.abort();
+  }, ms);
+  return {
+    signal: controller.signal,
+    cancel: function () { clearTimeout(timer); },
+    timedOut: function () { return fired; },
+  };
+}
+
+// payload — готовое тело запроса { model, messages } из assistant-view.js;
+// apiKey — сохранённый на устройстве ключ. Имя наружу не «requestAssistantReply»:
+// под этим именем в assistant-view.js осталась тонкая обёртка, собирающая
+// payload из состояния ассистента (её зовут тесты таймеров).
+export async function postAssistantChat(payload, apiKey) {
+  let response;
+  const guard = timeoutGuard(REQUEST_TIMEOUT_MS);
+  try {
+    response = await fetch(ASSISTANT_API_URL, {
+      method: 'POST',
+      headers: {
+        'Authorization': 'Bearer ' + apiKey,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+      signal: guard.signal,
+    });
+  } catch (e) {
+    // Реальная причина — в консоль (helper), текст — в ленту: TypeError
+    // (сеть/CORS/старый API) и TimeoutError/AbortError видны только так.
+    // timedOut() ловит ручную ветку: там abort даёт AbortError.
+    const timedOut = (e && e.name === 'TimeoutError') || guard.timedOut();
+    throw new Error(handleNetworkError(e, {
+      context: '[assistant]',
+      silent: true,
+      message: timedOut
+        ? 'Сервис не ответил за 60 секунд. Попробуйте ещё раз.'
+        : 'Нет связи с сервисом нейросети. Подробности — в консоли браузера (F12).',
+    }));
+  } finally {
+    // Таймер больше не нужен при любом исходе запроса
+    guard.cancel();
+  }
+
+  if (!response.ok) {
+    let detail = '';
+    try {
+      detail = (await response.text()).slice(0, 500);
+    } catch (e) {
+      // тело ошибки не прочиталось — статус уже показан ниже
+    }
+    console.error('[assistant] HTTP ' + response.status, ASSISTANT_API_URL, detail);
+    throw new Error(friendlyError(response.status));
+  }
+
+  let data;
+  try {
+    data = await response.json();
+  } catch (e) {
+    // Обрыв сети посреди чтения тела fetch роняет TypeError'ом (спека fetch:
+    // network error при прерывании потока), невалидный JSON — SyntaxError.
+    // Раньше оба случая маскировались под «не в формате JSON».
+    if (e && e.name === 'TypeError') {
+      throw new Error(handleNetworkError(e, {
+        context: '[assistant]',
+        silent: true,
+        message: 'Связь прервалась посреди ответа. Попробуйте ещё раз.',
+      }));
+    }
+    throw new Error('Сервис вернул ответ не в формате JSON. Попробуйте позже.');
+  }
+
+  const reply = data && data.choices && data.choices[0]
+    && data.choices[0].message && data.choices[0].message.content;
+  if (typeof reply !== 'string' || !reply.trim()) {
+    throw new Error('Сервис ответил пустым сообщением. Попробуйте переформулировать вопрос.');
+  }
+  return reply.trim();
+}
+
+// --- Фото в чате (Vision) ----------------------------------------------------
 
 const ASSISTANT_IMAGE_MAX = 3;        // картинок в одном вопросе
 // Размер и потолок экспортируются: те же правила сжатия использует фолбэк
@@ -143,10 +280,12 @@ export async function compressChatImages(fileList, refreshControls) {
         });
       } catch (e) {
         // Причина видна в консоли: не декодировано, canvas/toBlob отказал,
-        // файл слишком велик даже для последнего шанса
+        // файл слишком велик даже для последнего шанса. Текст — понятная
+        // причина без отсылки к консоли (баг 2, iPhone-тест Vision).
         console.error('[vision] фото не прикрепилось — сжатие не удалось ('
           + file.name + '):', e);
-        showErrorToast('Не удалось сжать «' + file.name + '» — подробности в консоли');
+        showErrorToast('Не удалось обработать «' + file.name
+          + '» — файл слишком большой или это не изображение');
       }
     }
     if (added.length) {

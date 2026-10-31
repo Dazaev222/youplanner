@@ -4,8 +4,8 @@
 // рендер ленты, модалка ключа и обработчики. Подсистемы вынесены в модули:
 // js/ui/assistant-pdf.js — чтение PDF, умная нарезка и скан-фолбэк (страницы
 // скана рендерятся в картинки и уходят в Vision как фото),
-// js/ui/assistant-vision.js — фото в чате,
-// js/ui/assistant-api.js — HTTP-клиент (fetch с таймаутом).
+// js/ui/assistant-media.js — фото в чате и HTTP-клиент (fetch с таймаутом;
+// слито из assistant-vision.js и assistant-api.js, этап Y1).
 // Публичная поверхность файла не менялась: app.js и тесты импортируют отсюда.
 //
 // Ключ хранится в localStorage устройства (youplanner.api_key) и сознательно
@@ -23,7 +23,7 @@ import { PRAYER_KEY } from '../data/prayer.js';
 import { QAZA_LOG_KEY, QAZA_STORAGE_KEY } from '../data/qaza.js';
 import { SLEEP_KEY } from '../data/sleep.js';
 import { STORAGE_KEYS } from '../data/storage.js';
-import { postAssistantChat } from './assistant-api.js';
+import { postAssistantChat } from './assistant-media.js';
 import {
   PDF_MAX_CHARS,
   getPdfContext,
@@ -40,7 +40,7 @@ import {
   getImageContext,
   isImageCompressing,
   updateImageIndicator,
-} from './assistant-vision.js';
+} from './assistant-media.js';
 
 // Ключ = доступ ассистента к neuraldeep.ru. Имя ключа — часть каркаса:
 // следующему заходу менять его нельзя без миграции.
@@ -276,7 +276,7 @@ function buildMessages() {
 
 // Реэкспорт чистой vision-функции под прежним именем: публичная поверхность
 // assistant-view.js не меняется (tests/assistant-vision.test.mjs импортирует
-// отсюда), реализация живёт в js/ui/assistant-vision.js.
+// отсюда), реализация живёт в js/ui/assistant-media.js.
 export function withVisionAttachments(messages, images) {
   return assistantWithVisionAttachments(messages, images);
 }
@@ -345,7 +345,7 @@ export function onAssistantPdfClear() {
 // --- Ход к API ---------------------------------------------------------------
 // Тонкая обёртка сохраняет прежнее имя и нулевую сигнатуру: payload
 // ({model, messages}) собирается из состояния ассистента, ключ читается
-// с устройства, сам HTTP ход — в js/ui/assistant-api.js (postAssistantChat).
+// с устройства, сам HTTP ход — в js/ui/assistant-media.js (postAssistantChat).
 async function requestAssistantReply() {
   return postAssistantChat(
     { model: readAssistantModel(), messages: buildMessages() },

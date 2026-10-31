@@ -15,7 +15,7 @@ import assert from 'node:assert/strict';
 import {
   mergeCloudIntoLocal, mergeHabitsById, mergeTombstonesById, sectionTsOf,
 } from '../js/sync/merge.js';
-import { validCloudTombstones } from '../js/sync/validators.js';
+import { validCloudTombstones } from '../js/sync/core.js';
 import { TOMBSTONES_LIMIT } from '../js/data/habits.js';
 import { loadApp } from './helpers/load-app.mjs';
 import { habit } from './helpers/fixtures.mjs';

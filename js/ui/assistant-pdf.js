@@ -15,7 +15,7 @@
 
 import { showErrorToast, showToast } from '../core/dom.js';
 import { canvasToBlob, compressImage } from '../data/image.js';
-import { IMAGE_MAX_BYTES, IMAGE_MAX_SIDE, blobToDataURL } from './assistant-vision.js';
+import { IMAGE_MAX_BYTES, IMAGE_MAX_SIDE, blobToDataURL } from './assistant-media.js';
 
 // Потолок страниц 200: файлы «100+ страниц» из сценария тестирования раньше
 // резались на 30-й странице, и модель видела четверть документа. 200 страниц

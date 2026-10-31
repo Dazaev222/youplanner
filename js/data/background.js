@@ -1,13 +1,13 @@
 // Фон приложения: сжатие пользовательского фото и настройки затемнения.
 // Слой данных без DOM: compressBgImage превращает File в Blob под размер
-// экрана, load/save хранят Blob в IndexedDB (js/core/db.js), уровень
+// экрана, load/save хранят Blob в IndexedDB (js/core/storage.js), уровень
 // затемнения — числом в localStorage. Применение к странице — в app.js.
 //
 // Ключи сознательно не входят в STORAGE_KEYS: фон — локальная косметика
 // устройства (как API-ключ ассистента), в Firebase и файлы копий она
 // не попадает.
 
-import { idbDelete, idbGet, idbPut } from '../core/db.js';
+import { idbDelete, idbGet, idbPut } from '../core/storage.js';
 import { compressImage } from './image.js';
 
 export const BG_IMAGE_KEY = 'app-background-image';   // ключ записи в IDB

@@ -29,7 +29,7 @@ import {
   hasData, validCloudArchive, validCloudFast, validCloudHabits,
   validCloudPrayer, validCloudQaza, validCloudQazaLog, validCloudRecords,
   validCloudSchedule, validCloudSleep, validCloudTombstones,
-} from './validators.js';
+} from './core.js';
 import { validQazaLogEntries } from '../data/qaza.js';
 import { validSleepHistory } from '../data/sleep.js';
 

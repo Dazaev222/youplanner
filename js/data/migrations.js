@@ -3,8 +3,7 @@ import { safeSetItem } from '../core/storage.js';
 import { defaultHabit, loadHabits, saveHabits } from './habits.js';
 import { PRESS_HABIT_ID } from './records.js';
 import { STORAGE_KEYS } from './storage.js';
-import { saveNormalized } from '../sync/state.js';
-import { hasData } from '../sync/validators.js';
+import { hasData, saveNormalized } from '../sync/core.js';
 
 
 // Какие разовые правки устройство уже прошло. Отметка нужна затем, чтобы

@@ -1,4 +1,4 @@
-// Тесты debounce (js/core/debounce.js) — аудит 2026-10-31.
+// Тесты debounce (живёт в js/core/dom.js после этапа Y4) — аудит 2026-10-31.
 //
 // Контракт: серия вызовов даёт один вызов функции — через wait мс после
 // ПОСЛЕДНЕГО события, с аргументами последнего вызова. flush() выполняет
@@ -8,7 +8,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { debounce } from '../js/core/debounce.js';
+import { debounce } from '../js/core/dom.js';
 
 function sleep(ms) {
   return new Promise(function (resolve) { setTimeout(resolve, ms); });

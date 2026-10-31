@@ -11,9 +11,8 @@ import { invalidateRecordsCache } from './data/records.js';
 import { SCHEDULE_TYPES } from './data/schedule.js';
 import { STATS_PERIOD_BOXES, saveStatsPeriod } from './data/stats.js';
 import { STORAGE_KEYS } from './data/storage.js';
-import { SYNC_STATUS_MS } from './data/sync.js';
 import { APP_BUILD, APP_VERSION } from './ui/constants.js';
-import { clearSyncPending, syncPending } from './sync/state.js';
+import { SYNC_STATUS_MS, clearSyncPending, syncPending } from './sync/core.js';
 import { flushPendingSync, markCloudReady, scheduleSync, settleHabitsAfterSync, syncFromCloud, syncToCloud } from './sync/sync.js';
 import { onFastAdd, onFastDone, onFastEdit, onFastInitCancel, onFastInitSave, renderFastView, resetFastForm } from './ui/fast-view.js';
 import {

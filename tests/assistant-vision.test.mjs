@@ -263,7 +263,7 @@ const okReply = (content) => ({
 });
 
 // Фейковые DOM-элементы по id (индикатор, тост, чат): это то, что читают
-// assistant-vision.js и core/dom.js. createElement пишется в список created —
+// assistant-media.js и core/dom.js. createElement пишется в список created —
 // так тест находит пузырь «Печатает…»/ошибки в ленте.
 function bindVisionDom(sandbox) {
   const els = {};
@@ -524,8 +524,9 @@ test('HEIC в чате: тост об ошибке, чип и флаг сжат�
   assert.equal(context.getImageContext(), null, 'битое фото не должно прикрепиться');
   assert.equal(context.isImageCompressing(), false, 'флаг сжатия залип');
   assert.equal(els['assistant-image-indicator'].hidden, true, 'индикатор «Сжимаю…» завис');
-  assert.ok(els.toast.textContent.indexOf('Не удалось сжать') !== -1,
-    'нет тоста пользователю: «' + els.toast.textContent + '»');
+  assert.ok(els.toast.textContent.indexOf('Не удалось обработать') !== -1
+    && els.toast.textContent.indexOf('не изображение') !== -1,
+    'нет тоста с понятной причиной: «' + els.toast.textContent + '»');
 });
 
 test('старый Safari без createImageBitmap: путь через <img> работает, objectURL закрыт', async () => {

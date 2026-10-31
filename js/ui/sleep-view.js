@@ -1,5 +1,4 @@
-import { debounce } from '../core/debounce.js';
-import { escapeHtml } from '../core/dom.js';
+import { debounce, escapeHtml } from '../core/dom.js';
 import { actualWakeTime, loadSleep, saveSleep, sleepAnchors, sleepCycleLabel, sleepCycleTimes, sleepDurationMinutes, sleepFallMinutes, sleepFormatDuration, sleepTimeMinutes } from '../data/sleep.js';
 // Значение поля экрана. Поля читаются как есть: набор, который видит человек
 export function sleepFieldValue(id) {

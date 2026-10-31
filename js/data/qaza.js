@@ -8,7 +8,7 @@ import { getRecord, setRecord } from './records.js';
 // безвреден: обе стороны зовут друг друга только внутри функций, и на
 // загрузке модулей ни одна ещё не работает
 import { qazaDoneOn } from './stats.js';
-import { saveNormalized } from '../sync/state.js';
+import { saveNormalized } from '../sync/core.js';
 export const QAZA_STORAGE_KEY = 'youplanner.qaza';
 // Привычка, которая показывает счётчик каза за день. Id из спеки трекера:
 // дефолтные привычки имеют стабильные id h1…h12.

@@ -9,7 +9,7 @@ import { loadSchedule } from './schedule.js';
 import { SLEEP_KEY, SLEEP_MAX_MINUTES, loadSleep, sleepDurationMinutes, sleepTimeMinutes, validSleepHistory } from './sleep.js';
 import { STORAGE_KEYS } from './storage.js';
 import { rollbackStagedKeys } from '../core/storage.js';
-import { validCloudArchive, validCloudSchedule } from '../sync/validators.js';
+import { validCloudArchive, validCloudSchedule } from '../sync/core.js';
 // Версия формата резервной копии. Растёт, если меняется состав полей файла:
 // версия 2 добавила раздел tasks, версия 3 — раздел prayer, версия 4 —
 // время у привычки и уровень у записи (§8), версия 5 — раздел fast (§11x),

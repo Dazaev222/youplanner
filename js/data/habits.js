@@ -47,10 +47,10 @@ export function defaultHabit(id) {
   return null;
 }
 // Годен ли элемент списка привычек. Те же минимальные поля, что проверяет
-// validCloudHabits (js/sync/validators.js): рендеру нужны id, name и тип из
+// validCloudHabits (js/sync/core.js): рендеру нужны id, name и тип из
 // набора формы. Продублировано локально: data не импортирует sync
 // (направление зависимостей core ← data ← sync/ui), а прямой импорт
-// validators.js из habits.js дал бы цикл — validators.js сам импортирует
+// валидаторов из habits.js дал бы цикл — core.js сам импортирует
 // habits.js. Битый элемент не должен ронять раздел и экран вместе с ним.
 function validHabitItem(habit) {
   if (!habit || typeof habit !== 'object' || Array.isArray(habit)) return false;

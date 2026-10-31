@@ -11,10 +11,10 @@ import { loadSchedule } from '../data/schedule.js';
 import { SLEEP_KEY, loadSleep, validSleepHistory } from '../data/sleep.js';
 import { STORAGE_KEYS } from '../data/storage.js';
 import { rollbackStagedKeys } from '../core/storage.js';
-import { BACKUP_LIMIT, FIREBASE_BACKUPS_URL, FIREBASE_URL, SYNC_DEBOUNCE_MS, SYNC_TS_KEY } from '../data/sync.js';
-import { clearSyncPending, markSyncPending, normalizing, saveNormalized, syncPending, syncTs } from './state.js';
+// Ядро sync-слоя: константы Firebase, флаги состояния и валидаторы снимка
+// (слито из data/sync.js, sync/state.js и sync/validators.js, этап Y2)
+import { BACKUP_LIMIT, FIREBASE_BACKUPS_URL, FIREBASE_URL, SYNC_DEBOUNCE_MS, SYNC_TS_KEY, clearSyncPending, hasData, markSyncPending, normalizing, saveNormalized, syncPending, syncTs, validCloudArchive, validCloudFast, validCloudHabits, validCloudPrayer, validCloudQaza, validCloudQazaLog, validCloudRecords, validCloudSchedule, validCloudSleep, validCloudTombstones } from './core.js';
 import { mergeCloudIntoLocal, mergeTombstonesById } from './merge.js';
-import { hasData, validCloudArchive, validCloudFast, validCloudHabits, validCloudPrayer, validCloudQaza, validCloudQazaLog, validCloudRecords, validCloudSchedule, validCloudSleep, validCloudTombstones } from './validators.js';
 export let syncTimer = null;
 // Сетевой таймаут обменов. Без него зависшее соединение (сеть отдаёт TCP,
 // но не отвечает) держит syncExchange открытым вечно: правки встают в

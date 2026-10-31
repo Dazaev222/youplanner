@@ -1,4 +1,4 @@
-// Тесты HTTP-клиента ассистента (js/ui/assistant-api.js) — adversarial-аудит
+// Тесты HTTP-клиента ассистента (живёт в js/ui/assistant-media.js, этап Y1) — adversarial-аудит
 // 2026-10-31. Два слоя:
 //
 // 1. Прямой ESM-импорт в node: реальный AbortSignal.timeout (современная ветка
@@ -9,7 +9,7 @@
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { postAssistantChat } from '../js/ui/assistant-api.js';
+import { postAssistantChat } from '../js/ui/assistant-media.js';
 import { loadApp } from './helpers/load-app.mjs';
 
 const PAYLOAD = { model: 'qwen3.6-35b-a3b', messages: [{ role: 'user', content: 'привет' }] };

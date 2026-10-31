@@ -8,7 +8,7 @@
    и что анонимный токен их проходит:
 
      1. Константы читаются из исходников: FIREBASE_URL / FIREBASE_BACKUPS_URL
-        (js/data/sync.js) и Web API Key (js/data/firebase-auth.js).
+        (js/sync/core.js, этап Y2) и Web API Key (js/data/firebase-auth.js).
      2. PUT пробы __rules_probe БЕЗ auth — ожидаем 401/403. Ответ 200 значит:
         правила публичны — опубликуй database.rules.json в консоли ОБОИХ
         инстансов. Успешная проба тут же удаляется (чистка). Узел бэкапов
@@ -30,7 +30,7 @@ import { fileURLToPath } from 'node:url';
 const HERE = dirname(fileURLToPath(import.meta.url));
 const ROOT = join(HERE, '..', '..');
 
-const syncSrc = readFileSync(join(ROOT, 'js', 'data', 'sync.js'), 'utf8');
+const syncSrc = readFileSync(join(ROOT, 'js', 'sync', 'core.js'), 'utf8');
 const authSrc = readFileSync(join(ROOT, 'js', 'data', 'firebase-auth.js'), 'utf8');
 
 const mainUrl = (syncSrc.match(/const FIREBASE_URL = '([^']+)'/) || [])[1];
@@ -80,7 +80,7 @@ async function main() {
   // ── 1. Константы из исходников ────────────────────────────────────────
   if (!mainUrl || !backupsUrl) {
     report('FAIL', 'константы Firebase',
-      'не нашёл FIREBASE_URL / FIREBASE_BACKUPS_URL в js/data/sync.js');
+      'не нашёл FIREBASE_URL / FIREBASE_BACKUPS_URL в js/sync/core.js');
     process.exit(1);
   }
   report('PASS', 'константы Firebase', mainUrl.slice(0, 60) + '…');
