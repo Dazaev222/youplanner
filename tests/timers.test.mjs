@@ -107,6 +107,7 @@ test('sync: таймаут по-прежнему прерывает зависш
   const timers = installFallbackTimers(app);
 
   const pending = app.context.syncFromCloud();
+  await Promise.resolve();   // fetchWithTimeout теперь async: guard создаётся микрозадачей позже
   assert.equal(timers.size, 1, 'таймер не был создан');
 
   Array.from(timers.values()).forEach((fn) => fn());   // срабатывание таймаута

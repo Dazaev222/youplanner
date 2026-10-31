@@ -162,39 +162,124 @@ export function parseBackup(text) {
 
   return data;
 }
+// Откат уже записанных ключей после сбоя записи посреди применения копии.
+// Та же схема, что у applyCloudData (js/sync/sync.js, rollbackAppliedKeys) —
+// помощник продублирован с собственным именем, потому что data-слой не
+// импортирует sync-слой целиком, а песочница тестов склеивает модули
+// в один скрипт, где повторное объявление затирало бы первое.
+// Порядок важен: сначала стираются новые ключи (которых раньше не
+// было) — так освобождается место, из-за нехватки которого всё началось;
+// только потом восстанавливаются прежние значения. Каждый ключ откатывается
+// под своим try: сбой одного не должен оставить неоткаченными остальные.
+// Если откатить не удалось — console.error с перечнем ключей: данные
+// в хранилище целее всего, о смешанном состоянии надо хотя бы крикнуть.
+function rollbackBackupWrites(appliedLog, source) {
+  const failed = [];
+  for (let i = 0; i < appliedLog.length; i++) {
+    const entry = appliedLog[i];
+    if (!entry.written || entry.had) continue;
+    try {
+      localStorage.removeItem(entry.key);
+    } catch (e) {
+      failed.push(entry.key);
+    }
+  }
+  for (let i = 0; i < appliedLog.length; i++) {
+    const entry = appliedLog[i];
+    if (!entry.written || !entry.had) continue;
+    try {
+      localStorage.setItem(entry.key, entry.previous);
+    } catch (e) {
+      failed.push(entry.key);
+    }
+  }
+  if (failed.length > 0) {
+    console.error(source + ': откат не удался, ключи в смешанном состоянии:',
+      failed.join(', '));
+  }
+}
 // Замена локальных данных копией. Пишем в localStorage напрямую: saveHabits и
 // saveQaza поставили бы по отправке на каждый ключ, а нужен один PUT на замену.
 // Раздела qaza в файле может не быть — тогда очередь остаётся текущей.
+//
+// Применение устроено «всё или ничего», теми же тремя фазами, что и
+// applyCloudData (js/sync/sync.js): parseBackup проверяет файл целиком ДО
+// вызова, поэтому отдельной фазы валидации здесь нет — только сбор stage из
+// уже провалидированных разделов, снимок прежнего состояния и запись с
+// откатом. Раньше QuotaExceededError посреди записи оставлял смесь данных
+// файла и устройства. Результат: true — копия применена целиком; false —
+// хранилище отвергло запись, применение откачено целиком (события замены
+// не эмитятся — менять было нечего, вызывающий видит false).
 export function applyBackup(data) {
-  localStorage.setItem(STORAGE_KEYS.habits, JSON.stringify(data.habits));
-  localStorage.setItem(STORAGE_KEYS.records, JSON.stringify(data.records));
-  invalidateRecordsCache();
-  if (data.qaza) localStorage.setItem(QAZA_STORAGE_KEY, JSON.stringify(data.qaza));
+  // ── Фаза 1: сбор stage без записей. Разбор уже проверил снимок целиком,
+  // поэтому условия здесь — только прежние «раздела в файле нет — ключ
+  // не трогаем». Ключей на удаление нет: копия никогда не стирает разделы,
+  // которых в ней нет, и выдумывать удаление здесь нельзя.
+  const stage = [];
+  stage.push({ key: STORAGE_KEYS.habits, value: JSON.stringify(data.habits) });
+  stage.push({ key: STORAGE_KEYS.records, value: JSON.stringify(data.records) });
+  if (data.qaza) stage.push({ key: QAZA_STORAGE_KEY, value: JSON.stringify(data.qaza) });
   if (data.prayer && typeof data.prayer === 'object' && !Array.isArray(data.prayer)) {
-    localStorage.setItem(PRAYER_KEY, JSON.stringify(data.prayer));
+    stage.push({ key: PRAYER_KEY, value: JSON.stringify(data.prayer) });
   }
   // Счётчик уразы заменяется целиком, как очередь. Раздела в файле
   // нет — текущий счётчик остаётся: импорт его не стирает.
   if (data.fast && typeof data.fast === 'object' && !Array.isArray(data.fast)) {
-    localStorage.setItem(FAST_KEY, JSON.stringify(data.fast));
+    stage.push({ key: FAST_KEY, value: JSON.stringify(data.fast) });
   }
   // Журнал выполнений каза заменяется целиком, как счётчик уразы. Раздела
   // в файле нет — текущий журнал остаётся: импорт его не стирает.
   if (data.qazaLog && typeof data.qazaLog === 'object' &&
       !Array.isArray(data.qazaLog)) {
-    localStorage.setItem(QAZA_LOG_KEY, JSON.stringify(data.qazaLog));
+    stage.push({ key: QAZA_LOG_KEY, value: JSON.stringify(data.qazaLog) });
   }
   // Запись о сне заменяется целиком, как счётчик уразы. Раздела в файле
   // нет — текущая запись остаётся: импорт её не стирает.
   if (data.sleep && typeof data.sleep === 'object' &&
       !Array.isArray(data.sleep)) {
-    localStorage.setItem(SLEEP_KEY, JSON.stringify(data.sleep));
+    stage.push({ key: SLEEP_KEY, value: JSON.stringify(data.sleep) });
   }
   // Расписание заменяется целиком, как запись о сне. validCloudSchedule —
   // та же проверка, что для снимка с сервера; раздела в файле нет —
   // текущее расписание остаётся: импорт его не стирает.
   if (data.schedule && validCloudSchedule(data.schedule)) {
-    localStorage.setItem(STORAGE_KEYS.schedule, JSON.stringify(data.schedule));
+    stage.push({ key: STORAGE_KEYS.schedule, value: JSON.stringify(data.schedule) });
+  }
+
+  // ── Фаза 2: снимок предыдущего состояния каждого ключа stage ──
+  // Журнал — он же протокол отката: written отмечает уже записанные ключи
+  // (только они подлежат откату), had — существовал ли ключ до записи
+  // (стирать или восстанавливать).
+  const appliedLog = [];
+  for (let i = 0; i < stage.length; i++) {
+    const previous = localStorage.getItem(stage[i].key);
+    appliedLog.push({
+      key: stage[i].key,
+      value: stage[i].value,
+      previous: previous,
+      had: previous !== null,
+      written: false,
+    });
+  }
+
+  // ── Фаза 3: применение; первая ошибка — откат всего записанного ──
+  for (let i = 0; i < appliedLog.length; i++) {
+    try {
+      localStorage.setItem(appliedLog[i].key, appliedLog[i].value);
+    } catch (e) {
+      // QuotaExceededError или любая другая ошибка записи: применённое
+      // до сбоя откатывается целиком (см. rollbackBackupWrites)
+      rollbackBackupWrites(appliedLog, 'applyBackup');
+      // Тот же сигнал квоты, что у safeSetItem: подписчик storage:error
+      // в app.js покажет тост. События замены (data:changed/data:replaced)
+      // не эмитятся: данные не менялись, перерисовывать нечего
+      bus.emit('storage:error');
+      return false;
+    }
+    appliedLog[i].written = true;
+    // Кэш записей сбрасывается сразу после записи раздела, как раньше:
+    // при последующем откате кэш просто перечитает прежнюю строку
+    if (appliedLog[i].key === STORAGE_KEYS.records) invalidateRecordsCache();
   }
 
   // Слой данных не трогает состояние интерфейса и рендеры: замена данных
@@ -202,4 +287,5 @@ export function applyBackup(data) {
   // qazaState и перерисует экраны (как sync:applied у серверного снимка)
   bus.emit('data:changed');
   bus.emit('data:replaced');
+  return true;
 }

@@ -1,6 +1,9 @@
 import { bus } from '../core/bus.js';
 import { safeSetItem } from '../core/storage.js';
-import { loadRecords, saveRecords } from './records.js';
+// touchRecordsVersion живёт в records.js рядом с recordsCache, который
+// он защищает: removeHabit ниже мутирует кэш записей in-place и обязан
+// сдвигать версию кэша прогресса
+import { loadRecords, saveRecords, touchRecordsVersion } from './records.js';
 import { STORAGE_KEYS } from './storage.js';
 // 12 привычек по умолчанию (порядок и значения — из спеки, п.5)
 export const DEFAULT_HABITS = [
@@ -124,10 +127,16 @@ export function removeHabit(id) {
     changed = true;
     if (Object.keys(day).length === 0) delete records[dates[i]];
   }
+  // Мутации выше правят recordsCache in-place: сдвигаем версию кэша
+  // прогресса сразу, не дожидаясь исхода записи. Откат ниже сдвинет ещё
+  // раз — лишний сдвиг безвреден, устаревший процент нет
+  if (changed) touchRecordsVersion();
   if (changed && !saveRecords(records)) {
     // Локальный объект записей возвращаем к снимку до мутаций.
     Object.keys(records).forEach(function (key) { delete records[key]; });
     Object.assign(records, recordsSnapshot);
+    // Откат — тоже мутация кэша in-place: версия обязана уйти вперёд
+    touchRecordsVersion();
     // Записи на диск не легли (там прежние, с удаляемой привычкой), а список
     // привычек уже записан без неё — возвращаем его к снимку. Если и это
     // не удалось, всё равно возвращаем false (best-effort).

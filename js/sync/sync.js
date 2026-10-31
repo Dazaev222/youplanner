@@ -1,5 +1,6 @@
 import { bus } from '../core/bus.js';
 import { FAST_KEY, FAST_VERSION, loadFast, validFastHistory } from '../data/fast.js';
+import { getAuthToken } from '../data/firebase-auth.js';
 import { DEFAULT_HABITS, defaultHabit, loadHabits, saveHabits } from '../data/habits.js';
 import { markMigration, migratePressHabit } from '../data/migrations.js';
 import { PRAYER_KEY, loadPrayer } from '../data/prayer.js';
@@ -40,10 +41,24 @@ function syncGuard() {
 // fetch с таймаутом: таймер снимается, как только запрос завершился любым
 // исходом (успех, ошибка, прерывание). Сам таймаут по-прежнему прерывает
 // зависший запрос.
-function fetchWithTimeout(url, options) {
+//
+// Токен анонимной аутентификации добывается здесь, в единственной обёртке:
+// правило базы auth != null (database.rules.json) закрывает все пять узлов
+// сразу, и вызывающим про аутентификацию знать не нужно. Токена нет (нет
+// ключа, офлайн, пауза после неудачи) — запрос идёт как раньше: до публикации
+// правил база публична, это рабочий режим. getAuthToken() не бросает и при
+// неудаче не выходит в сеть до конца своей 5-минутной паузы, так что вызов
+// здесь дешёвый.
+async function fetchWithTimeout(url, options) {
+  const token = await getAuthToken();
+  let fullUrl = url;
+  if (token) {
+    fullUrl = url + (url.indexOf('?') === -1 ? '?' : '&') +
+      'auth=' + encodeURIComponent(token);
+  }
   const guard = syncGuard();
   const request = Object.assign({}, options, { signal: guard.signal });
-  return fetch(url, request).finally(guard.cancel);
+  return fetch(fullUrl, request).finally(guard.cancel);
 }
 // Идёт обмен с сервером. Свои же сохранения в этот момент не должны ставить
 // встречную отправку: loadQaza() зовёт saveQaza(), а syncToCloud() зовёт
@@ -59,10 +74,60 @@ export let cloudReady = false;
 // недоступном сервере, а пустая таблица должна отличать «не загрузили»
 // от «человек всё удалил» (§13).
 export let cloudReachable = false;
+// Откат уже записанных ключей после сбоя записи посреди применения снимка
+// (применяют и applyCloudData, и applyBackup в js/data/backup.js — помощник
+// продублирован там, потому что data-слой не импортирует sync-слой целиком).
+// Порядок важен: сначала стираются новые ключи (которых раньше не было) —
+// так освобождается место, из-за нехватки которого всё началось; только
+// потом восстанавливаются прежние значения. Каждый ключ откатывается под
+// своим try: сбой одного не должен оставить неоткаченными остальные.
+// Если откатить не удалось — console.error с перечнем ключей: данные
+// в хранилище целее всего, о смешанном состоянии надо хотя бы крикнуть.
+function rollbackAppliedKeys(appliedLog, source) {
+  const failed = [];
+  for (let i = 0; i < appliedLog.length; i++) {
+    const entry = appliedLog[i];
+    if (!entry.written || entry.had) continue;
+    try {
+      localStorage.removeItem(entry.key);
+    } catch (e) {
+      failed.push(entry.key);
+    }
+  }
+  for (let i = 0; i < appliedLog.length; i++) {
+    const entry = appliedLog[i];
+    if (!entry.written || !entry.had) continue;
+    try {
+      localStorage.setItem(entry.key, entry.previous);
+    } catch (e) {
+      failed.push(entry.key);
+    }
+  }
+  if (failed.length > 0) {
+    console.error(source + ': откат не удался, ключи в смешанном состоянии:',
+      failed.join(', '));
+  }
+}
 // Применяет данные с сервера. Пишем прямо в localStorage: saveHabits/saveQaza
 // поставили бы отправку и вернули бы на сервер только что полученное.
 // Пустой раздел на сервере не затирает непустой локальный: это след неполного
 // снимка, а не осознанное удаление — иначе чужая пустая копия съест записи.
+//
+// Применение устроено «всё или ничего» (аудит 2026-10-31): раньше каждый
+// прошедший проверку раздел писался сразу, и QuotaExceededError посреди
+// применения оставлял половину разделов — данные пользователя смешивались
+// с серверными, а UI рисовал половину. Теперь три фазы:
+//   1) валидация всех разделов и сбор stage — пар «ключ, готовая строка» —
+//      без единой записи в хранилище;
+//   2) снимок предыдущего состояния каждого ключа stage;
+//   3) запись; первая ошибка — откат уже записанных ключей (rollbackAppliedKeys).
+// Предсказать квоту localStorage заранее нельзя: navigator.storage.estimate
+// считает совсем другое (кэш и диски, а не лимит ключей), у строк своя цена
+// в UTF-16 — поэтому гарантией целостности служит откат фаз 2–3, а не
+// предсказание места.
+// Результат: true — снимок применён целиком; false — хранилище отвергло
+// запись и применение откачено (потребитель обязан считать снимок
+// неприменённым); применять было нечего — undefined, как раньше.
 export function applyCloudData(data, ts) {
   syncing = true;
   // Снимок считается принятым, если хотя бы один раздел прошёл проверку
@@ -72,8 +137,8 @@ export function applyCloudData(data, ts) {
   // уже за пределами try-блока.
   let cloudApplied = false;
   try {
-    // Снимок локального берём под флагом: loadHabits/loadQaza при первом
-    // прогоне пишут дефолты и иначе поставили бы отправку
+    // Снимок локального берём под флагом: loadQaza при первом прогоне пишет
+    // дефолты и иначе поставил бы отправку
     const local = {
       habits: loadHabits(),
       records: loadRecords(),
@@ -85,29 +150,31 @@ export function applyCloudData(data, ts) {
       schedule: loadSchedule(),
     };
 
+    // ── Фаза 1: валидация всех разделов, сбор stage без записей ──
+    // Условия применения каждого раздела — ровно прежние: битый раздел
+    // по-прежнему отвергается целиком (в stage не попадает и не пишется
+    // вовсе), но остальные разделы снимка из-за него не отбрасываются.
+    // Ключей на удаление в stage нет: прежняя семантика никогда не стирает
+    // разделы снимком, и выдумывать удаление здесь нельзя.
+    const stage = [];
     if (validCloudHabits(data.habits) && (hasData(data.habits) || !hasData(local.habits))) {
-      localStorage.setItem(STORAGE_KEYS.habits, JSON.stringify(data.habits));
-      cloudApplied = true;
+      stage.push({ key: STORAGE_KEYS.habits, value: JSON.stringify(data.habits) });
     }
     if (validCloudRecords(data.records) &&
         (hasData(data.records) || !hasData(local.records))) {
-      localStorage.setItem(STORAGE_KEYS.records, JSON.stringify(data.records));
-      invalidateRecordsCache();
-      cloudApplied = true;
+      stage.push({ key: STORAGE_KEYS.records, value: JSON.stringify(data.records) });
     }
     // Раздел каза не применяется, пока есть неотправленная правка:
     // серверной копии она ещё не видела, и снимок затёр бы её молча.
     if (!syncPending && validCloudQaza(data.qaza) &&
         (hasData(data.qaza) || !hasData(local.qaza))) {
-      localStorage.setItem(QAZA_STORAGE_KEY, JSON.stringify(data.qaza));
-      cloudApplied = true;
+      stage.push({ key: QAZA_STORAGE_KEY, value: JSON.stringify(data.qaza) });
     }
     // Координаты — один раздел целиком. Пустой объект с сервера
     // не затирает заданные координаты: это след неполного снимка.
     if (validCloudPrayer(data.prayer) &&
         (hasData(data.prayer) || !hasData(local.prayer))) {
-      localStorage.setItem(PRAYER_KEY, JSON.stringify(data.prayer));
-      cloudApplied = true;
+      stage.push({ key: PRAYER_KEY, value: JSON.stringify(data.prayer) });
     }
     // Счётчик уразы — один раздел целиком, как координаты. Ноль
     // здесь значимое значение: объект с remaining: 0 непуст по ключам,
@@ -125,12 +192,11 @@ export function applyCloudData(data, ts) {
     // локальный счётчик остаётся нетронутым (уровень защиты 1, §11aa, В2)
     if (validCloudFast(data.fast) &&
         (hasData(data.fast) || !hasData(local.fast))) {
-      localStorage.setItem(FAST_KEY, JSON.stringify({
+      stage.push({ key: FAST_KEY, value: JSON.stringify({
         version: FAST_VERSION,
         remaining: data.fast.remaining,
         history: validFastHistory(data.fast.history),
-      }));
-      cloudApplied = true;
+      }) });
     }
     // Журнал выполнений каза — отдельный раздел, один целиком, как счётчик
     // уразы. Пустой журнал (entries: []) ключами непуст, поэтому hasData даёт
@@ -143,22 +209,20 @@ export function applyCloudData(data, ts) {
     // серверного снимка, который её ещё не содержит.
     if (!syncPending && validCloudQazaLog(data.qazaLog) &&
         (hasData(data.qazaLog) || !hasData(local.qazaLog))) {
-      localStorage.setItem(QAZA_LOG_KEY, JSON.stringify({
+      stage.push({ key: QAZA_LOG_KEY, value: JSON.stringify({
         version: QAZA_LOG_VERSION,
         since: data.qazaLog.since,
         entries: validQazaLogEntries(data.qazaLog.entries),
-      }));
-      cloudApplied = true;
+      }) });
     }
     // Запись о сне — отдельный раздел, один целиком, как счётчик уразы.
     // Пустой объект с сервера не затирает заведённую запись: он приходит
     // следом неполного снимка, а не осознанным удалением (§5)
     if (validCloudSleep(data.sleep) &&
         (hasData(data.sleep) || !hasData(local.sleep))) {
-      localStorage.setItem(SLEEP_KEY, JSON.stringify(Object.assign({}, data.sleep, {
+      stage.push({ key: SLEEP_KEY, value: JSON.stringify(Object.assign({}, data.sleep, {
         history: validSleepHistory(data.sleep.history),
-      })));
-      cloudApplied = true;
+      })) });
     }
     // Расписание заменяется целиком, как запись о сне. Дефолтов здесь нет:
     // loadSchedule подставляет их сама, поэтому раздел с сервера, прошедший
@@ -166,10 +230,57 @@ export function applyCloudData(data, ts) {
     // открытого экрана расписания — у подписчика sync:applied, вместе
     // с остальными экранами (§11v)
     if (validCloudSchedule(data.schedule)) {
-      localStorage.setItem(STORAGE_KEYS.schedule, JSON.stringify(data.schedule));
-      cloudApplied = true;
+      stage.push({ key: STORAGE_KEYS.schedule, value: JSON.stringify(data.schedule) });
     }
-    if (cloudApplied) localStorage.setItem(SYNC_TS_KEY, String(ts));
+
+    // Нечего применять: прежний код с cloudApplied=false не писал метку
+    // и не эмитил — выходим с тем же наблюдаемым результатом (undefined)
+    if (stage.length === 0) return;
+
+    // Метка времени — последний элемент stage: она движется только вместе
+    // с целым снимком (бывшее `if (cloudApplied)`), а сбой её записи откатывает
+    // снимок целиком — метка на наполовину применённых данных заставила бы
+    // считать их серверными и больше не принимать свежий снимок.
+    stage.push({ key: SYNC_TS_KEY, value: String(ts) });
+
+    // ── Фаза 2: снимок предыдущего состояния каждого ключа stage ──
+    // Журнал — он же протокол отката: written отмечает уже записанные
+    // ключи (только они подлежат откату), had — существовал ли ключ до
+    // записи (стирать или восстанавливать).
+    const appliedLog = [];
+    for (let i = 0; i < stage.length; i++) {
+      const previous = localStorage.getItem(stage[i].key);
+      appliedLog.push({
+        key: stage[i].key,
+        value: stage[i].value,
+        previous: previous,
+        had: previous !== null,
+        written: false,
+      });
+    }
+
+    // ── Фаза 3: применение; первая ошибка — откат всего записанного ──
+    for (let i = 0; i < appliedLog.length; i++) {
+      try {
+        localStorage.setItem(appliedLog[i].key, appliedLog[i].value);
+      } catch (e) {
+        // QuotaExceededError или любая другая ошибка записи: применённое
+        // до сбоя откатывается целиком (см. rollbackAppliedKeys)
+        rollbackAppliedKeys(appliedLog, 'applyCloudData');
+        // Практика сообщения о квоте в проекте одна: safeSetItem эмитит
+        // storage:error, тост показывает подписчик в app.js. Метка не
+        // двигается и sync:applied не эмится: хранилище осталось ровно
+        // в прежнем состоянии
+        bus.emit('storage:error');
+        return false;
+      }
+      appliedLog[i].written = true;
+      // Кэш записей сбрасывается сразу после записи раздела, как раньше:
+      // при последующем откате кэш просто перечитает прежнюю строку
+      if (appliedLog[i].key === STORAGE_KEYS.records) invalidateRecordsCache();
+    }
+
+    cloudApplied = true;
   } finally {
     syncing = false;
   }
@@ -180,6 +291,8 @@ export function applyCloudData(data, ts) {
   // не менял, и шторм перерисовок (таблица, каза, молитвы, ураза) был бы
   // чистым расходом — при сверах «ничего нового» частых.
   if (cloudApplied) bus.emit('sync:applied');
+  // Дошли сюда — все ключи записаны, отката не было
+  return true;
 }
 // Чей снимок применяем. Чистое правило без чтения глобального состояния:
 // серверный снимок должен быть строго новее и не спорить с правкой, которой
@@ -234,7 +347,16 @@ export async function syncFromCloud() {
       return { reachable: true, serverEmpty: false };
     }
 
-    applyCloudData(data, serverTs);
+    // false у applyCloudData — строго «хранилище отвергло запись, применение
+    // откачено»: снимок не применён, метка не двигалась, но сервер отвечал.
+    // Минимальная реакция — та же, что у сетевой ошибки ниже: пометить
+    // сервер недоступным, обмен фактического результата не дал (защита
+    // серверных привычек в syncBody остаётся честной). reachable в ответе
+    // остаётся true: сервер реально отвечал, а reachable:false заставил бы
+    // settleHabitsAfterSync сеять офлайн-дефолты поверх рабочих данных.
+    if (applyCloudData(data, serverTs) === false) {
+      cloudReachable = false;
+    }
     return { reachable: true, serverEmpty: false };
   } catch (e) {
     cloudReachable = false;
