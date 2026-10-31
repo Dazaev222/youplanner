@@ -989,13 +989,30 @@ function renderHistory() {
   const history = readHistory();
   if (!history.length) {
     appendMessage('bot', ASSISTANT_WELCOME);
+    reattachTyping(chat);
     return;
   }
   for (let i = 0; i < history.length; i++) {
     appendMessage(history[i].role === 'user' ? 'user' : 'bot', history[i].content, true);
   }
+  reattachTyping(chat);
   // Одна прокрутка в конец вместо плавной на каждый пузырь
   chat.scrollTop = chat.scrollHeight;
+}
+
+// Живой узел «Печатает…» между перерисовками ленты. Перерисовка (textContent
+// = '') отрывает его: ответ запроса в полёте записался бы в отсоединённый
+// узел и остался бы невидимым, а экран выглядел бы зависшим — assistantBusy
+// держит кнопку погашенной до завершения запроса.
+let typingNode = null;
+
+// Перерисовка при busy: typing-узел перепрыгивает на свежую ленту — ссылка
+// в runAssistantReply остаётся боевой, ответ допишется в видимый пузырь.
+// Приветствие не ломается: оно рисуется как обычно, typing возвращается
+// последним — индикатор и обязан быть нижним пузырём.
+function reattachTyping(chat) {
+  if (!assistantBusy || !typingNode) return;
+  chat.appendChild(typingNode);
 }
 
 export function openAssistantKeyModal() {
@@ -1070,6 +1087,10 @@ export function onAssistantClear() {
   } catch (e) {
     // не критично: пустая история дорисуется при следующем входе
   }
+  // Инвалидация in-flight: ответ запроса, начатого до очистки, в историю
+  // уже не пишется (см. assistantGeneration в runAssistantReply). Сам пузырь
+  // в текущей сессии остаётся — перерисовка ниже вернёт typing-узел в ленту.
+  assistantGeneration += 1;
   renderHistory();
   showToast('История очищена');
 }
@@ -1117,6 +1138,12 @@ function appendUserMessage(text, images) {
 // Пока идёт запрос к API, новый не отпускается: кнопки гасятся (анти-спам,
 // иначе быстрые повторные вопросы ловили 429), а Enter игнорится флагом.
 let assistantBusy = false;
+
+// Поколение сессии чата. «Очистить историю» сдвигает его: запрос, начатый
+// до очистки, при завершении показывается в текущей ленте (typing-узел),
+// но в историю не пишется — иначе «очищенная» история получила бы
+// запоздавшую реплику этого запроса.
+let assistantGeneration = 0;
 
 // Один источник правды для состояния кнопок. Гасит отправку и скрепку и на
 // время запроса, и на время разбора PDF: раньше вопрос, отправленный пока
@@ -1182,11 +1209,14 @@ export function onAssistantSubmit(text) {
 }
 
 async function runAssistantReply() {
-  const typing = appendMessage('bot', 'Печатает…');
-  if (typing) typing.classList.add('is-typing');
+  typingNode = appendMessage('bot', 'Печатает…');
+  if (typingNode) typingNode.classList.add('is-typing');
   setAssistantBusy(true);
   let reply = null;
   let error = null;
+  // Поколение на старте запроса: очистка истории посреди полёта сдвинет
+  // счётчик, и разница будет видна ниже
+  const generation = assistantGeneration;
   try {
     reply = await requestAssistantReply();
   } catch (e) {
@@ -1196,6 +1226,8 @@ async function runAssistantReply() {
     // finally: индикатор гасится при любом исходе — успех, 401, 500,
     // таймаут или неожиданное исключение. Раньше подвисал «Печатает…»,
     // если сбой случался между catch и снятием класса
+    const typing = typingNode;
+    typingNode = null;
     if (typing) {
       typing.classList.remove('is-typing');
       if (error) {
@@ -1213,7 +1245,9 @@ async function runAssistantReply() {
     }
     return;
   }
-  pushHistory('assistant', reply);
+  // Пузырь уже показан в ленте (typing-узел выше); в историю ответ пишется,
+  // только если история не очищалась, пока запрос был в полёте
+  if (generation === assistantGeneration) pushHistory('assistant', reply);
 }
 
 // Обработчик формы: гасит перезагрузку; чистит поле только после принятой

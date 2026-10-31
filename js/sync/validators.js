@@ -2,6 +2,7 @@ import { PRAYER_MADHHABS, PRAYER_METHODS } from '../data/prayer.js';
 import { NAMAZ_ORDER, QAZA_VERSION, validQazaLogDate } from '../data/qaza.js';
 import { SLEEP_MAX_MINUTES, sleepDurationMinutes, sleepFallMinutes, sleepTimeMinutes } from '../data/sleep.js';
 import { ARCHIVE_VERSION } from '../data/archive.js';
+import { sanitizeTombstones } from '../data/habits.js';
 
 
 // Раздел с данными: непустой список или непустой объект.
@@ -140,4 +141,16 @@ export function validCloudArchive(archive) {
   if (since !== undefined && since !== null &&
       (typeof since !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(since))) return false;
   return true;
+}
+// Надгробия удалённых привычек (js/data/habits.js): объект id → метка
+// удаления. От остальных валидаторов отличается возвратом: раздел плоский,
+// поэтому битые записи не роняют его целиком, а отбрасываются — возвращается
+// ОЧИЩЕННЫЙ объект (sanitizeTombstones: лимит числа, конечные ts, строковые
+// id); не-объект — раздела нет (null). Пустой объект валиден: «надгробий
+// нет» — легальное содержимое раздела. Раздел необязателен: снимки до
+// введения надгробий его не несут, и null потребители читают как «раздела
+// в снимке нет».
+export function validCloudTombstones(tombstones) {
+  if (!tombstones || typeof tombstones !== 'object' || Array.isArray(tombstones)) return null;
+  return sanitizeTombstones(tombstones);
 }

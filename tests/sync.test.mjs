@@ -84,7 +84,9 @@ test('вызов во время обмена доезжает повторны�
   await first;
   await new Promise((resolve) => setTimeout(resolve, 20));
 
-  assert.equal(fetchImpl.stats.mainGets(), 2,
+  // Два обмена, и в каждом два чтения узла: первое — внутри бэкапа,
+  // второе — повторная сверка непосредственно перед PUT (B.2).
+  assert.equal(fetchImpl.stats.mainGets(), 4,
     'повторный обмен после очереди не состоялся');
   assert.equal(fetchImpl.stats.mainPuts(), 2);
 });
@@ -159,8 +161,9 @@ test('ключ задан: все firebaseio-обмены уходят с ?auth=
       c.url.includes('?auth=tok1') || c.url.includes('&auth=tok1'),
       'обмен без auth-параметра: ' + c.url);
   }
-  // Фильтры счётчиков по подстроке firebaseio не должны заметить auth-серверы
-  assert.equal(fetchImpl.stats.mainGets(), 1);
+  // Фильтры счётчиков по подстроке firebaseio не должны заметить auth-серверы.
+  // Чтений два: бэкап плюс повторная сверка перед PUT (B.2), оба с токеном.
+  assert.equal(fetchImpl.stats.mainGets(), 2);
   assert.equal(fetchImpl.stats.mainPuts(), 1);
 });
 

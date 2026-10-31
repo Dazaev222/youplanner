@@ -8,11 +8,16 @@
 //   habits, records, sleep.history, qazaLog.entries — коллекции с ключами
 //   (id привычки, дата дня, тройка записи журнала): сливаются аддитивно,
 //   локальные элементы не пропадают никогда;
+//   habits особая оговорка: привычка, чьё надгробие удаления (tombstones)
+//   не старше метки раздела habits снимка, в ветке extra не привозится —
+//   иначе удаление отменялось бы каждой сверкой (B.3);
 //   qaza, prayer, fast, schedule, скаляры сна — цельные объекты: применяются
 //   с сервера, только если метка раздела (sectionTs, fallback updatedAt)
 //   строго новее нашей последней сверки, и только когда нет правки, которой
 //   сервер ещё не видел (pending);
-//   archive — производные месячные сводки: объединение по месяцам.
+//   archive — производные месячные сводки: объединение по месяцам;
+//   tombstones — надгробия удалённых привычек: слияние по max(ts) на id,
+//   аддитивно, метка раздела не участвует (надгробие не воскрешается).
 //
 // При pending (правка ещё не уезжала наверх) слияние консервативнее: коллекции
 // только «заполняют дыры» (день/привычка/день сна, которых локально нет),
@@ -23,7 +28,7 @@
 import {
   hasData, validCloudArchive, validCloudFast, validCloudHabits,
   validCloudPrayer, validCloudQaza, validCloudQazaLog, validCloudRecords,
-  validCloudSchedule, validCloudSleep,
+  validCloudSchedule, validCloudSleep, validCloudTombstones,
 } from './validators.js';
 import { validQazaLogEntries } from '../data/qaza.js';
 import { validSleepHistory } from '../data/sleep.js';
@@ -37,11 +42,52 @@ export function sectionTsOf(cloud, section, fallbackTs) {
   return Number(fallbackTs) || 0;
 }
 
+// Надгробия удалённых привычек: слияние по max(ts) на id, аддитивно.
+// Надгробие никогда не «воскрешается»: отсутствие пары на чужой стороне
+// локальную не отменяет — снятие метки локальное решение устройства
+// (pruneResolvedTombstones), а не содержимое снимка. Обе стороны приходят
+// уже очищенными (loadTombstones/validCloudTombstones), битые значения
+// и здесь отбрасываются — защита от вызова с сырыми данными.
+export function mergeTombstonesById(localTombstones, cloudTombstones) {
+  const merged = {};
+  const sides = [localTombstones, cloudTombstones];
+  for (let s = 0; s < sides.length; s++) {
+    const side = sides[s];
+    if (!side || typeof side !== 'object' || Array.isArray(side)) continue;
+    const ids = Object.keys(side);
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i];
+      const ts = side[id];
+      // Только числа по типу: мягкое приведение сделало бы из null и ''
+      // нулевую метку — надгробие «с самого начала времён»
+      if (typeof ts !== 'number' || !Number.isFinite(ts) || ts < 0) continue;
+      if (merged[id] === undefined || ts > merged[id]) merged[id] = ts;
+    }
+  }
+  return merged;
+}
+
 // Привычки: объединение по id. Порядок локального списка сохраняется,
 // чужие привычки дописываются в конец в своём порядке. Совпадающий id:
 // при cloudWins объект сервера, иначе локальный — список и так видел
 // серверную версию при прошлой сверке.
-export function mergeHabitsById(localHabits, cloudHabits, cloudWins) {
+//
+// opts.tombstones и opts.sectionTs (необязательно, B.3): ветка extra не
+// привозит привычку, чьё надгробие не старше метки раздела habits снимка —
+// иначе удалённая на этом устройстве привычка воскресала бы с сервера.
+// Метка раздела НОВЕЕ надгробия — чужая правка привычки победила, привычка
+// привозится как раньше; равные метки читаются консервативно — удаление
+// считается последней известной правкой, привычка не привозится.
+export function mergeHabitsById(localHabits, cloudHabits, cloudWins, opts) {
+  const options = opts || {};
+  const tombstones = options.tombstones || {};
+  const sectionTs = Number(options.sectionTs) || 0;
+  const tombstoned = function (id) {
+    const ts = tombstones[id];
+    // Мусорная метка (не число) не блокирует: блокирует только настоящая
+    if (typeof ts !== 'number' || !Number.isFinite(ts)) return false;
+    return ts >= sectionTs;
+  };
   const local = Array.isArray(localHabits) ? localHabits : [];
   const cloud = Array.isArray(cloudHabits) ? cloudHabits : [];
   const byId = {};
@@ -59,7 +105,7 @@ export function mergeHabitsById(localHabits, cloudHabits, cloudWins) {
     if (!habit || habit.id == null) continue;
     if (byId[habit.id] !== undefined) {
       if (cloudWins) byId[habit.id] = habit;
-    } else {
+    } else if (!tombstoned(habit.id)) {
       byId[habit.id] = habit;
       extra.push(habit.id);
     }
@@ -246,13 +292,31 @@ export function mergeCloudIntoLocal(local, cloud, opts) {
     sleep: local.sleep,
     schedule: local.schedule,
     archive: local.archive,
+    tombstones: local.tombstones,
   };
+
+  // Надгробия приезжают вместе со снимком и нужны дважды: слиянию привычек
+  // ниже (не вернуть удалённое) и самому разделу (слияние по max(ts)).
+  // Снимки до введения надгробий раздела не несут — тогда слияние идёт
+  // только с локальными.
+  const cloudTombstones = validCloudTombstones(cloud.tombstones);
+  if (cloudTombstones && hasData(cloudTombstones)) {
+    merged.tombstones = mergeTombstonesById(local.tombstones, cloudTombstones);
+  }
 
   // Коллекции с ключами: аддитивное слияние при любом раскладе. При pending —
   // только «заполнение дыр» (cloudWins=false): существующие локально элементы
   // не трогаются, приезжают лишь отсутствующие.
   if (validCloudHabits(cloud.habits) && hasData(cloud.habits)) {
-    merged.habits = mergeHabitsById(local.habits, cloud.habits, !pending);
+    // Ветке extra видны и локальные надгробия, и приехавшие с этим снимком:
+    // снимок только что принят к слиянию, его метки — часть одного решения
+    const tombstonesForHabits = cloudTombstones
+      ? mergeTombstonesById(local.tombstones, cloudTombstones)
+      : local.tombstones;
+    merged.habits = mergeHabitsById(local.habits, cloud.habits, !pending, {
+      tombstones: tombstonesForHabits,
+      sectionTs: sectionTsOf(cloud, 'habits', cloudTs),
+    });
   }
   if (validCloudRecords(cloud.records) && hasData(cloud.records)) {
     merged.records = mergeRecordsByDay(local.records, cloud.records, !pending);

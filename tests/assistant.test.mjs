@@ -287,3 +287,174 @@ test('keyboard-open: на Android (окно сжимается целиком) �
     'перекрытия нет — класс не должен ставиться');
   assert.equal(view.style.marginBottom, '', 'подъём тоже не нужен');
 });
+
+// --- Гонка рендера и «Очистить историю» --------------------------------------
+// Лента #assistant-chat перерисовывается по textContent (защита от XSS), и
+// пока запрос в полёте, перерисовка отрывает узел «Печатает…»: ответ
+// записывается в отсоединённый узел и не виден, экран выглядит зависшим.
+// А «Очистить история» посреди запроса не должен пропускать завершившийся
+// ответ в персистентную историю: очистка честнее пришедшего позже ответа.
+//
+// Песочница без DOM: чат — ручной двухпанельный объект (textContent-сеттер
+// чистит детей, appendChild пишет в массив), createElement отдаёт пузыри с
+// classList и scrollIntoView и складывает их в список созданных. Так тест
+// держит ссылку именно на живой typing-узел, а не ищет его заново.
+
+function makeChat() {
+  const children = [];
+  const chat = {
+    scrollTop: 0,
+    scrollHeight: 1000,
+    children: children,
+    appendChild(child) { children.push(child); return child; },
+  };
+  Object.defineProperty(chat, 'textContent', {
+    get() { return ''; },
+    set() { children.length = 0; },   // как у настоящего узла: присваивание чистит ленту
+  });
+  return chat;
+}
+
+function bindAssistantDom(sandbox, chat) {
+  const created = [];
+  sandbox.document.getElementById = (id) => (id === 'assistant-chat' ? chat : null);
+  sandbox.document.createElement = () => {
+    const el = {
+      className: '',
+      textContent: '',
+      classList: {
+        _set: new Set(),
+        add(c) { this._set.add(c); },
+        remove(c) { this._set.delete(c); },
+        contains(c) { return this._set.has(c); },
+        toggle() {},
+      },
+      appendChild(child) { (el.children = el.children || []).push(child); return child; },
+      scrollIntoView() {},
+    };
+    created.push(el);
+    return el;
+  };
+  sandbox.document.createTextNode = (text) => ({ text: text });
+  return created;
+}
+
+function findTyping(created) {
+  return created.find((el) => el.textContent === 'Печатает…') || null;
+}
+
+function okReply(content) {
+  return {
+    ok: true,
+    status: 200,
+    json: () => Promise.resolve({ choices: [{ message: { content: content } }] }),
+  };
+}
+
+// Промис ответа сервера держится до resolveReply(): тест успевает сделать
+// перерисовку/очистку, пока запрос «в полёте»
+function makeDeferredFetch() {
+  let resolveReply = null;
+  const fetchImpl = () => new Promise((resolve) => { resolveReply = resolve; });
+  fetchImpl.resolveReply = (content) => resolveReply(okReply(content));
+  return fetchImpl;
+}
+
+async function settle() {
+  for (let i = 0; i < 5; i++) await new Promise((r) => setImmediate(r));
+}
+
+function storedHistory(sandbox) {
+  const raw = sandbox.localStorage.getItem('youplanner.assistant_history');
+  return raw ? JSON.parse(raw) : [];
+}
+
+test('рендер при busy не сносит typing: ответ приходит в видимый узел ленты', async () => {
+  const chat = makeChat();
+  const fetchImpl = makeDeferredFetch();
+  const { sandbox, context } = loadApp({ fetchImpl });
+  const created = bindAssistantDom(sandbox, chat);
+  sandbox.localStorage.setItem('youplanner.api_key', 'тест-ключ');
+  sandbox.localStorage.setItem('youplanner.assistant_history', JSON.stringify([
+    { role: 'user', content: 'старый вопрос' },
+    { role: 'assistant', content: 'старый ответ' },
+  ]));
+
+  context.renderHistory();
+  assert.equal(chat.children.length, 2, 'история должна отрисоваться');
+
+  assert.equal(context.onAssistantSubmit('Новый вопрос'), true);
+  const typing = findTyping(created);
+  assert.ok(typing, 'узел «Печатает…» должен быть создан');
+  assert.ok(chat.children.indexOf(typing) !== -1, 'typing живёт в ленте до рендера');
+
+  // Перерисовка (уход с вкладки и обратно) посреди запроса
+  context.renderHistory();
+  assert.ok(chat.children.indexOf(typing) !== -1,
+    'перерисовка при busy выбросила typing: ответ уйдёт в отсоединённый узел');
+  assert.equal(chat.children[chat.children.length - 1], typing,
+    'typing должен остаться последним пузырём ленты');
+
+  fetchImpl.resolveReply('СВЕЖИЙ ОТВЕТ');
+  await settle();
+
+  assert.equal(typing.textContent, 'СВЕЖИЙ ОТВЕТ', 'ответ не записался в узел');
+  assert.ok(chat.children.indexOf(typing) !== -1,
+    'ответ записан в узел, оторванный от ленты: экран выглядит зависшим');
+  const history = storedHistory(sandbox);
+  assert.ok(history.some((m) => m.content === 'СВЕЖИЙ ОТВЕТ'),
+    'ответ должен попасть в историю (очистки не было)');
+});
+
+test('очистка истории во время запроса: ответ виден в чате, но не пишется в историю', async () => {
+  const chat = makeChat();
+  const fetchImpl = makeDeferredFetch();
+  const { sandbox, context } = loadApp({ fetchImpl });
+  const created = bindAssistantDom(sandbox, chat);
+  sandbox.localStorage.setItem('youplanner.api_key', 'тест-ключ');
+  sandbox.localStorage.setItem('youplanner.assistant_history', JSON.stringify([
+    { role: 'user', content: 'старый вопрос' },
+  ]));
+  sandbox.confirm = () => true;
+
+  assert.equal(context.onAssistantSubmit('Вопрос'), true);
+  const typing = findTyping(created);
+
+  // Очистка, пока запрос в полёте
+  context.onAssistantClear();
+  assert.equal(storedHistory(sandbox).length, 0, 'история должна очиститься сразу');
+
+  fetchImpl.resolveReply('ПОЗДНИЙ ОТВЕТ');
+  await settle();
+
+  assert.equal(typing.textContent, 'ПОЗДНИЙ ОТВЕТ', 'ответ не записался в узел');
+  assert.ok(chat.children.indexOf(typing) !== -1,
+    'очистка посреди запроса прячет ответ: пузырь должен остаться в текущей сессии');
+  assert.ok(!storedHistory(sandbox).some((m) => m.content === 'ПОЗДНИЙ ОТВЕТ'),
+    '«очищенная» история получила сообщение завершившегося запроса');
+});
+
+test('после очистки следующий запрос пишется в историю: инвалидация не залипает', async () => {
+  const chat = makeChat();
+  const fetchImpl = makeDeferredFetch();
+  const { sandbox, context } = loadApp({ fetchImpl });
+  const created = bindAssistantDom(sandbox, chat);
+  sandbox.localStorage.setItem('youplanner.api_key', 'тест-ключ');
+  sandbox.localStorage.setItem('youplanner.assistant_history', JSON.stringify([
+    { role: 'user', content: 'старый вопрос' },
+  ]));
+  sandbox.confirm = () => true;
+
+  // Очистка без запроса в полёте
+  context.onAssistantClear();
+  assert.equal(storedHistory(sandbox).length, 0);
+
+  // Новый запрос после очистки обязан персиститься как обычно
+  assert.equal(context.onAssistantSubmit('Новый вопрос'), true);
+  fetchImpl.resolveReply('ОТВЕТ ПОСЛЕ ОЧИСТКИ');
+  await settle();
+
+  const history = storedHistory(sandbox);
+  assert.ok(history.some((m) => m.role === 'assistant' && m.content === 'ОТВЕТ ПОСЛЕ ОЧИСТКИ'),
+    'инвалидирующий флаг пережил свой запрос и съел чужой ответ');
+});

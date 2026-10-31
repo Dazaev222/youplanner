@@ -134,6 +134,81 @@ test('пустой ключ: null без единого сетевого выз�
     'пустой ключ не должен выходить в сеть');
 });
 
+// Восстановление при протухшем refresh-токене: securetoken отвечает
+// 400 (INVALID_REFRESH_TOKEN), и обменять мёртвый токен нельзя. Хранить
+// ключ дальше значило бы умирать вечно: он стирается, и запрос
+// повторяется один раз свежим signUp'ом — заводится новый анонимный
+// аккаунт, данные это не затрагивает.
+function denied(status) {
+  return {
+    ok: false,
+    status: status,
+    json: () => Promise.resolve({ error: { message: 'INVALID_REFRESH_TOKEN' } }),
+  };
+}
+
+test('протухший refresh-токен: 400 на обмен — ключ удалён, повтор идёт signUp\'ом', async () => {
+  // Устройство с сохранённым refresh-токеном: signUp даёт r1
+  const fetch1 = makeAuthFetch();
+  const first = loadApp({ fetchImpl: fetch1 });
+  first.context.setFirebaseApiKey(KEY);
+  assert.equal(await first.context.getAuthToken(), 'tok1');
+  assert.equal(first.sandbox.localStorage.getItem(AUTH_REFRESH_KEY), 'r1');
+
+  // Перезагрузка: refresh-токен с устройства протух — обмен отвечает 400
+  const fetch2 = makeAuthFetch();
+  const securetokenCalls = [];
+  const signUpCalls = [];
+  fetch2.calls = [];
+  fetch2.impl = function (url, opts = {}) {
+    const u = String(url);
+    fetch2.calls.push({ url: u, body: opts && opts.body });
+    if (u.indexOf('securetoken.googleapis.com') !== -1) {
+      securetokenCalls.push(u);
+      return Promise.resolve(denied(400));
+    }
+    if (u.indexOf('identitytoolkit.googleapis.com') !== -1) {
+      signUpCalls.push(u);
+      return Promise.resolve(okJson({ idToken: 'tok3', refreshToken: 'r3', expiresIn: '3600' }));
+    }
+    return Promise.resolve(okJson({}));
+  };
+
+  const second = loadApp({ fetchImpl: fetch2.impl });
+  const dump = first.sandbox.localStorage._dump();
+  Object.keys(dump).forEach((k) => second.sandbox.localStorage.setItem(k, dump[k]));
+  second.context.setFirebaseApiKey(KEY);
+
+  assert.equal(await second.context.getAuthToken(), 'tok3',
+    'после 400 на обмен должен прийти signUp-токен, а не null навсегда');
+  assert.equal(securetokenCalls.length, 1, 'обмен должен случиться ровно один раз');
+  assert.equal(signUpCalls.length, 1, 'повтор должен быть ровно один signUp');
+  assert.equal(second.sandbox.localStorage.getItem(AUTH_REFRESH_KEY), 'r3',
+    'мёртвый ключ не удалён из localStorage');
+});
+
+test('протухший refresh-токен и signUp отказал: null, пауза держит сеть', async () => {
+  let networkCalls = 0;
+  const fetchImpl = () => {
+    networkCalls += 1;
+    return Promise.resolve(denied(400));
+  };
+  const { sandbox, context } = loadApp({ fetchImpl });
+  sandbox.localStorage.setItem(AUTH_REFRESH_KEY, 'r-dead');
+  context.setFirebaseApiKey(KEY);
+
+  assert.equal(await context.getAuthToken(), null);
+  // Обмен + один signUp-повтор — и ни одного запроса сверх: зацикливания нет
+  assert.equal(networkCalls, 2,
+    'повторов больше одного: endless-loop, вызовов ' + networkCalls);
+  assert.equal(sandbox.localStorage.getItem(AUTH_REFRESH_KEY), null,
+    'мёртвый refresh-токен должен быть удалён и при отказе signUp');
+
+  // Пауза 5 минут: повтор сразу не выходит в сеть
+  assert.equal(await context.getAuthToken(), null);
+  assert.equal(networkCalls, 2, 'пауза не удержала сеть после двойной неудачи');
+});
+
 test('битый ответ 200 без idToken: null, повтор сразу — тоже null', async () => {
   let networkCalls = 0;
   const fetchImpl = () => {
