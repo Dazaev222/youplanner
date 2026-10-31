@@ -23,7 +23,7 @@ export const ASSISTANT_HISTORY_KEY = 'youplanner.assistant_history';
 // единственная базовая «все тарифы · в РФ».
 const ASSISTANT_API_URL = 'https://api.neuraldeep.ru/v1/chat/completions';
 export const ASSISTANT_MODELS = [
-  { id: 'qwen3.6-35b-a3b', label: 'Qwen 3.6 — базовая (все тарифы)' },
+  { id: 'qwen3.6-35b-a3b', label: 'Qwen 3.6 — базовая (все тарифы)', vision: true },
   { id: 'qwen3.8-27b', label: 'Qwen 3.8 — Starter/Pro, зрение', vision: true },
   { id: 'gpt-oss-120b', label: 'GPT-OSS 120B — Starter/Pro, вне РФ' },
 ];
@@ -79,11 +79,18 @@ export function onAssistantModelChange() {
 }
 
 // Принимает ли модель изображения. Чистая функция: проверяется тестами.
+// Правило из баг-репорта iPhone (2026-10-31): всё семейство qwen — со зрением.
+// Каталог сверяется первым: явный флаг сильнее; модели вне каталога (кэш с
+// устройства после правки списка — например qwen3.6f.p) распознаются
+// по префиксу семейства.
 export function assistantModelSupportsVision(modelId) {
   for (let i = 0; i < ASSISTANT_MODELS.length; i++) {
-    if (ASSISTANT_MODELS[i].id === modelId) return ASSISTANT_MODELS[i].vision === true;
+    if (ASSISTANT_MODELS[i].id === modelId) {
+      return ASSISTANT_MODELS[i].vision === true;
+    }
   }
-  return false;
+  return typeof modelId === 'string'
+    && modelId.slice(0, 4).toLowerCase() === 'qwen';
 }
 
 function readHistory() {
@@ -284,20 +291,44 @@ function updateImageIndicator() {
   setImageIndicator('✕ ' + parts.join(' | ') + ' — нажмите, чтобы убрать');
 }
 
+// Снимок выбранных файлов в обычный массив. Обязателен ДО сброса input.value:
+// присвоение пустой строки опустошает список выбранных файлов (спека HTML,
+// files — SameObject), и живой FileList в руках обработчика становился
+// пустым — камера «молчала» на любом устройстве (баг-репорт iPhone,
+// 2026-10-31: «нажимаю Готово — ничего не происходит»). Чистая функция:
+// проверяется тестами на массивоподобном объекте.
+export function snapshotPickedFiles(fileList) {
+  if (!fileList) return [];
+  return Array.prototype.slice.call(fileList);
+}
+
 export function onAssistantImagePick() {
   const input = document.getElementById('assistant-image-input');
-  const files = input && input.files;
+  const picked = snapshotPickedFiles(input && input.files);
   // Сброс значения — как у PDF: иначе повторный выбор того же файла не
   // стреляет change, и камера кажется сломанной
   if (input) input.value = '';
-  if (!files || !files.length) return;
-  if (imageCompressing) return;
-  compressChatImages(files);
+  if (!picked.length) {
+    console.warn('[vision] change пришёл, но файлов в input нет — ' +
+      'выбор прерван до начала');
+    return;
+  }
+  const names = picked.map(function (f) { return f.name; }).join(', ');
+  console.log('[vision] выбрано файлов: ' + picked.length + ' (' + names + ')'
+    + '; модель: ' + readAssistantModel()
+    + ', зрение: ' + assistantModelSupportsVision(readAssistantModel()));
+  if (imageCompressing) {
+    console.warn('[vision] предыдущее сжатие ещё идёт — выбор пропущен');
+    return;
+  }
+  compressChatImages(picked);
 }
 
 async function compressChatImages(fileList) {
   const room = ASSISTANT_IMAGE_MAX - (imageContext ? imageContext.length : 0);
   if (room <= 0) {
+    console.warn('[vision] лимит ' + ASSISTANT_IMAGE_MAX
+      + ' фото исчерпан — новые не прикрепляются');
     showErrorToast('Не больше ' + ASSISTANT_IMAGE_MAX
       + ' фото — уберите лишние по чипу над полем ввода');
     return;
@@ -319,14 +350,20 @@ async function compressChatImages(fileList) {
           maxSide: IMAGE_MAX_SIDE,
           maxBytes: IMAGE_MAX_BYTES,
         });
+        console.log('[vision] сжато: ' + file.name + ' (' + file.size
+          + ' Б) → ' + compressed.blob.type + ' ' + compressed.blob.size
+          + ' Б, ' + compressed.width + '×' + compressed.height);
         added.push({
           dataUrl: await blobToDataURL(compressed.blob),
           name: file.name,
           bytes: compressed.blob.size,
         });
       } catch (e) {
-        console.error('[assistant] сжатие фото не удалось:', e);
-        showErrorToast('Не удалось сжать «' + file.name + '»');
+        // Причина видна в консоли: не декодировано, canvas/toBlob отказал,
+        // файл слишком велик даже для последнего шанса
+        console.error('[vision] фото не прикрепилось — сжатие не удалось ('
+          + file.name + '):', e);
+        showErrorToast('Не удалось сжать «' + file.name + '» — подробности в консоли');
       }
     }
     if (added.length) {
@@ -883,10 +920,40 @@ export function renderAssistantView() {
   } else {
     openAssistantKeyModal();
   }
+  bindViewportDockFix();
   // Чип фото живёт пока прикреплены снимки: переменная модуля переживает
   // уход с вкладки и обратно
   updateImageIndicator();
   renderHistory();
+}
+
+// --- Клавиатура iOS: док над системной панелью навигации --------------------
+// iPhone (баг-репорт 2026-10-31): iOS при открытии клавиатуры НЕ уменьшает
+// layout viewport — клавиатура вместе с системной панелью (стрелки вверх/
+// вниз, галочка) просто наезжает на нижнюю часть экрана и перекрывает док.
+// window.visualViewport даёт видимую область: перекрытие низа — это
+// innerHeight минус высота и смещение визуального вьюпорта. На эту величину
+// поднимается весь экран ассистента (margin-bottom в flex-колонке #app):
+// лента и док остаются видимы, шапка не сдвигается. При закрытой клавиатуре
+// перекрытие нулевое — инлайн-стиль снимается, safe-area CSS возвращается.
+let viewportBound = false;
+function bindViewportDockFix() {
+  if (viewportBound) return;
+  const viewport = window.visualViewport;
+  if (!viewport) return;   // старые браузеры без API — живут как раньше
+  viewportBound = true;
+  let lastOverlap = -1;
+  const apply = function () {
+    const view = document.getElementById('assistant-view');
+    if (!view) return;
+    const overlap = Math.round(Math.max(0,
+      window.innerHeight - viewport.height - viewport.offsetTop));
+    if (overlap === lastOverlap) return;
+    lastOverlap = overlap;
+    view.style.marginBottom = overlap > 0 ? overlap + 'px' : '';
+  };
+  viewport.addEventListener('resize', apply);
+  viewport.addEventListener('scroll', apply);
 }
 
 // Приветствие пустого чата: без истории лента — не «белая дыра», а стартовая
@@ -1076,8 +1143,10 @@ export function onAssistantSubmit(text) {
   // Фото при модели без зрения не отправляются вовсе: API ответил бы
   // непонятной ошибкой. Модалка модели уже открыта — переключение рядом.
   if (images.length && !assistantModelSupportsVision(readAssistantModel())) {
+    console.warn('[vision] отправка отсечена: модель без зрения — '
+      + readAssistantModel());
     showErrorToast('Текущая модель не принимает изображения — переключитесь '
-      + 'на qwen3.8-27b (шестерёнка в шапке)');
+      + 'на Qwen (шестерёнка в шапке)');
     openAssistantKeyModal();
     return false;
   }
