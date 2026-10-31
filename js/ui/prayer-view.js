@@ -276,6 +276,9 @@ export function prayerParseCoord(value, limit) {
 // Геолокация — единственный способ, который может отказать не по вине
 // пользователя, поэтому отказ объясняется словами, а не молчанием.
 // Экран без своей строки для пояснений (настройки) говорит тостом.
+// Обе кнопки геолокации гаснут на время определения (до 10 секунд): второй
+// запрос параллельно первому всё равно вернулся бы тем же ответом, а мигание
+// «Определяем…» при каждом тапе только путало.
 export function requestPrayerLocation(noteId, onDone) {
   const note = noteId ? document.getElementById(noteId) : null;
   const say = function (message) {
@@ -288,12 +291,25 @@ export function requestPrayerLocation(noteId, onDone) {
     return;
   }
 
+  const geoBtn = document.getElementById('prayer-geo');
+  const refreshBtn = document.getElementById('prayer-refresh');
+  const setButtonsDisabled = function (disabled) {
+    if (geoBtn) geoBtn.disabled = disabled;
+    if (refreshBtn) refreshBtn.disabled = disabled;
+  };
+
+  setButtonsDisabled(true);
   say('Определяем местоположение…');
   navigator.geolocation.getCurrentPosition(function (position) {
+    // getCurrentPosition — колбэки, не промис: «finally» здесь — оба выхода,
+    // успех и отказ. Кнопки в разметке статичные, перерисовки их не
+    // пересоздают, поэтому возврат по ссылке всегда попадает в живой узел
+    setButtonsDisabled(false);
     say('');
     onDone(prayerRound(position.coords.latitude),
       prayerRound(position.coords.longitude));
   }, function () {
+    setButtonsDisabled(false);
     say('Не удалось определить местоположение. Введите координаты вручную.');
   }, { timeout: 10000, maximumAge: 600000 });
 }

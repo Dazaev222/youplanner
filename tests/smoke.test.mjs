@@ -19,6 +19,7 @@ import { dirname, join, resolve } from 'node:path';
 import {
   readIndexHtml, getEntry, getModuleOrder, getAppJs, stripModuleSyntax,
 } from './helpers/sources.mjs';
+import { loadApp } from './helpers/load-app.mjs';
 
 const html = readIndexHtml();
 const js = getAppJs();
@@ -228,6 +229,133 @@ test('снятая вкладка задач не оставила висячи�
     js.includes('function migrateDropTasks()'),
     'migrateDropTasks() пропала: старые данные задач перестанут чиститься',
   );
+});
+
+test('switchAppView с битым именем открывает главный экран, а не белый', () => {
+  // Регрессия: неизвестное имя скрывало ВСЕ экраны разом — каждый ключ
+  // реестра SCREENS получал hidden, и интерфейс пропадал целиком.
+  const app = loadApp();
+  const nodes = {};
+  const fakeNode = () => ({
+    hidden: false, innerHTML: '', textContent: '',
+    classList: { toggle() {}, add() {}, remove() {} },
+    querySelectorAll: () => [],
+    addEventListener() {},
+    setAttribute() {}, getAttribute: () => null,
+    style: {},
+  });
+  app.sandbox.document.getElementById = (id) => (nodes[id] || (nodes[id] = fakeNode()));
+  app.sandbox.document.querySelectorAll = () => [];
+  app.sandbox.requestAnimationFrame = () => 0;
+  app.sandbox.cancelAnimationFrame = () => {};
+  let warns = 0;
+  app.sandbox.console = { warn() { warns++; }, log() {}, error() {} };
+
+  app.context.switchAppView('несуществующий-экран');
+  app.context.switchAppView('ещё-одно-битое-имя');
+
+  assert.equal(nodes.main.hidden, false, 'главный экран должен остаться видимым');
+  assert.equal(nodes['settings-view'].hidden, true, 'остальные экраны должны быть скрыты');
+  assert.equal(warns, 1, 'предупреждение о битом имени должно выводиться один раз');
+});
+
+// ── Disabled-состояния кнопок на время долгих операций ──────────────────────
+
+// Кнопка-приманка: запоминает обработчики, как настоящий addEventListener
+function trapButton() {
+  return {
+    disabled: false,
+    handlers: {},
+    addEventListener(type, fn) { this.handlers[type] = fn; },
+  };
+}
+
+test('кнопки ручной синхронизации гаснут на время обмена и возвращаются в finally', async () => {
+  const app = loadApp();
+  const nodes = {
+    'settings-sync-now': trapButton(),
+    'settings-sync-push': trapButton(),
+  };
+  app.sandbox.document.getElementById = (id) => nodes[id] || null;
+  app.sandbox.document.querySelectorAll = () => [];
+
+  // Сеть и тяжёлые перерисовки подменяются: тест про disabled, а не про
+  // обмен. Подмена после загрузки видна обработчикам: имена ищутся через
+  // глобальные привязки в момент вызова
+  let releaseSync;
+  app.sandbox.syncFromCloud = () => new Promise(function (resolve) { releaseSync = resolve; });
+  app.sandbox.syncToCloud = () => Promise.resolve({ ok: true });
+  app.sandbox.settleHabitsAfterSync = function () {};
+  app.sandbox.renderMainView = function () {};
+  app.sandbox.showSyncStatus = function () {};
+  app.sandbox.showErrorToast = function () {};
+  app.sandbox.loadHabits = () => [];
+
+  app.context.bindEvents();
+
+  nodes['settings-sync-now'].handlers.click();
+  assert.equal(nodes['settings-sync-now'].disabled, true, '«Обновить» должна гаснуть до ответа');
+
+  releaseSync({ reachable: true, serverEmpty: false });
+  await new Promise(setImmediate); // микротаски: then с итогом → finally
+  assert.equal(nodes['settings-sync-now'].disabled, false, '«Обновить» возвращается в finally');
+
+  nodes['settings-sync-push'].handlers.click();
+  assert.equal(nodes['settings-sync-push'].disabled, true, '«Отправить» должна гаснуть до ответа');
+  await new Promise(setImmediate);
+  assert.equal(nodes['settings-sync-push'].disabled, false, '«Отправить» возвращается в finally');
+});
+
+test('геолокация: prayer-geo/prayer-refresh гаснут на время определения', () => {
+  const app = loadApp();
+  const nodes = {};
+  const node = () => ({ hidden: false, disabled: false, textContent: '' });
+  app.sandbox.document.getElementById = (id) => (nodes[id] || (nodes[id] = node()));
+
+  let succeed = null;
+  let fail = null;
+  app.sandbox.navigator.geolocation = {
+    getCurrentPosition(ok, err) { succeed = ok; fail = err; },
+  };
+
+  app.context.requestPrayerLocation('prayer-welcome-note', function () {});
+
+  assert.equal(nodes['prayer-geo'].disabled, true, 'кнопка приветствия гаснет до ответа');
+  assert.equal(nodes['prayer-refresh'].disabled, true, 'кнопка настроек гаснет до ответа');
+  assert.equal(nodes['prayer-welcome-note'].textContent, 'Определяем местоположение…');
+
+  // Успех возвращает кнопки (вместе с событием таймаута это оба выхода
+  // колбэкового API — «finally» здесь некуда вставить)
+  succeed({ coords: { latitude: 43.1, longitude: 45.2 } });
+  assert.equal(nodes['prayer-geo'].disabled, false);
+  assert.equal(nodes['prayer-refresh'].disabled, false);
+  assert.equal(nodes['prayer-welcome-note'].textContent, '');
+
+  // Отказ тоже
+  app.context.requestPrayerLocation('prayer-welcome-note', function () {});
+  assert.equal(nodes['prayer-geo'].disabled, true);
+  fail(new Error('отказано'));
+  assert.equal(nodes['prayer-geo'].disabled, false, 'отказ геолокации возвращает кнопки');
+  assert.equal(nodes['prayer-refresh'].disabled, false);
+});
+
+test('геолокация недоступна: ранний выход не оставляет кнопки погашенными', () => {
+  const app = loadApp(); // navigator.geolocation в песочнице нет
+  const nodes = {
+    // Ранний выход до lookup кнопок: узлы создаём заранее, чтобы честно
+    // проверить, что они остались активными
+    'prayer-geo': { disabled: false },
+    'prayer-refresh': { disabled: false },
+  };
+  const node = () => ({ hidden: false, disabled: false, textContent: '' });
+  app.sandbox.document.getElementById = (id) => (nodes[id] || (nodes[id] = node()));
+
+  app.context.requestPrayerLocation('prayer-welcome-note', function () {});
+
+  assert.equal(nodes['prayer-geo'].disabled, false, 'кнопки не должны гаснуть до запроса');
+  assert.equal(nodes['prayer-refresh'].disabled, false);
+  assert.equal(nodes['prayer-welcome-note'].textContent,
+    'Геолокация недоступна. Введите координаты вручную.');
 });
 
 test('облачные бэкапы не лежат внутри синхронизируемого узла', () => {
