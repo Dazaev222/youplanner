@@ -99,28 +99,29 @@
   единицы (график и сетка ходят однодневными периодами — теперь это 4 ключа
   на день вместо полного прохода записей на каждый вызов).
 
-## 5. Diff
+## 5. Diff (реальный diffstat коммита)
 
 ```
- database.rules.json        |   3 +
- js/app.js                  |   0  (не менялся в этой сессии)
- js/data/firebase-auth.js   | 151 +++++++++++++ (новый)
- js/data/backup.js          | 130 ++++++++---- (транзакционный applyBackup)
- js/data/habits.js          |   9 ++ (touchRecordsVersion в removeHabit)
- js/data/records.js         | 135 ++++++++--- (версия + кэш)
- js/data/sync.js            |   0  (константы не менялись)
- js/sync/sync.js            | 260 ++++++++++++----- (auth в обёртке + транзакционный applyCloudData)
- sw.js                      |   3 +- (firebase-auth.js в ASSETS, v27)
- tests/backup.test.mjs      |  40 ++++ (квота при импорте)
- tests/firebase-auth.test.mjs | 130 ++++++++ (новый)
- tests/records.test.mjs     | 219 ++++++++++ (новый)
- tests/sync.test.mjs        | 120 +++++++- (auth ×2, квота ×2, фикс ассерта)
- tests/timers.test.mjs      |   1 + (await микрозадачи из-за async-обёртки)
- tests/e2e/firebase-rules.e2e.mjs | 120 +++ (новый, вне npm test)
- README.md, status.md       |  документация
+ DAY_REPORT.md                    | 138 +++++
+ README.md                        |  32 ++ (раздел «Безопасность Firebase»)
+ database.rules.json              |   6 + (новый, auth != null)
+ js/data/backup.js                | 104 ++++++-- (транзакционный applyBackup)
+ js/data/firebase-auth.js         | 178 +++++++++++ (новый)
+ js/data/habits.js                |  11 +- (touchRecordsVersion в removeHabit)
+ js/data/records.js               |  83 +++++- (версия записей + кэш прогресса)
+ js/sync/sync.js                  | 174 ++++++++++--- (auth в обёртке + транзакционный applyCloudData)
+ status.md                        |  18 ++ (записи журнала)
+ sw.js                            |   3 +- (firebase-auth.js в ASSETS, кэш v27)
+ tests/backup.test.mjs            | 100 +++++ (квота при импорте)
+ tests/e2e/firebase-rules.e2e.mjs | 211 +++++ (новый, вне npm test)
+ tests/firebase-auth.test.mjs     | 149 +++++ (новый)
+ tests/records.test.mjs           | 211 +++++ (новый)
+ tests/sync.test.mjs              | 248 +++++- (auth ×2, квота ×2)
+ tests/timers.test.mjs            |   1 + (await микрозадачи из-за async-обёртки)
+ 16 files changed, 1624 insertions(+), 43 deletions(-)
 ```
 
-Точный дифф: `git show` последнего коммита.
+Точный дифф: `git show 2f65767`.
 
 ## 6. Замечания
 
