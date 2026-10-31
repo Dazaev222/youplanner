@@ -273,11 +273,32 @@
     <div class="qaza-head assistant-head">
       <button type="button" class="btn btn-secondary" id="assistant-back">← Назад</button>
       <h2>Ассистент</h2>
+      <!-- Кнопки-иконки — инлайн-SVG в духе SF Symbols: stroke 1.8,
+           round-концы, цвет наследуется от кнопки (currentColor) -->
       <div class="assistant-head-actions">
-        <button type="button" id="assistant-clear" class="btn btn-secondary"
-                aria-label="Очистить историю диалогов">🧹</button>
-        <button type="button" id="assistant-settings" class="btn btn-secondary"
-                aria-label="Настройки API-ключа">⚙</button>
+        <button type="button" id="assistant-clear" class="assistant-icon-btn"
+                aria-label="Очистить историю диалогов">
+          <!-- Корзина (trash): крышка, ручка, корпус, две метки внутри -->
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+               stroke-linejoin="round" aria-hidden="true">
+            <path d="M4.5 6.5h15"/>
+            <path d="M9.75 6.5V5.2c0-.7.6-1.3 1.3-1.3h1.9c.7 0 1.3.6 1.3 1.3v1.3"/>
+            <path d="M6.3 6.5l.55 11.7a2.2 2.2 0 0 0 2.2 2.1h5.9a2.2 2.2 0 0 0 2.2-2.1l.55-11.7"/>
+            <path d="M10.1 10.6v5.2"/>
+            <path d="M13.9 10.6v5.2"/>
+          </svg>
+        </button>
+        <button type="button" id="assistant-settings" class="assistant-icon-btn"
+                aria-label="Настройки API-ключа">
+          <!-- Шестерёнка (gearshape) -->
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
+               stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+               stroke-linejoin="round" aria-hidden="true">
+            <path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/>
+            <circle cx="12" cy="12" r="3"/>
+          </svg>
+        </button>
       </div>
     </div>
     <div id="assistant-chat" aria-live="polite"></div>
@@ -298,19 +319,44 @@
         <div class="assistant-input-row">
           <label id="assistant-pdf-btn" class="assistant-pdf-btn"
                  for="assistant-pdf-input" role="button" tabindex="0"
-                 aria-label="Прикрепить PDF-файл">📎
+                 aria-label="Прикрепить PDF-файл">
+            <!-- Документ с текстом (doc.text) -->
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+                 stroke-linejoin="round" aria-hidden="true">
+              <path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/>
+              <path d="M14 2v4a2 2 0 0 0 2 2h4"/>
+              <path d="M10 9H8"/>
+              <path d="M16 13H8"/>
+              <path d="M16 17H8"/>
+            </svg>
             <input type="file" id="assistant-pdf-input" accept="application/pdf,.pdf" hidden>
           </label>
           <label id="assistant-image-btn" class="assistant-pdf-btn"
                  for="assistant-image-input" role="button" tabindex="0"
-                 aria-label="Прикрепить фото">📷
+                 aria-label="Прикрепить фото">
+            <!-- Камера (camera) -->
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
+                 stroke-linejoin="round" aria-hidden="true">
+              <path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3z"/>
+              <circle cx="12" cy="13" r="3"/>
+            </svg>
             <input type="file" id="assistant-image-input" accept="image/*" multiple hidden>
           </label>
           <input type="text" id="assistant-input"
                  placeholder="Спросите что-нибудь…" autocomplete="off"
                  aria-label="Сообщение ассистенту">
           <button type="submit" id="assistant-send"
-                  aria-label="Отправить">➤</button>
+                  aria-label="Отправить">
+            <!-- Стрелка вверх (arrow.up) -->
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none"
+                 stroke="currentColor" stroke-width="2" stroke-linecap="round"
+                 stroke-linejoin="round" aria-hidden="true">
+              <path d="m5 12 7-7 7 7"/>
+              <path d="M12 19V5"/>
+            </svg>
+          </button>
         </div>
       </form>
     </div>

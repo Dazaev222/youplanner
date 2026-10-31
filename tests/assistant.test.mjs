@@ -559,6 +559,27 @@ test('двойная отправка при медленной сети: assist
 
   const history = storedHistory(sandbox);
   assert.equal(history.filter((m) => m.role === 'user').length, 2,
-    'второй вопрос должен был осесть в истории');
+    'второй вопрос должен был осеть в истории');
   assert.equal(history.filter((m) => m.role === 'assistant').length, 1);
+});
+
+// --- Отсутствующие контролы: функция не должна ронять страницу ---------------
+// updateAssistantControls зовётся из многих мест (setAssistantBusy, чтение
+// PDF, сжатие фото), и getElementById там может вернуть null, если разметка
+// вкладки ещё не встала или частично не отрисовалась. Функция обязана молча
+// пройти мимо отсутствующих узлов (там стоят if (input) / if (send)), а не
+// уронить ход приложения исключением.
+
+test('updateAssistantControls: нет кнопки и поля в DOM — функция молча проходит', () => {
+  const { sandbox, context } = loadApp();
+  // Жёстко фиксируем «элементов нет»: любой getElementById отдаёт null
+  sandbox.document.getElementById = () => null;
+  assert.equal(typeof context.updateAssistantControls, 'function',
+    'updateAssistantControls должна быть доступна из песочницы');
+
+  // Покой и оба края busy-цикла: ни один вызов не должен бросить исключение
+  context.updateAssistantControls();
+  context.setAssistantBusy(true);
+  context.setAssistantBusy(false);
+  context.updateAssistantControls();
 });
