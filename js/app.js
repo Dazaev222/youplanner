@@ -28,7 +28,7 @@ import { closeLevelSheet, onLevelPick } from './ui/level-sheet.js';
 import { changeWeek, goToday, onTableChange, onTableClick, renderDayCards, renderHeader, renderMainView, renderTable, updateRowCircle } from './ui/main-table.js';
 import { onPrayerGeo, onPrayerMadhhabChange, onPrayerManualSave, onPrayerMethodChange, onPrayerRefresh, onPrayerShowAll, renderPrayerSettings, renderPrayerView, resetPrayerShowAll, startPrayerClock } from './ui/prayer-view.js';
 import { ensureQazaState, onQazaAddPick, onQazaAddSubmit, onQazaDone, onQazaStartChange, onQazaUndo, qazaCellMarkup, renderQazaView, setQazaState } from './ui/qaza-view.js';
-import { applyScreen } from './ui/router.js';
+import { applyScreen, SCREENS } from './ui/router.js';
 import { onScheduleAddSubmit, onScheduleEditListClick, renderScheduleEditView, renderScheduleView } from './ui/schedule-view.js';
 import { flushPendingSleepSave, onSleepFieldChange, renderSleepView } from './ui/sleep-view.js';
 import { appState, isMainDayView, isMobileView, ui } from './ui/state.js';
@@ -453,10 +453,15 @@ export function bindEvents() {
 
   // Ручная синхронизация из настроек. Итог у неё тот же, что у первой:
   // пустой сервер засевает дефолты — иначе пустая таблица осталась бы и без
-  // данных, и без пометки. Отправку ставит сама запись (§11t)
+  // данных, и без пометки. Отправку ставит сама запись (§11t).
+  // На время обмена кнопка гаснет: повторный клик до ответа сервера мигал
+  // бы статусом и плодил параллельные запросы (очередь syncExchange их
+  // сериализует, но лишний UI-шум убирает она не полностью). Возврат —
+  // в finally, при любом исходе обещания.
   const syncNow = document.getElementById('settings-sync-now');
   if (syncNow) {
     syncNow.addEventListener('click', function () {
+      syncNow.disabled = true;
       syncFromCloud().then(function (result) {
         settleHabitsAfterSync(result);
         appState.habits = loadHabits();
@@ -467,6 +472,8 @@ export function bindEvents() {
           return;
         }
         showSyncStatus('Обновлено');
+      }).finally(function () {
+        syncNow.disabled = false;
       });
     });
   }
@@ -477,12 +484,15 @@ export function bindEvents() {
   const syncPush = document.getElementById('settings-sync-push');
   if (syncPush) {
     syncPush.addEventListener('click', function () {
+      syncPush.disabled = true;
       syncToCloud().then(function (result) {
         if (result && result.ok) {
           showSyncStatus('Отправлено');
           return;
         }
         showErrorToast('Не отправлено: нет связи с сервером');
+      }).finally(function () {
+        syncPush.disabled = false;
       });
     });
   }
@@ -938,7 +948,22 @@ const ROUTE_RENDER = {
   'assistant': renderAssistantView,
 };
 
+// Предупреждение о битом имени экрана уже выведено (switchAppView)
+let warnedUnknownView = false;
+
 export function switchAppView(name) {
+  // Неизвестное имя раньше скрывало ВСЕ экраны разом (белый лист): реестр
+  // SCREENS такого ключа не знает, и каждый контейнер получал hidden.
+  // Битое имя — не повод терять интерфейс: предупреждаем один раз (не спамим
+  // в консоль при повторных переходах) и открываем главный экран.
+  if (!Object.prototype.hasOwnProperty.call(SCREENS, name)) {
+    if (!warnedUnknownView) {
+      console.warn('switchAppView: неизвестный экран "' + name + '", открыт главный');
+      warnedUnknownView = true;
+    }
+    name = 'main';
+  }
+
   // Панель статистики принадлежит главной: любой переход её закрывает.
   // Попап уровня — тоже: программный переход (из консоли, теста или будущего
   // кода) без этого оставил бы его висеть поверх нового экрана.

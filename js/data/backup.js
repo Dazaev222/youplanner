@@ -68,12 +68,11 @@ export function parseBackup(text) {
   let data;
   try {
     data = JSON.parse(text);
-    // Копии прошлых версий (например, v10-файлы) отвергаются так же, как
-    // битые: раздел schedule у них может отсутствовать целиком, и соединять
-    // поколения формата нельзя — файл обязан быть ровно BACKUP_VERSION
-    if (data.version !== undefined &&
-        (typeof data.version !== 'number' ||
-         data.version !== BACKUP_VERSION)) return null;
+    // Копии прошлых версий (например, v10-файлы) и файлы вообще без поля
+    // version отвергаются так же, как битые: раздел schedule у них может
+    // отсутствовать целиком, и соединять поколения формата нельзя — файл
+    // обязан быть ровно BACKUP_VERSION
+    if (data.version !== BACKUP_VERSION) return null;
   } catch (e) {
     return null;
   }

@@ -46,8 +46,26 @@ export function defaultHabit(id) {
   }
   return null;
 }
+// Годен ли элемент списка привычек. Те же минимальные поля, что проверяет
+// validCloudHabits (js/sync/validators.js): рендеру нужны id, name и тип из
+// набора формы. Продублировано локально: data не импортирует sync
+// (направление зависимостей core ← data ← sync/ui), а прямой импорт
+// validators.js из habits.js дал бы цикл — validators.js сам импортирует
+// habits.js. Битый элемент не должен ронять раздел и экран вместе с ним.
+function validHabitItem(habit) {
+  if (!habit || typeof habit !== 'object' || Array.isArray(habit)) return false;
+  if (typeof habit.id !== 'string' || habit.id === '') return false;
+  if (typeof habit.name !== 'string') return false;
+  for (let i = 0; i < HABIT_TYPES.length; i++) {
+    if (HABIT_TYPES[i].value === habit.type) return true;
+  }
+  return false;
+}
+
 // Возвращает список привычек как он лежит в хранилище. Отсутствие ключа,
 // пустой список и битый JSON читаются одинаково — как «привычек нет».
+// Битые элементы внутри списка (null, мусор, привычка без id) отбрасываются,
+// а не роняют чтение: один битый элемент не должен прятать весь список.
 // Дефолты здесь не пишутся: пустое хранилище значит «ещё не знаем», а не
 // «привычек нет», и засевает его init после подтверждённой сверки (§13).
 export function loadHabits() {
@@ -56,7 +74,7 @@ export function loadHabits() {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed;
+    return parsed.filter(validHabitItem);
   } catch (e) {
     return [];
   }

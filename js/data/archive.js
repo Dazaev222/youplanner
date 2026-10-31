@@ -252,12 +252,14 @@ export function archiveHistories(now) {
         for (let i = 0; i < parts.archived.length; i++) {
           if (parts.archived[i].date < archive.fast.since) archive.fast.since = parts.archived[i].date;
         }
-        safeSetItem(FAST_KEY, JSON.stringify({
+        // Результат записи проверяется, как в ветке сна и записей: при отказе
+        // квоты детализация остаётся на месте, и сводить её в архив нельзя —
+        // иначе сводка задвоила бы ещё не срезанные месяцы
+        if (safeSetItem(FAST_KEY, JSON.stringify({
           version: FAST_VERSION,
           remaining: fast.remaining,
           history: parts.kept,
-        }));
-        changed = true;
+        }))) changed = true;
       }
     }
   } catch (e) {
@@ -274,12 +276,13 @@ export function archiveHistories(now) {
         archive.qaza = {
           months: mergeMonthMaps(archive.qaza && archive.qaza.months, archiveQazaLogMonths(parts.archived)),
         };
-        safeSetItem(QAZA_LOG_KEY, JSON.stringify({
+        // Результат записи проверяется, как в ветке сна и записей: при отказе
+        // квоты журнал остаётся целиком, и сводить его в архив нельзя
+        if (safeSetItem(QAZA_LOG_KEY, JSON.stringify({
           version: QAZA_LOG_VERSION,
           since: log.since,
           entries: parts.kept,
-        }));
-        changed = true;
+        }))) changed = true;
       }
     }
   } catch (e) {

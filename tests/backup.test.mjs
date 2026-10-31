@@ -47,6 +47,16 @@ const invalidBackups = [
     message: 'копия версии 10 прошла разбор',
   },
   {
+    name: 'копия без поля version',
+    mutate: (backup) => { delete backup.version; },
+    message: 'копия без version прошла разбор',
+  },
+  {
+    name: 'копия с не-числом в version',
+    mutate: (backup) => { backup.version = '11'; },
+    message: 'копия со строковой version прошла разбор',
+  },
+  {
     name: 'не-время в actualWake',
     mutate: (backup) => { backup.sleep.actualWake = '25:99'; },
     message: 'битый actualWake прошёл разбор',

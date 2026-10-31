@@ -1,4 +1,5 @@
 import { bus } from '../core/bus.js';
+import { safeSetItem } from '../core/storage.js';
 import { defaultHabit, loadHabits, saveHabits } from './habits.js';
 import { PRESS_HABIT_ID } from './records.js';
 import { STORAGE_KEYS } from './storage.js';
@@ -27,12 +28,15 @@ export function markMigration(name) {
   const migrations = loadMigrations();
   if (migrations[name] === true) return;
   migrations[name] = true;
-  localStorage.setItem(STORAGE_KEYS.migrations, JSON.stringify(migrations));
+  safeSetItem(STORAGE_KEYS.migrations, JSON.stringify(migrations));
 }
 export function migrateDropTasks() {
   if (migrationDone('drop-tasks')) return;
-  markMigration('drop-tasks');
+  // Сначала действие, потом пометка: сбой между ними повторит миграцию
+  // на следующем запуске, а removeItem сам по себе повторобезопасен.
+  // Пометка до действия при сбое записи (квота) навсегда отменяла бы чистку.
   localStorage.removeItem(STORAGE_KEYS.tasks);
+  markMigration('drop-tasks');
   bus.emit('data:changed');
 }
 // «Пресс» заведена в дефолтах позже остальных привычек, поэтому у устройства
@@ -45,12 +49,22 @@ export function migratePressHabit() {
 
   const habits = loadHabits();
   if (!hasData(habits)) return;
-  markMigration('press');
 
+  // Проверка «уже есть» — до добавления и до пометки: сбой между действием
+  // и пометкой повторит прогон на следующем запуске, и без неё «Пресс»
+  // дублировался бы в списке.
   for (let i = 0; i < habits.length; i++) {
-    if (habits[i].id === PRESS_HABIT_ID) return;
+    if (habits[i].id === PRESS_HABIT_ID) {
+      markMigration('press');
+      return;
+    }
   }
 
+  // Порядок тот же — действие, потом пометка; пометка ставится только
+  // после удавшейся записи: иначе несостоявшееся дополнение было бы
+  // забыто навсегда
   habits.push(defaultHabit(PRESS_HABIT_ID));
-  saveNormalized(function () { saveHabits(habits); });
+  const saved = saveNormalized(function () { return saveHabits(habits); });
+  if (saved === false) return;
+  markMigration('press');
 }

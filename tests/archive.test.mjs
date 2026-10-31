@@ -160,6 +160,56 @@ test('проход архивации идемпотентен: второй п�
   assert.equal(app.run('globalThis.__changed'), 0);
 });
 
+test('отказ квоты при записи срезов: changed не выставляется, свод не уходит', () => {
+  const app = loadApp();
+  // Только ураза и журнал каза: сон и записи делить нечего, так что итог
+  // прохода целиком зависит от проверки результата записи срезов
+  const seed = {
+    'youplanner.qaza.fast': JSON.stringify({
+      version: 1, remaining: 2,
+      history: [
+        { date: '2024-09-05', count: 3, source: 'done' },
+        { date: '2026-10-01', count: 1, source: 'done' },
+      ],
+    }),
+    'youplanner.qaza.log': JSON.stringify({
+      version: 1, since: '2024-08-01',
+      entries: [
+        { date: '2024-09-05', namaz: 'fajr', source: 'done' },
+        { date: '2026-10-02', namaz: 'isha', source: 'done' },
+      ],
+    }),
+  };
+  const keys = Object.keys(seed);
+  for (let i = 0; i < keys.length; i++) app.sandbox.localStorage.setItem(keys[i], seed[keys[i]]);
+  app.run("globalThis.__changed = 0;");
+  app.run("bus.on('data:changed', function () { globalThis.__changed++; });");
+
+  // Оба среза (FAST_KEY и QAZA_LOG_KEY) записаться не могут: квота
+  const original = app.sandbox.localStorage.setItem;
+  app.sandbox.localStorage.setItem = function (key, value) {
+    if (key === 'youplanner.qaza.fast' || key === 'youplanner.qaza.log') {
+      const error = new Error('QuotaExceededError');
+      error.name = 'QuotaExceededError';
+      throw error;
+    }
+    return original(key, value);
+  };
+
+  const changed = app.context.archiveHistories(NOW);
+
+  assert.equal(changed, false, 'несостоявшаяся архивация не должна выставлять changed');
+  assert.equal(app.sandbox.localStorage.getItem('youplanner.archive'), null,
+    'свод не должен уходить в хранилище при отказе записи детализации');
+  assert.equal(app.run('globalThis.__changed'), 0, 'data:changed эмитился на несостоявшейся архивации');
+
+  // Детализация осталась целиком: ничего не срезано «в никуда»
+  const fast = JSON.parse(app.sandbox.localStorage.getItem('youplanner.qaza.fast'));
+  assert.deepEqual(fast.history.map(function (e) { return e.date; }), ['2024-09-05', '2026-10-01']);
+  const log = JSON.parse(app.sandbox.localStorage.getItem('youplanner.qaza.log'));
+  assert.deepEqual(log.entries.map(function (e) { return e.date; }), ['2024-09-05', '2026-10-02']);
+});
+
 test('вернувшийся полный месяц пересчитывает сводку, а не удваивает', () => {
   const app = loadApp();
   seedHistories(app.sandbox);
