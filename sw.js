@@ -1,4 +1,4 @@
-const CACHE = 'youplanner-v30';
+const CACHE = 'youplanner-v31';
 // Иконки — все из manifest.json: отсутствующая в кэше иконка ломала бы
 // офлайн-установку PWA (аудит 2026-10-31: icon-512.png не кэшировался)
 const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon-512.png', './icon.svg',
@@ -16,6 +16,10 @@ const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './ic
   './js/sync/sync.js',
   './js/ui/state.js',
   './js/ui/assistant-view.js',
+  // Подсистемы ассистента, вынесенные из assistant-view.js (этап D.5)
+  './js/ui/assistant-pdf.js',
+  './js/ui/assistant-vision.js',
+  './js/ui/assistant-api.js',
   './js/ui/prayer-view.js',
   './js/ui/fast-view.js',
   './js/ui/sleep-view.js',
@@ -35,7 +39,7 @@ const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './ic
   './js/data/prayer.js', './js/data/fast.js', './js/data/sleep.js',
   './js/data/stats.js', './js/data/backup.js', './js/data/background.js',
   './js/data/archive.js', './js/data/image.js',
-  './js/data/ui.js',
+  './js/ui/constants.js',
   './js/data/sync.js',
   './js/sync/state.js', './js/sync/validators.js', './js/sync/merge.js'];
 

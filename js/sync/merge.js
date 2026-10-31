@@ -183,7 +183,7 @@ export function mergeSleepHistories(localHistory, cloudHistory, cloudWins) {
 
 // Запись о сне: скаляры (bed/wake/fall и пары) по правилу цельных разделов,
 // история — аддитивно при любом раскладе.
-export function mergeSleepEntry(localSleep, cloudSleep, cloudWinsCore, cloudWinsHistory) {
+function mergeSleepEntry(localSleep, cloudSleep, cloudWinsCore, cloudWinsHistory) {
   if (!cloudSleep || typeof cloudSleep !== 'object' || Array.isArray(cloudSleep)) {
     return localSleep;
   }
@@ -255,7 +255,7 @@ function mergeFastArchive(localPart, cloudPart) {
   return merged;
 }
 
-export function mergeArchive(localArchive, cloudArchive) {
+function mergeArchive(localArchive, cloudArchive) {
   if (!cloudArchive || typeof cloudArchive !== 'object' || Array.isArray(cloudArchive)) {
     return localArchive;
   }

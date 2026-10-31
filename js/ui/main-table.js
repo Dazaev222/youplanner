@@ -4,7 +4,7 @@ import { cloudReachable, cloudReady } from '../sync/sync.js';
 import { qazaCellMarkup } from './qaza-view.js';
 import { appState, isMainDayView, isMobileView, ui } from './state.js';
 import { openLevelSheet } from './level-sheet.js';
-import { CIRCLE_CENTER, CIRCLE_LENGTH, CIRCLE_RADIUS, CIRCLE_SIZE, MONTHS_GENITIVE, MONTHS_NOMINATIVE, MONTHS_SHORT } from '../data/ui.js';
+import { CIRCLE_CENTER, CIRCLE_LENGTH, CIRCLE_RADIUS, CIRCLE_SIZE, MONTHS_GENITIVE, MONTHS_NOMINATIVE, MONTHS_SHORT } from './constants.js';
 import { LEVEL_LATE, LEVEL_ON_TIME, LEVEL_TWO_MIN, QURAN_HABIT_ID, SPORT_VALUES, SPORT_VALUE_LABELS, calcProgress, defaultLevel, getEntry, getRecord, habitMarkDate, hasLevelPopup, isChoiceLevelHabit, isLevelHabit, writeHabitEntry } from '../data/records.js';
 import { cssEscape, escapeHtml, pad2 } from '../core/dom.js';
 import { CHOICE_OPTIONS, loadHabits } from '../data/habits.js';

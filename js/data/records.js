@@ -149,7 +149,7 @@ export function hasLevelPopup(habitId) {
 // Приводит запись к виду { value, level }. Старые записи — скаляр (число
 // страниц или строка варианта) — читаются как { value: оно, level: null };
 // перезапись в localStorage при чтении не делается. null — записи нет.
-export function normalizeEntry(habitId, raw) {
+function normalizeEntry(habitId, raw) {
   if (raw === undefined || raw === null || raw === '') return null;
 
   if (typeof raw === 'object' && !Array.isArray(raw)) {
@@ -176,12 +176,12 @@ export function getEntry(date, habitId) {
   return normalizeEntry(habitId, raw);
 }
 // Значение записи без уровня — то, что показывает поле отметки
-export function recordValue(date, habitId) {
+function recordValue(date, habitId) {
   const entry = getEntry(date, habitId);
   return entry ? entry.value : undefined;
 }
 // 'HH:MM' → минуты от полуночи; null, если строка не время
-export function habitTimeMinutes(time) {
+function habitTimeMinutes(time) {
   if (typeof time !== 'string') return null;
   const match = /^(\d{1,2}):(\d{2})$/.exec(time);
   if (!match) return null;

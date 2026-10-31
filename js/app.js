@@ -12,7 +12,7 @@ import { SCHEDULE_TYPES } from './data/schedule.js';
 import { STATS_PERIOD_BOXES, saveStatsPeriod } from './data/stats.js';
 import { STORAGE_KEYS } from './data/storage.js';
 import { SYNC_STATUS_MS } from './data/sync.js';
-import { APP_BUILD, APP_VERSION } from './data/ui.js';
+import { APP_BUILD, APP_VERSION } from './ui/constants.js';
 import { clearSyncPending, syncPending } from './sync/state.js';
 import { flushPendingSync, markCloudReady, scheduleSync, settleHabitsAfterSync, syncFromCloud, syncToCloud } from './sync/sync.js';
 import { onFastAdd, onFastDone, onFastEdit, onFastInitCancel, onFastInitSave, renderFastView, resetFastForm } from './ui/fast-view.js';
@@ -41,7 +41,7 @@ import { closeStatsMenu, isStatsMenuOpen, isStatsView, openStatsMenu, renderStat
 
 /* --- Статус ручной синхронизации в Настройках ------------------------------ */
 
-export let syncStatusTimer = null;
+let syncStatusTimer = null;
 //
 // Один снимок приходит из Firebase целиком, и каждый раздел в нём проверяется
 // содержимым, а не только типом «объект/массив»: раздел, не прошедший проверку,
@@ -105,9 +105,10 @@ export function onBackupRead(text) {
 /* ==========================================================================
    YouPlanner — логика интерфейса
 
-   Скрипт не модуль и не IIFE: все имена объявляются в глобальной области
-   видимости. Функции слоя данных только ВЫЗЫВАЮТСЯ, но никогда
-   не переобъявляются.
+   ES-модуль и точка входа: index.html подключает его через
+   <script type="module">, он собирает слои core/data/sync/ui и по
+   DOMContentLoaded запускает init() — инициализация состояния, затем
+   bindEvents и проводка шины событий.
 
    Ключевая архитектурная особенность: ячейки таблицы перерисовываются целиком
    (renderTable), поэтому обработчики событий навешиваются ОДИН РАЗ на
@@ -1205,7 +1206,7 @@ export const LIQUID_SWITCH_SELECTORS = [
   '#stats-sleep-period'
 ];
 
-window.moveIndicator = function (container) {
+function moveIndicator(container) {
   if (!container || container.hidden) return;
 
   const indicator = container.querySelector(':scope > .glass-indicator');
@@ -1246,7 +1247,7 @@ window.moveIndicator = function (container) {
     indicator.style.transform =
       'translate3d(' + Math.max(0, rawLeft) + 'px, 0, 0)';
   }
-};
+}
 
 export function getLiquidSwitchContainers() {
   return LIQUID_SWITCH_SELECTORS
@@ -1258,11 +1259,11 @@ export function getLiquidSwitchContainers() {
 
 export function moveAllIndicators() {
   getLiquidSwitchContainers().forEach(function (container) {
-    window.moveIndicator(container);
+    moveIndicator(container);
   });
 }
 
-export let liquidIndicatorFrame = 0;
+let liquidIndicatorFrame = 0;
 
 export function scheduleLiquidIndicators() {
   if (liquidIndicatorFrame) {
@@ -1289,7 +1290,7 @@ document.addEventListener('click', function (event) {
 
 // Наблюдатель следит за class/hidden; style не наблюдаем, чтобы собственные
 // изменения индикатора не зацикливали пересчёт.
-export const liquidObserver = new MutationObserver(function () {
+const liquidObserver = new MutationObserver(function () {
   scheduleLiquidIndicators();
 });
 
@@ -1303,7 +1304,7 @@ export function observeLiquidSwitches() {
   });
 }
 
-export let liquidResizeObserver = null;
+let liquidResizeObserver = null;
 
 export function observeLiquidSwitchSizes() {
   if (!('ResizeObserver' in window)) return;
