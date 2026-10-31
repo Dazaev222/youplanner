@@ -34,16 +34,27 @@ function friendlyError(status) {  if (status === 401 || status === 403) {
 // его вызов кидал TypeError, и каждый запрос мгновенно падал в «Нет связи».
 // Ручной контроллер работает везде, поэтому подстраховываем им. Таймер
 // возвращается вместе с сигналом: короткий ответ иначе оставлял бы его
-// жить до истечения таймаута.
+// жить до истечения таймаута. timedOut() различает истёкший таймаут:
+// в ручной ветке fetch отвергается AbortError (не TimeoutError), и без
+// этого флага таймаут на старых Safari выдавался за «нет связи».
 function timeoutGuard(ms) {
   if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) {
-    return { signal: AbortSignal.timeout(ms), cancel: function () {} };
+    return {
+      signal: AbortSignal.timeout(ms),
+      cancel: function () {},
+      timedOut: function () { return false; },
+    };
   }
+  let fired = false;
   const controller = new AbortController();
-  const timer = setTimeout(function () { controller.abort(); }, ms);
+  const timer = setTimeout(function () {
+    fired = true;
+    controller.abort();
+  }, ms);
   return {
     signal: controller.signal,
     cancel: function () { clearTimeout(timer); },
+    timedOut: function () { return fired; },
   };
 }
 
@@ -67,7 +78,8 @@ export async function postAssistantChat(payload, apiKey) {
   } catch (e) {
     // Реальная причина — в консоль (helper), текст — в ленту: TypeError
     // (сеть/CORS/старый API) и TimeoutError/AbortError видны только так.
-    const timedOut = e && e.name === 'TimeoutError';
+    // timedOut() ловит ручную ветку: там abort даёт AbortError.
+    const timedOut = (e && e.name === 'TimeoutError') || guard.timedOut();
     throw new Error(handleNetworkError(e, {
       context: '[assistant]',
       silent: true,
@@ -95,6 +107,16 @@ export async function postAssistantChat(payload, apiKey) {
   try {
     data = await response.json();
   } catch (e) {
+    // Обрыв сети посреди чтения тела fetch роняет TypeError'ом (спека fetch:
+    // network error при прерывании потока), невалидный JSON — SyntaxError.
+    // Раньше оба случая маскировались под «не в формате JSON».
+    if (e && e.name === 'TypeError') {
+      throw new Error(handleNetworkError(e, {
+        context: '[assistant]',
+        silent: true,
+        message: 'Связь прервалась посреди ответа. Попробуйте ещё раз.',
+      }));
+    }
     throw new Error('Сервис вернул ответ не в формате JSON. Попробуйте позже.');
   }
 

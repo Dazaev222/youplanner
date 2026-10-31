@@ -105,7 +105,13 @@ export async function compressImage(file, opts) {
     const candidate = await canvasToBlob(canvas, a.type, a.quality);
     if (!candidate) continue;
     blob = candidate;
-    if (candidate.size <= maxBytes && candidate.type === a.type) break;
+    // Влез в потолок — хватит. Фактический тип не проверяем: Safari без
+    // кодировщика WebP молча отдаёт PNG (проверка типа нужна была, чтобы
+    // решить, спускаться ли дальше), но если такой кадр ВЛЕЗАЕТ в maxBytes,
+    // он и есть результат — спуск в JPEG нужен только при промахе по размеру.
+    // Раньше влезающий кандидат отбрасывался по типу, и код возвращал
+    // последний шаг лестницы — Blob БОЛЬШЕ потолка при готовом меньшем.
+    if (candidate.size <= maxBytes) break;
   }
   if (!blob) {
     console.warn('compressImage: все форматы лестницы не закодировались — пробую PNG');

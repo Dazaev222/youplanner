@@ -475,3 +475,35 @@ test('после очистки следующий запрос пишется �
   assert.ok(history.some((m) => m.role === 'assistant' && m.content === 'ОТВЕТ ПОСЛЕ ОЧИСТКИ'),
     'инвалидирующий флаг пережил свой запрос и съел чужой ответ');
 });
+
+// --- Двойная отправка при медленной сети (adversarial-аудит 2026-10-31) ------
+// assistantBusy гасит и повторную отправку (Enter/чип во время запроса ловили
+// 429), и кнопку #assistant-send до завершения запроса.
+
+test('двойная отправка при медленной сети: assistantBusy гасит кнопку и повтор', async () => {
+  const chat = makeChat();
+  const fetchImpl = makeDeferredFetch();
+  const { sandbox, context } = loadApp({ fetchImpl });
+  const created = bindAssistantDom(sandbox, chat);
+  sandbox.localStorage.setItem('youplanner.api_key', 'тест-ключ');
+
+  const send = { disabled: false, classList: { toggle() {} } };
+  const baseGet = sandbox.document.getElementById;
+  sandbox.document.getElementById = (id) => (id === 'assistant-send' ? send : baseGet(id));
+
+  assert.equal(context.onAssistantSubmit('Первый вопрос'), true);
+  assert.equal(send.disabled, true, 'кнопка отправки не погашена на время запроса');
+
+  assert.equal(context.onAssistantSubmit('Второй вопрос'), false,
+    'повторная отправка при busy не должна отпускаться');
+  fetchImpl.resolveReply('ОТВЕТ');
+  await settle();
+
+  assert.equal(send.disabled, false, 'кнопка не вернулась после ответа');
+  assert.equal(context.onAssistantSubmit('Третий вопрос'), true, 'после ответа отправка заблокирована');
+
+  const history = storedHistory(sandbox);
+  assert.equal(history.filter((m) => m.role === 'user').length, 2,
+    'второй вопрос должен был осесть в истории');
+  assert.equal(history.filter((m) => m.role === 'assistant').length, 1);
+});

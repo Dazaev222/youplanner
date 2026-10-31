@@ -107,11 +107,15 @@ export async function compressChatImages(fileList, refreshControls) {
     return;
   }
   imageCompressing = true;
-  if (refreshControls) refreshControls();
-  setImageIndicator('Сжимаю…');
-  const added = [];
-  let limitSkipped = 0;
+  // Всё — включая refreshControls и индикатор — под try: finally ниже
+  // единственное место снятия флага. Иначе исключение до входа в try
+  // (например, брошенный колбэк контролов) оставляло imageCompressing
+  // = true навсегда: выбор фото и отправка блокировались до перезагрузки.
   try {
+    if (refreshControls) refreshControls();
+    setImageIndicator('Сжимаю…');
+    const added = [];
+    let limitSkipped = 0;
     for (let i = 0; i < fileList.length; i++) {
       if (added.length >= room) {
         limitSkipped = fileList.length - i;
