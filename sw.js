@@ -1,4 +1,4 @@
-const CACHE = 'youplanner-v26';
+const CACHE = 'youplanner-v27';
 // Иконки — все из manifest.json: отсутствующая в кэше иконка ломала бы
 // офлайн-установку PWA (аудит 2026-10-31: icon-512.png не кэшировался)
 const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon-512.png', './icon.svg',
@@ -12,6 +12,7 @@ const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './ic
   // pdf.js для чтения PDF в ассистенте: локальные копии вместо CDN —
   // офлайн-PWA разбирает файлы без сети
   './js/vendor/pdf.min.mjs', './js/vendor/pdf.worker.min.mjs',
+  './js/data/firebase-auth.js',
   './js/sync/sync.js',
   './js/ui/state.js',
   './js/ui/assistant-view.js',

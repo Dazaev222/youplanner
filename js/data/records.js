@@ -35,8 +35,20 @@ export const SPORT_LEGACY_VALUES = {
 
 // Кэш записей: null — «ещё не загружено», {} — валидное «записей нет».
 export let recordsCache = null;
+// Версия данных записей. Всё, что мутирует recordsCache хотя бы in-place,
+// обязано сдвигать счётчик touchRecordsVersion(), иначе кэш прогресса
+// (calcProgress) отдаст устаревший процент. Сам счётчик наружу не
+// экспортируется: снаружи от него нужен только touch.
+let recordsVersion = 0;
+export function touchRecordsVersion() {
+  recordsVersion++;
+}
 export function invalidateRecordsCache() {
   recordsCache = null;
+  // Следующая загрузка придёт из хранилища с чужими данными (applyBackup,
+  // sync, событие storage из другой вкладки) — кэш прогресса обязан
+  // пересчитаться с нуля
+  touchRecordsVersion();
 }
 // Возвращает объект записей. Битый JSON или не-объект → пустой объект.
 // Возвращает общий кэш-объект. Мутирующие пути (setRecord, removeHabit)
@@ -68,7 +80,12 @@ export function loadRecords() {
 // его in-place; кэш трогать нельзя, иначе откат разойдётся с кэшем.
 export function saveRecords(records) {
   const ok = safeSetItem(STORAGE_KEYS.records, JSON.stringify(records));
-  if (ok) recordsCache = records;
+  if (ok) {
+    recordsCache = records;
+    // Write-through закрепил новое состояние в кэше и на диске: версия
+    // данных записей сменилась, кэш прогресса должен пересчитаться
+    touchRecordsVersion();
+  }
   return ok;
 }
 // Значение привычки в конкретный день или undefined, если записи нет
@@ -104,8 +121,15 @@ export function setRecord(date, habitId, value) {
     } else {
       delete records[date];
     }
+    // Откат — тоже мутация кэша in-place: версия обязана уйти вперёд,
+    // даже если состояние вернулось к прежнему (лишний сдвиг безвреден,
+    // устаревший процент — нет)
+    touchRecordsVersion();
     return false;
   }
+  // Запись изменила recordsCache in-place ещё до saveRecords: сдвигаем
+  // версию в самой точке мутации, а не полагаемся на write-through ниже
+  touchRecordsVersion();
   bus.emit('data:changed');
   return true;
 }
@@ -225,11 +249,26 @@ export function writeHabitEntry(habit, date, value, level) {
   if (!setRecord(date, habit.id, { value: value, level: level })) return false;
   return true;
 }
-// Процент выполнения привычки за набор дат. Может быть больше 100.
-// База — все дни периода, включая пустые: непроставленный день даёт 0.
-// Знаменатель обрезается до первой записи: пользователь видит прогресс за
-// тот период, когда реально вёл привычку, а не за весь календарь.
-export function calcProgress(habit, dates) {
+// Кэш процентов прогресса. Habit-объекты пересоздаются каждым рендером
+// (loadHabits читает JSON из хранилища), держать значение по ссылке
+// объекта нельзя — ключ собирается из полей, которые calcProgress реально
+// читает (id, type, goal), плюс версии данных записей и периода.
+const progressCache = new Map();
+
+// Сигнатура периода для ключа кэша. Массивы дат пересоздаются каждым
+// рендером, сравнение по ссылке даёт 0% попаданий; все источники —
+// непрерывные диапазоны ISO-дат (год, неделя, месяц, одиночный день),
+// поэтому содержимое массива однозначно задано краями и длиной.
+// Одиночный день сводится к самой дате: habitMarked ходит однодневными
+// массивами.
+function periodSignature(dates) {
+  if (dates.length === 1) return dates[0];
+  return dates[0] + '..' + dates[dates.length - 1] + ':' + dates.length;
+}
+
+// Тело calcProgress без кэша. Не экспортируется: наружу идёт обёртка
+// ниже, вызывающие (stats, stats-view, main-table) кэш не замечают.
+function calcProgressUncached(habit, dates) {
   if (!dates || dates.length === 0) return 0;
 
   // Веса вариантов ответа для типа "choice". Коды Спорта и Пресса и русские
@@ -283,4 +322,36 @@ export function calcProgress(habit, dates) {
     return (sum / base) / habit.goal * 100;
   }
   return sum / base * 100;
+}
+
+// Процент выполнения привычки за набор дат. Может быть больше 100.
+// База — все дни периода, включая пустые: непроставленный день даёт 0.
+// Знаменатель обрезается до первой записи: пользователь видит прогресс за
+// тот период, когда реально вёл привычку, а не за весь календарь.
+//
+// Карточка привычки за «Все время» зовёт это ~1500 раз за рендер (график,
+// сетка и серии — по одному дню), на телефонах это заметные лаги, поэтому
+// пересчёт только на промахе кэша. Попадание валидно, пока жива версия
+// данных записей и не сменился период.
+export function calcProgress(habit, dates) {
+  // Пустой период — 0 мимо кэша: считать нечего, ключ не построить
+  if (!dates || dates.length === 0) return 0;
+
+  // goal детерминированно через String: у привычки goal бывает undefined,
+  // и 'undefined' в ключе — постоянное, всегда одинаковое значение
+  const key = String(habit.id) + '|' + String(habit.type) + '|' +
+    String(habit.goal) + '|' + recordsVersion + '|' + periodSignature(dates);
+
+  // Попадание только при живой версии: сдвиг версии делает ключ новым
+  const cached = progressCache.get(key);
+  if (cached && cached.version === recordsVersion) return cached.value;
+
+  const value = calcProgressUncached(habit, dates);
+
+  // Потолок памяти: на длинной сессии привычек и периодов много, карте
+  // распухать нельзя; само вычисление дешёвое, потеря кэша безболезненна
+  if (progressCache.size > 1000) progressCache.clear();
+  progressCache.set(key, { version: recordsVersion, value: value });
+
+  return value;
 }
