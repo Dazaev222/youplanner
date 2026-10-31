@@ -265,6 +265,10 @@ const okReply = (content) => ({
 // Фейковые DOM-элементы по id (индикатор, тост, чат): это то, что читают
 // assistant-media.js и core/dom.js. createElement пишется в список created —
 // так тест находит пузырь «Печатает…»/ошибки в ленте.
+// getAttribute/querySelectorAll нужны модалке настроек (openAssistantKeyModal
+// заполняет слайдеры персонализации и переключает табы): открывается она и из
+// заблокированных путей onAssistantSubmit — без стандартных методов узла
+// песочница падала бы TypeError'ом там, где живой DOM проходит насквозь.
 function bindVisionDom(sandbox) {
   const els = {};
   const created = [];
@@ -275,6 +279,8 @@ function bindVisionDom(sandbox) {
     appendChild(c) { return c; },
     scrollIntoView() {},
     focus() {},
+    getAttribute: () => null,
+    querySelectorAll: () => [],
   });
   sandbox.document.createElement = () => { const el = makeEl(); created.push(el); return el; };
   sandbox.document.createTextNode = (t) => ({ text: t });

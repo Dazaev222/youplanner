@@ -43,7 +43,8 @@
 }
 
 /* Все сегмент-контролы приложения. position: relative — точка отсчёта
-   капли-индикатора; isolation держит z-index кнопок внутри контрола. */
+   капли-индикатора; isolation держит z-index кнопок внутри контрола.
+   #assistant-settings-switch — табы модалки «Настройки ассистента». */
 #main-view-switch,
 #schedule-switch,
 #schedule-edit-switch,
@@ -52,7 +53,8 @@
 #stats-habits-period,
 #stats-habit-period,
 #stats-fast-period,
-#stats-sleep-period {
+#stats-sleep-period,
+#assistant-settings-switch {
   position: relative;
   isolation: isolate;
 }
@@ -67,7 +69,8 @@
 #stats-habits-period > button,
 #stats-habit-period > button,
 #stats-fast-period > button,
-#stats-sleep-period > button {
+#stats-sleep-period > button,
+#assistant-settings-switch > button {
   position: relative;
   z-index: 2;
   background: transparent;

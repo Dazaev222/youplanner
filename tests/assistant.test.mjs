@@ -583,3 +583,469 @@ test('updateAssistantControls: нет кнопки и поля в DOM — фун
   context.setAssistantBusy(false);
   context.updateAssistantControls();
 });
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Персонализация ассистента (модалка «Настройки ассистента», два таба)
+//
+// Персонализация живёт на устройстве одним JSON — youplanner.assistant_persona:
+// инструкции для системного промпта, окно контекста данных (дни), температура,
+// потолок длины ответа (max_tokens) и поведение Shift+Enter. Валидация
+// по-полевая: мусор в одном поле не должен портить остальные, а отсутствие
+// или битый JSON целиком откатывает КАЖДОЕ поле на дефолт — так же, как
+// readAssistantModel откатывается на дефолтную модель.
+// ═════════════════════════════════════════════════════════════════════════════
+
+const PERSONA_KEY = 'youplanner.assistant_persona';
+
+const PERSONA_DEFAULTS = {
+  instructions: '',
+  contextDays: 14,
+  temperature: 0.3,
+  maxTokens: 1000,
+  shiftEnter: false,
+};
+
+// Объект, созданный в vm-реалме, → хозяйский: deepStrictEqual из strict-режима
+// сравнивает прототипы, поэтому сравнивать можно только свои объекты
+function personaOf(context) {
+  return { ...context.readAssistantPersona() };
+}
+
+test('readAssistantPersona: пустое хранилище, мусор и не-объект — дефолты', () => {
+  const { sandbox, context } = loadApp();
+  assert.equal(typeof context.readAssistantPersona, 'function',
+    'readAssistantPersona должна быть доступна из песочницы');
+  assert.deepEqual(personaOf(context), PERSONA_DEFAULTS, 'пустое хранилище');
+
+  sandbox.localStorage.setItem(PERSONA_KEY, '{битый json');
+  assert.deepEqual(personaOf(context), PERSONA_DEFAULTS, 'битый JSON');
+
+  sandbox.localStorage.setItem(PERSONA_KEY, JSON.stringify([1, 2, 3]));
+  assert.deepEqual(personaOf(context), PERSONA_DEFAULTS, 'массив — не персонализация');
+
+  sandbox.localStorage.setItem(PERSONA_KEY, JSON.stringify('строка'));
+  assert.deepEqual(personaOf(context), PERSONA_DEFAULTS, 'строка — не персонализация');
+
+  sandbox.localStorage.setItem(PERSONA_KEY, 'null');
+  assert.deepEqual(personaOf(context), PERSONA_DEFAULTS, 'null — тоже мусор');
+});
+
+test('readAssistantPersona: валидация по-полевая — партиал и мусор в отдельных полях', () => {
+  const { sandbox, context } = loadApp();
+
+  // Партиальный объект: известное поле применяется, остальные — дефолты
+  sandbox.localStorage.setItem(PERSONA_KEY, JSON.stringify({ contextDays: 7 }));
+  assert.deepEqual(personaOf(context), { ...PERSONA_DEFAULTS, contextDays: 7 });
+
+  // Мусор в каждом поле — поле откатывается на дефолт, соседние не трогаются
+  sandbox.localStorage.setItem(PERSONA_KEY, JSON.stringify({
+    good: { contextDays: 5 },
+    instructions: 42,
+    contextDays: 'семь',
+    temperature: 'много',
+    maxTokens: null,
+    shiftEnter: 1,
+  }));
+  const mixed = personaOf(context);
+  assert.equal(mixed.contextDays, 14, 'строковое окно — дефолт');
+  assert.equal(mixed.temperature, 0.3, 'строковая температура — дефолт');
+  assert.equal(mixed.maxTokens, 1000, 'null вместо лимита — дефолт');
+  assert.equal(mixed.shiftEnter, false, 'единица вместо булева — дефолт');
+  assert.equal(mixed.instructions, '', 'число вместо инструкций — дефолт');
+
+  // Нижние границы диапазонов принимаются
+  sandbox.localStorage.setItem(PERSONA_KEY, JSON.stringify({
+    instructions: '  Кратко.  ',
+    contextDays: 2,
+    temperature: 0,
+    maxTokens: 100,
+    shiftEnter: true,
+  }));
+  assert.deepEqual(personaOf(context), {
+    instructions: 'Кратко.',   // трим обязателен
+    contextDays: 2,
+    temperature: 0,
+    maxTokens: 100,
+    shiftEnter: true,
+  });
+
+  // Верхние границы диапазонов принимаются
+  sandbox.localStorage.setItem(PERSONA_KEY, JSON.stringify({
+    contextDays: 30, temperature: 1, maxTokens: 4000,
+  }));
+  const top = personaOf(context);
+  assert.equal(top.contextDays, 30);
+  assert.equal(top.temperature, 1);
+  assert.equal(top.maxTokens, 4000);
+
+  // Вне диапазона — дефолт поля
+  sandbox.localStorage.setItem(PERSONA_KEY, JSON.stringify({
+    contextDays: 31, temperature: 1.5, maxTokens: 50,
+  }));
+  const off = personaOf(context);
+  assert.equal(off.contextDays, 14);
+  assert.equal(off.temperature, 0.3);
+  assert.equal(off.maxTokens, 1000);
+
+  // Не-целые для целочисленных полей — дефолт поля
+  sandbox.localStorage.setItem(PERSONA_KEY, JSON.stringify({
+    contextDays: 7.5, maxTokens: 250.5,
+  }));
+  const frac = personaOf(context);
+  assert.equal(frac.contextDays, 14, 'дробное окно — дефолт');
+  assert.equal(frac.maxTokens, 1000, 'дробный лимит — дефолт');
+
+  // Инструкции длиннее 2000 символов обрезаются до 2000
+  sandbox.localStorage.setItem(PERSONA_KEY, JSON.stringify({
+    instructions: 'а'.repeat(2500),
+  }));
+  assert.equal(personaOf(context).instructions.length, 2000);
+});
+
+test('buildMessages: инструкции попадают в системный промпт после первой фразы и до данных', () => {
+  const { sandbox, context } = loadApp();
+  sandbox.localStorage.setItem(PERSONA_KEY, JSON.stringify({
+    instructions: 'Отвечай как кот',
+  }));
+
+  const messages = context.buildMessages();
+  const system = messages[0].content;
+  assert.ok(system.indexOf('Инструкции пользователя: Отвечай как кот') !== -1,
+    'инструкций нет в системном промпте: ' + system.slice(0, 200));
+  const atFirstSentence = system.indexOf('так и скажи.');
+  const atInstructions = system.indexOf('Инструкции пользователя');
+  // Данные могут отсутствовать (пустой трекер) — тогда сравниваем с блоком
+  // «Данных пока нет», который идёт на том же месте
+  const atData = system.indexOf('Данные пользователя');
+  const atDataBlock = atData !== -1 ? atData : system.indexOf('Данных пока нет');
+  assert.ok(atInstructions > atFirstSentence,
+    'инструкции должны стоять после первой фразы промпта');
+  assert.ok(atInstructions < atDataBlock,
+    'инструкции должны стоять ПЕРЕД данными трекера');
+});
+
+test('buildMessages: пустые инструкции — блока «Инструкции пользователя» нет', () => {
+  const { sandbox, context } = loadApp();
+  const bare = context.buildMessages()[0].content;
+  assert.ok(bare.indexOf('Инструкции пользователя') === -1,
+    'без персонализации блока инструкций быть не должно');
+
+  // Пробельные инструкции после трима — пустые: блока тоже нет
+  sandbox.localStorage.setItem(PERSONA_KEY, JSON.stringify({ instructions: '   ' }));
+  assert.ok(context.buildMessages()[0].content.indexOf('Инструкции пользователя') === -1,
+    'блок инструкций не должен появляться из одних пробелов');
+});
+
+test('buildContext: contextDays задаёт окно записей в снимке данных', () => {
+  const { sandbox, context } = loadApp();
+  // 40 дней записей: маркер ДЕНЬ-N, где N — сколько дней назад была запись
+  const records = {};
+  const now = new Date();
+  for (let i = 0; i < 40; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+    const iso = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0')
+      + '-' + String(d.getDate()).padStart(2, '0');
+    records[iso] = { note: 'ДЕНЬ-' + i };
+  }
+  sandbox.localStorage.setItem('youplanner.records', JSON.stringify(records));
+
+  sandbox.localStorage.setItem(PERSONA_KEY, JSON.stringify({ contextDays: 7 }));
+  let system = context.buildMessages()[0].content;
+  assert.ok(system.indexOf('Записи за 7 дней') !== -1,
+    'подпись должна называть реальное окно');
+  assert.ok(system.indexOf('ДЕНЬ-6') !== -1, 'последний день окна потерялся');
+  assert.ok(system.indexOf('ДЕНЬ-0') !== -1, 'сегодняшний день потерялся');
+  assert.ok(system.indexOf('ДЕНЬ-7') === -1, 'в окно попал день за его пределами');
+
+  // Без персонализации окно прежнее — 14 дней
+  sandbox.localStorage.removeItem(PERSONA_KEY);
+  system = context.buildMessages()[0].content;
+  assert.ok(system.indexOf('Записи за 14 дней') !== -1);
+  assert.ok(system.indexOf('ДЕНЬ-13') !== -1);
+  assert.ok(system.indexOf('ДЕНЬ-14') === -1);
+
+  // Русское склонение в подписи: «21 день», а не «21 дней»
+  sandbox.localStorage.setItem(PERSONA_KEY, JSON.stringify({ contextDays: 21 }));
+  system = context.buildMessages()[0].content;
+  assert.ok(system.indexOf('Записи за 21 день\n') !== -1
+    || system.indexOf('Записи за 21 день:') !== -1,
+    'склонение «21 дней» — уродливо: ' + system.slice(0, 300));
+});
+
+test('payload: temperature и max_tokens из персонализации уходят в тело запроса', async () => {
+  const bodies = [];
+  const fetchImpl = (_url, opts) => {
+    bodies.push(JSON.parse(opts.body));
+    return Promise.resolve(okReply('ок'));
+  };
+  const chat = makeChat();
+  const { sandbox, context } = loadApp({ fetchImpl });
+  bindAssistantDom(sandbox, chat);
+  sandbox.localStorage.setItem('youplanner.api_key', 'тест-ключ');
+  sandbox.localStorage.setItem(PERSONA_KEY, JSON.stringify({
+    temperature: 0.7, maxTokens: 2500,
+  }));
+
+  assert.equal(context.onAssistantSubmit('Вопрос'), true);
+  await settle();
+
+  assert.equal(bodies.length, 1, 'запрос не дошёл до fetch');
+  assert.equal(bodies[0].temperature, 0.7, 'temperature не из персонализации');
+  assert.equal(bodies[0].max_tokens, 2500,
+    'max_tokens должен быть snake_case (OpenAI-совместимо) и из персонализации');
+  assert.ok(bodies[0].model, 'модель потерялась из payload');
+  assert.ok(Array.isArray(bodies[0].messages), 'messages потерялись из payload');
+});
+
+test('payload: без персонализации уходят дефолты temperature 0.3 и max_tokens 1000', async () => {
+  const bodies = [];
+  const fetchImpl = (_url, opts) => {
+    bodies.push(JSON.parse(opts.body));
+    return Promise.resolve(okReply('ок'));
+  };
+  const chat = makeChat();
+  const { sandbox, context } = loadApp({ fetchImpl });
+  bindAssistantDom(sandbox, chat);
+  sandbox.localStorage.setItem('youplanner.api_key', 'тест-ключ');
+
+  assert.equal(context.onAssistantSubmit('Вопрос'), true);
+  await settle();
+
+  assert.equal(bodies.length, 1);
+  assert.equal(bodies[0].temperature, 0.3, 'дефолт температуры должен уйти в payload');
+  assert.equal(bodies[0].max_tokens, 1000, 'дефолт лимита должен уйти в payload');
+});
+
+// DOM модалки настроек: элементы, которые читают/пишут openAssistantKeyModal
+// и onAssistantKeySave, плюс тост. Чего нет в overrides — создаётся заглушкой.
+function bindAssistantSettingsDom(sandbox, overrides) {
+  const els = {
+    'assistant-key-modal': { hidden: true },
+    'assistant-key-input': { value: '', focus() {} },
+    'assistant-key-error': { textContent: '' },
+    'assistant-model-select': {
+      options: [],
+      appendChild(option) { this.options.push(option); return option; },
+    },
+    'assistant-persona-instructions': { value: '' },
+    // data-format у слайдеров живёт в разметке; заглушка отдаёт null —
+    // форматирование деградирует на «как есть» (ветка default)
+    'assistant-context-days': { value: '14', getAttribute: () => null },
+    'assistant-context-days-value': { textContent: '' },
+    'assistant-temperature': { value: '0.3', getAttribute: () => null },
+    'assistant-temperature-value': { textContent: '' },
+    'assistant-max-tokens': { value: '1000', getAttribute: () => null },
+    'assistant-max-tokens-value': { textContent: '' },
+    'assistant-shift-enter': { checked: false },
+    'assistant-image-indicator': { textContent: '', hidden: true },
+    'toast': { textContent: '', hidden: true, addEventListener() {} },
+  };
+  for (const key of Object.keys(overrides || {})) els[key] = overrides[key];
+  sandbox.document.getElementById = (id) => (Object.prototype.hasOwnProperty.call(els, id) ? els[id] : null);
+  return els;
+}
+
+test('onAssistantKeySave: сохраняет и ключ, и персонализацию одним «Сохранить»', () => {
+  const { sandbox, context } = loadApp();
+  const els = bindAssistantSettingsDom(sandbox);
+  els['assistant-key-input'].value = '  новый-ключ  ';
+  els['assistant-persona-instructions'].value = '  Кратко, без воды  ';
+  els['assistant-context-days'].value = '21';
+  els['assistant-temperature'].value = '0.5';
+  els['assistant-max-tokens'].value = '2000';
+  els['assistant-shift-enter'].checked = true;
+
+  context.onAssistantKeySave();
+
+  assert.equal(sandbox.localStorage.getItem('youplanner.api_key'), 'новый-ключ',
+    'ключ должен сохраниться тримленным');
+  assert.deepEqual(JSON.parse(sandbox.localStorage.getItem(PERSONA_KEY)), {
+    instructions: 'Кратко, без воды',
+    contextDays: 21,
+    temperature: 0.5,
+    maxTokens: 2000,
+    shiftEnter: true,
+  }, 'персонализация должна записаться тем же «Сохранить»');
+  assert.ok(els['toast'].textContent.indexOf('Настройки сохранены') !== -1,
+    'тост должен быть «Настройки сохранены»: ' + els['toast'].textContent);
+  assert.equal(els['assistant-key-modal'].hidden, true,
+    'модалка должна закрыться после сохранения');
+});
+
+test('onAssistantKeySave: пустой ключ — ошибка, записей нет (ни ключа, ни персонализации)', () => {
+  const { sandbox, context } = loadApp();
+  const els = bindAssistantSettingsDom(sandbox);
+  els['assistant-key-input'].value = '   ';
+  els['assistant-persona-instructions'].value = 'Кратко';
+
+  context.onAssistantKeySave();
+
+  assert.ok(els['assistant-key-error'].textContent.length > 0,
+    'при пустом ключе должна показываться ошибка');
+  assert.equal(sandbox.localStorage.getItem('youplanner.api_key'), null,
+    'пустая строка ключом не считается («ключа нет»)');
+  assert.equal(sandbox.localStorage.getItem(PERSONA_KEY), null,
+    'персонализация не должна сохраниться, если ключ не введён');
+});
+
+// Кнопка таба модалки: класс-набор и getAttribute, как у настоящего узла
+function makeTabButton(tab) {
+  const classes = new Set();
+  const btn = {
+    attrs: { 'data-assistant-tab': tab, 'aria-selected': 'false' },
+    // обработчик клика делегирует через closest — кнопка матчится сама
+    closest(selector) { return selector === '.view-switch-btn' ? btn : null; },
+    getAttribute(name) { return btn.attrs[name] !== undefined ? btn.attrs[name] : null; },
+    setAttribute(name, value) { btn.attrs[name] = value; },
+    classList: {
+      add(c) { classes.add(c); },
+      remove(c) { classes.delete(c); },
+      toggle(c, force) {
+        const want = force === undefined ? !classes.has(c) : Boolean(force);
+        if (want) classes.add(c); else classes.delete(c);
+      },
+      contains(c) { return classes.has(c); },
+    },
+  };
+  return btn;
+}
+
+test('табы настроек: клик по кнопке переключает панели чистым DOM', () => {
+  const { sandbox, context } = loadApp();
+  const personaBtn = makeTabButton('persona');
+  const apiBtn = makeTabButton('api');
+  const personaPanel = { hidden: false };
+  const apiPanel = { hidden: true };
+  const container = {
+    querySelectorAll: (sel) => (sel === '.view-switch-btn' ? [personaBtn, apiBtn] : []),
+  };
+  sandbox.document.getElementById = (id) => {
+    if (id === 'assistant-settings-switch') return container;
+    if (id === 'assistant-persona-panel') return personaPanel;
+    if (id === 'assistant-api-panel') return apiPanel;
+    return null;
+  };
+
+  context.onAssistantSettingsTabClick({ target: apiBtn });
+  assert.ok(apiBtn.classList.contains('is-active'), 'активный класс не переехал на API');
+  assert.equal(personaBtn.classList.contains('is-active'), false);
+  assert.equal(apiBtn.attrs['aria-selected'], 'true', 'aria-selected не обновился');
+  assert.equal(personaPanel.hidden, true, 'панель персонализации должна скрыться');
+  assert.equal(apiPanel.hidden, false, 'панель API должна показаться');
+
+  // Обратное переключение
+  context.onAssistantSettingsTabClick({ target: personaBtn });
+  assert.ok(personaBtn.classList.contains('is-active'));
+  assert.equal(personaPanel.hidden, false);
+  assert.equal(apiPanel.hidden, true);
+
+  // Мусорное значение таба ничего не переключает
+  context.onAssistantSettingsTabClick({ target: makeTabButton('мусор') });
+  assert.ok(personaBtn.classList.contains('is-active'),
+    'чужое значение кнопки не должно сбивать выбор');
+
+  // Клик мимо кнопок и вовсе без события — no-op без исключений
+  context.onAssistantSettingsTabClick({ target: { closest: () => null } });
+  context.onAssistantSettingsTabClick(null);
+});
+
+test('openAssistantKeyModal: стартовая вкладка — API без ключа, Персонализация с ключом', () => {
+  const { sandbox, context } = loadApp();
+  const personaBtn = makeTabButton('persona');
+  const apiBtn = makeTabButton('api');
+  personaBtn.classList.add('is-active');   // как в разметке по умолчанию
+  const personaPanel = { hidden: false };
+  const apiPanel = { hidden: true };
+  const els = bindAssistantSettingsDom(sandbox, {
+    'assistant-settings-switch': {
+      querySelectorAll: (sel) => (sel === '.view-switch-btn' ? [personaBtn, apiBtn] : []),
+    },
+    'assistant-persona-panel': personaPanel,
+    'assistant-api-panel': apiPanel,
+  });
+
+  // Ключа нет: модалка открылась на вкладке «API Ключ»
+  context.openAssistantKeyModal();
+  assert.equal(els['assistant-key-modal'].hidden, false, 'модалка должна открыться');
+  assert.equal(apiBtn.classList.contains('is-active'), true,
+    'без ключа должен открываться таб «API Ключ»');
+  assert.equal(personaBtn.classList.contains('is-active'), false);
+  assert.equal(apiPanel.hidden, false);
+  assert.equal(personaPanel.hidden, true);
+
+  // С ключом: по умолчанию — «Персонализация», контролы заполнены дефолтами
+  sandbox.localStorage.setItem('youplanner.api_key', 'ключ');
+  context.openAssistantKeyModal();
+  assert.equal(personaBtn.classList.contains('is-active'), true,
+    'с ключом должен открываться таб «Персонализация»');
+  assert.equal(apiPanel.hidden, true);
+  assert.equal(personaPanel.hidden, false);
+  assert.equal(els['assistant-persona-instructions'].value, '', 'инструкции не заполнены');
+  assert.equal(els['assistant-context-days'].value, '14', 'окно контекста не заполнено');
+  assert.equal(els['assistant-temperature'].value, '0.3', 'температура не заполнена');
+  assert.equal(els['assistant-max-tokens'].value, '1000', 'лимит не заполнен');
+  assert.equal(els['assistant-shift-enter'].checked, false, 'тумблер должен быть выключен');
+});
+
+// --- Shift+Enter и Enter в поле ввода (textarea) ------------------------------
+// #assistant-input теперь textarea: Enter нативно вставляет перенос, поэтому
+// отправка живёт в keydown-обработчике. Shift+Enter вставляет перенос только
+// при включённом тумблере персонализации, при выключенном — ничего не делает.
+// Песочница KeyboardEvent не умеет — обработчик зовётся с фейковым объектом.
+
+function makeKeyEvent(key, shiftKey) {
+  const event = { key, shiftKey: Boolean(shiftKey), prevented: false, defaultPrevented: false };
+  event.preventDefault = function () { event.prevented = true; };
+  return event;
+}
+
+test('onAssistantInputKeydown: Enter отправляет всегда, Shift+Enter зависит от тумблера', async () => {
+  const chat = makeChat();
+  const { sandbox, context } = loadApp();
+  const created = bindAssistantDom(sandbox, chat);
+  const inputEl = { value: '', disabled: false, style: {} };
+  const baseGet = sandbox.document.getElementById;
+  sandbox.document.getElementById = (id) => (id === 'assistant-input' ? inputEl : baseGet(id));
+  sandbox.localStorage.setItem('youplanner.api_key', 'тест-ключ');
+
+  const users = () => storedHistory(sandbox).filter((m) => m.role === 'user').length;
+
+  // Тумблер выключен (дефолт): Enter — отправка
+  inputEl.value = 'Первый вопрос';
+  const enter = makeKeyEvent('Enter', false);
+  context.onAssistantInputKeydown(enter);
+  assert.ok(enter.prevented, 'Enter должен preventDefault: textarea иначе вставил бы перенос');
+  assert.equal(users(), 1, 'Enter должен отправлять реплику');
+  assert.equal(inputEl.value, '', 'поле должно очиститься после отправки');
+  await settle();   // запрос в полёте гасится, busy снимается
+
+  // Shift+Enter при выключенном тумблере: ни отправки, ни переноса
+  inputEl.value = 'не должен отправиться';
+  const shift = makeKeyEvent('Enter', true);
+  context.onAssistantInputKeydown(shift);
+  assert.ok(shift.prevented, 'Shift+Enter должен блокироваться — перенос запрещён тумблером');
+  assert.equal(users(), 1, 'Shift+Enter при выключенном тумблере не должен отправлять');
+  await settle();
+
+  // Тумблер включён: Shift+Enter не блокируется (браузер вставит перенос сам)
+  sandbox.localStorage.setItem(PERSONA_KEY, JSON.stringify({ shiftEnter: true }));
+  const shift2 = makeKeyEvent('Enter', true);
+  context.onAssistantInputKeydown(shift2);
+  assert.equal(shift2.prevented, false, 'перенос строки должен быть разрешён');
+  assert.equal(users(), 1, 'Shift+Enter с включённым тумблером не отправляет');
+
+  // Enter отправляет и при включённом тумблере
+  inputEl.value = 'Второй вопрос';
+  const enter2 = makeKeyEvent('Enter', false);
+  context.onAssistantInputKeydown(enter2);
+  assert.ok(enter2.prevented);
+  assert.equal(users(), 2, 'Enter должен отправлять всегда, независимо от тумблера');
+  await settle();
+
+  // Не-Enter в обработчике — no-op (авто-высота живёт на отдельном событии)
+  const letter = makeKeyEvent('a', false);
+  context.onAssistantInputKeydown(letter);
+  assert.equal(letter.prevented, false);
+  assert.equal(users(), 2, 'нажатие буквы не должно отправлять реплику');
+  assert.ok(created.length > 0, 'пузыри реплик должны были создаться');
+});

@@ -18,9 +18,10 @@ import { onFastAdd, onFastDone, onFastEdit, onFastInitCancel, onFastInitSave, re
 import {
   closeAssistantKeyModal, onAssistantChipClick, onAssistantClear,
   onAssistantFormSubmit, onAssistantImageClear, onAssistantImagePick,
-  onAssistantKeyCancel,
+  onAssistantInputInput, onAssistantInputKeydown, onAssistantKeyCancel,
   onAssistantKeySave, onAssistantModelChange, onAssistantPdfClear,
-  onAssistantPdfPick, openAssistantKeyModal, renderAssistantView,
+  onAssistantPdfPick, onAssistantPersonaRangeInput, onAssistantSettingsTabClick,
+  openAssistantKeyModal, renderAssistantView,
 } from './ui/assistant-view.js';
 import { closeModal, onFormSubmit, onHabitListClick, onHabitsEditChange, onHabitsEditClick, openModal, renderHabitsEditList, setFormError, updateFormFields } from './ui/habits-edit.js';
 import { closeLevelSheet, onLevelPick } from './ui/level-sheet.js';
@@ -566,13 +567,27 @@ export function bindEvents() {
   if (assistantBack) assistantBack.addEventListener('click', function () { switchAppView('main'); });
 
   const assistantSettings = document.getElementById('assistant-settings');
-  if (assistantSettings) assistantSettings.addEventListener('click', openAssistantKeyModal);
+  if (assistantSettings) {
+    // Без обёртки: openAssistantKeyModal принимает аргументом стартовую
+    // вкладку, а клик прислал бы сюда объект события
+    assistantSettings.addEventListener('click', function () { openAssistantKeyModal(); });
+  }
 
   const assistantClear = document.getElementById('assistant-clear');
   if (assistantClear) assistantClear.addEventListener('click', onAssistantClear);
 
   const assistantForm = document.getElementById('assistant-form');
   if (assistantForm) assistantForm.addEventListener('submit', onAssistantFormSubmit);
+
+  // Поле ввода ассистента — textarea: Enter отправляет (нативный Enter
+  // textarea вставлял бы перенос, поэтому отправка живёт в keydown),
+  // Shift+Enter — перенос по тумблеру персонализации; input растит высоту
+  // поля до ~5 строк. Оба обработчика живут в assistant-view.js.
+  const assistantInput = document.getElementById('assistant-input');
+  if (assistantInput) {
+    assistantInput.addEventListener('keydown', onAssistantInputKeydown);
+    assistantInput.addEventListener('input', onAssistantInputInput);
+  }
 
   const assistantChips = document.getElementById('assistant-chips');
   if (assistantChips) assistantChips.addEventListener('click', onAssistantChipClick);
@@ -589,8 +604,23 @@ export function bindEvents() {
   const assistantKeyBackdrop = document.querySelector('.modal-backdrop[data-assistant-key-close]');
   if (assistantKeyBackdrop) assistantKeyBackdrop.addEventListener('click', closeAssistantKeyModal);
 
+  // Табы «Настройки ассистента»: переключение панелей — чистый DOM, обработчик
+  // в assistant-view.js (делегирование по контейнеру, как у schedule-switch)
+  const assistantSettingsSwitch = document.getElementById('assistant-settings-switch');
+  if (assistantSettingsSwitch) {
+    assistantSettingsSwitch.addEventListener('click', onAssistantSettingsTabClick);
+  }
+
+  // Живые подписи значений слайдеров персонализации. Сохранение — кнопкой
+  // «Сохранить», здесь только подпись рядом с ползунком
+  ['assistant-context-days', 'assistant-temperature', 'assistant-max-tokens']
+    .forEach(function (id) {
+      const field = document.getElementById(id);
+      if (field) field.addEventListener('input', onAssistantPersonaRangeInput);
+    });
+
   // Выбор модели в настройках ассистента: сохраняется сразу, кнопка
-  // «Сохранить» относится только к ключу
+  // «Сохранить» относится к ключу и персонализации
   const assistantModelSelect = document.getElementById('assistant-model-select');
   if (assistantModelSelect) {
     assistantModelSelect.addEventListener('change', onAssistantModelChange);
@@ -1192,6 +1222,11 @@ if ('serviceWorker' in navigator) {
 }
 
 // --- Liquid Glass: плавающая капсула для таб-бара и всех переключателей ---
+// #assistant-settings-switch — табы модалки «Настройки ассистента»: капля
+// живёт в display:none-модалке, поэтому applyAssistantSettingsTab в
+// assistant-view.js специально переставляет классы через remove+add —
+// мутация по наблюдателю (observeLiquidSwitches ниже) пересчитывает позицию
+// уже после открытия модалки.
 export const LIQUID_SWITCH_SELECTORS = [
   '#tab-bar',
   '#main-view-switch',
@@ -1202,7 +1237,8 @@ export const LIQUID_SWITCH_SELECTORS = [
   '#stats-habits-period',
   '#stats-habit-period',
   '#stats-fast-period',
-  '#stats-sleep-period'
+  '#stats-sleep-period',
+  '#assistant-settings-switch'
 ];
 
 function moveIndicator(container) {

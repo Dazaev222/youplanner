@@ -290,7 +290,7 @@
           </svg>
         </button>
         <button type="button" id="assistant-settings" class="assistant-icon-btn"
-                aria-label="Настройки API-ключа">
+                aria-label="Настройки ассистента">
           <!-- Шестерёнка (gearshape) -->
           <svg width="20" height="20" viewBox="0 0 24 24" fill="none"
                stroke="currentColor" stroke-width="1.8" stroke-linecap="round"
@@ -344,9 +344,13 @@
             </svg>
             <input type="file" id="assistant-image-input" accept="image/*" multiple hidden>
           </label>
-          <input type="text" id="assistant-input"
-                 placeholder="Спросите что-нибудь…" autocomplete="off"
-                 aria-label="Сообщение ассистенту">
+          <!-- Поле ввода — textarea, а не input: тумблер «Shift+Enter — новая
+               строка» в настройках требует многострочного поля. Enter всегда
+               отправляет (обработчик onAssistantInputKeydown), высота растёт
+               до ~5 строк (авто-высота в assistant-view.js) -->
+          <textarea id="assistant-input" rows="1" enterkeyhint="send"
+                    placeholder="Спросите что-нибудь…" autocomplete="off"
+                    aria-label="Сообщение ассистенту"></textarea>
           <button type="submit" id="assistant-send"
                   aria-label="Отправить">
             <!-- Стрелка вверх (arrow.up) -->
@@ -362,29 +366,90 @@
     </div>
   </section>
 
-  <!-- Модалка ввода API-ключа ассистента. Ключ вводится пользователем,
-       в коде его нет; живёт только в localStorage устройства. -->
+  <!-- Модалка «Настройки ассистента»: два таба на сегмент-контроле с каплей
+       (тот же паттерн, что у «День / Неделя» и периодов статистики).
+       Таб «Персонализация» — инструкции и параметры генерации (хранятся
+       одним JSON в youplanner.assistant_persona), таб «API Ключ» — ключ и
+       модель. Ключ вводится пользователем, в коде его нет; живёт только в
+       localStorage устройства. ID модалки и кнопок сохранены прежние
+       (assistant-key-*): на них завязаны app.js, тесты и послойный Escape. -->
   <div id="assistant-key-modal" class="modal" hidden>
     <div class="modal-backdrop" data-assistant-key-close></div>
     <div class="modal-window" role="dialog" aria-modal="true" aria-labelledby="assistant-key-title">
       <div class="modal-header">
-        <h2 id="assistant-key-title">API-ключ ассистента</h2>
+        <h2 id="assistant-key-title">Настройки ассистента</h2>
         <button id="assistant-key-close" class="btn btn-secondary" data-assistant-key-close
                 aria-label="Закрыть">✕</button>
       </div>
       <div class="modal-body">
-        <p class="qaza-summary">Ключ от neuraldeep.ru хранится только на этом
-          устройстве и никуда не отправляется вместе с данными.</p>
-        <div class="form-fields">
-          <input id="assistant-key-input" type="password" placeholder="API-ключ"
-                 autocomplete="off" aria-label="API-ключ">
+        <div id="assistant-settings-switch" role="tablist"
+             aria-label="Разделы настроек ассистента">
+          <div class="glass-indicator"></div>
+          <!-- Активный таб ставит openAssistantKeyModal: без ключа — «API
+               Ключ», с ключом — «Персонализация». is-active ниже — только
+               стартовое состояние до первого открытия -->
+          <button type="button" class="view-switch-btn is-active" data-assistant-tab="persona"
+                  role="tab" aria-selected="true"
+                  aria-controls="assistant-persona-panel">Персонализация</button>
+          <button type="button" class="view-switch-btn" data-assistant-tab="api"
+                  role="tab" aria-selected="false"
+                  aria-controls="assistant-api-panel">API Ключ</button>
         </div>
-        <h3>Модель</h3>
-        <div class="form-fields">
-          <select id="assistant-model-select" class="input" aria-label="Модель ассистента">
-            <!-- варианты ставит assistant-view.js из каталога NeuralDeep -->
-          </select>
+
+        <!-- Таб 1: персонализация -->
+        <div id="assistant-persona-panel" role="tabpanel"
+             aria-label="Персонализация">
+          <h3>Инструкции</h3>
+          <div class="form-fields">
+            <textarea id="assistant-persona-instructions" class="input" rows="3"
+                      maxlength="2000" placeholder="Например: Отвечай кратко, без воды"
+                      aria-label="Инструкции ассистенту"></textarea>
+          </div>
+          <label class="assistant-setting" for="assistant-context-days">
+            <span class="assistant-setting-label">Контекст данных</span>
+            <input type="range" id="assistant-context-days" min="2" max="30" step="1"
+                   value="14" data-format="days"
+                   aria-label="Сколько дней записей отдавать ассистенту">
+            <span class="assistant-setting-value" id="assistant-context-days-value">14 дней</span>
+          </label>
+          <label class="assistant-setting" for="assistant-temperature">
+            <span class="assistant-setting-label">Температура</span>
+            <input type="range" id="assistant-temperature" min="0" max="1" step="0.1"
+                   value="0.3" data-format="temperature"
+                   aria-label="Температура генерации: чем меньше, тем строже ответы">
+            <span class="assistant-setting-value" id="assistant-temperature-value">0.3</span>
+          </label>
+          <label class="assistant-setting" for="assistant-max-tokens">
+            <span class="assistant-setting-label">Лимит длины ответа</span>
+            <input type="range" id="assistant-max-tokens" min="100" max="4000" step="100"
+                   value="1000" data-format="tokens"
+                   aria-label="Максимальная длина ответа в символах">
+            <span class="assistant-setting-value" id="assistant-max-tokens-value">1000 симв.</span>
+          </label>
+          <label class="assistant-setting assistant-switch-row" for="assistant-shift-enter">
+            <span class="assistant-setting-label">Shift+Enter — новая строка</span>
+            <!-- По умолчанию выключен: Enter всегда отправляет -->
+            <input type="checkbox" id="assistant-shift-enter" class="assistant-switch"
+                   role="switch" aria-label="Shift+Enter вставляет перенос строки">
+          </label>
         </div>
+
+        <!-- Таб 2: ключ и модель -->
+        <div id="assistant-api-panel" role="tabpanel" aria-label="API Ключ" hidden>
+          <p class="qaza-summary">Ключ от neuraldeep.ru хранится только на этом
+            устройстве и никуда не отправляется вместе с данными.</p>
+          <div class="form-fields">
+            <input id="assistant-key-input" type="password" placeholder="API-ключ"
+                   autocomplete="off" aria-label="API-ключ">
+          </div>
+          <h3>Модель</h3>
+          <div class="form-fields">
+            <select id="assistant-model-select" class="input" aria-label="Модель ассистента">
+              <!-- варианты ставит assistant-view.js из каталога NeuralDeep -->
+            </select>
+          </div>
+        </div>
+
         <p id="assistant-key-error" class="form-error" role="alert"></p>
         <div class="form-actions">
           <button type="button" id="assistant-key-save" class="btn btn-primary">Сохранить</button>

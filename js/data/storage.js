@@ -1,4 +1,9 @@
-// Ключи localStorage
+// Ключи localStorage. Реестр — только разделы ДАННЫХ: они синхронизируются
+// с сервером и уходят в файловые копии. Девайс-локальные настройки и секреты
+// (youplanner.api_key, youplanner.assistant_persona, youplanner.assistant_history,
+// youplanner.assistant_model и пр.) сюда сознательно не входят: ключ нейросети
+// не должен покидать устройство, а поведение ассистента — настройка конкретного
+// устройства (обоснование — в шапке js/ui/assistant-view.js).
 export const STORAGE_KEYS = {
   habits: 'youplanner.habits',
   records: 'youplanner.records',

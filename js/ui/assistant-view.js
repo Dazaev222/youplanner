@@ -1,11 +1,11 @@
 // Вкладка «ИИ-Ассистент»: чат с ходом к api.neuraldeep.ru.
 //
-// С этапа D.5 файл — оркестратор экрана: состояние (ключ/модель/история),
-// рендер ленты, модалка ключа и обработчики. Подсистемы вынесены в модули:
-// js/ui/assistant-pdf.js — чтение PDF, умная нарезка и скан-фолбэк (страницы
-// скана рендерятся в картинки и уходят в Vision как фото),
-// js/ui/assistant-media.js — фото в чате и HTTP-клиент (fetch с таймаутом;
-// слито из assistant-vision.js и assistant-api.js, этап Y1).
+// С этапа D.5 файл — оркестратор экрана: состояние (ключ/модель/история/
+// персонализация), рендер ленты, модалка настроек и обработчики. Подсистемы
+// вынесены в модули: js/ui/assistant-pdf.js — чтение PDF, умная нарезка и
+// скан-фолбэк (страницы скана рендерятся в картинки и уходят в Vision как
+// фото), js/ui/assistant-media.js — фото в чате и HTTP-клиент (fetch с
+// таймаутом; слито из assistant-vision.js и assistant-api.js, этап Y1).
 // Публичная поверхность файла не менялась: app.js и тесты импортируют отсюда.
 //
 // Ключ хранится в localStorage устройства (youplanner.api_key) и сознательно
@@ -13,9 +13,18 @@
 // для синхронизации и файла копии, а ключ так жизни не должен получать.
 // В коде ключа нет — его вводит пользователь в модалке.
 //
+// Рядом с ключом живёт персонализация (youplanner.assistant_persona): JSON
+// {instructions, contextDays, temperature, maxTokens, shiftEnter} из модалки
+// «Настройки ассистента». В STORAGE_KEYS она не входит по той же причине,
+// что и ключ: это настройка конкретного устройства и конкретной нейросети,
+// а не данные трекера — синхронизировать и копировать в файл бэкапа её
+// не нужно (как и ключ, она не должна уезжать на другой аккаунт).
+//
 // История диалога живёт рядом (youplanner.assistant_history): массив
 // {role, content}, хвост из 50 сообщений. В запрос уходит системный промпт
-// со снимком данных трекера и последние 20 реплик.
+// (первая фраза → инструкции пользователя → снимок данных трекера) и
+// последние 20 реплик; генерацию ограничивают temperature и max_tokens
+// из персонализации.
 
 import { showErrorToast, showToast } from '../core/dom.js';
 import { FAST_KEY } from '../data/fast.js';
@@ -47,6 +56,9 @@ import {
 export const ASSISTANT_API_KEY = 'youplanner.api_key';
 const ASSISTANT_MODEL_KEY = 'youplanner.assistant_model';
 export const ASSISTANT_HISTORY_KEY = 'youplanner.assistant_history';
+// Персонализация ассистента — поведенческие настройки из модалки «Настройки
+// ассистента» (см. комментарий в шапке файла, почему ключа нет в STORAGE_KEYS).
+export const ASSISTANT_PERSONA_KEY = 'youplanner.assistant_persona';
 // Каталог моделей NeuralDeep: модель выбирается в модалке настроек и хранится
 // на устройстве (ASSISTANT_MODEL_KEY). Первая в списке — дефолт: она же
 // единственная базовая «все тарифы · в РФ».
@@ -63,6 +75,76 @@ const HISTORY_SEND = 20;   // сколько последних реплик у�
 // а вместе с PDF-текстом и историей остаётся запас до контекста API
 // (256k токенов у qwen)
 const CONTEXT_MAX_CHARS = 20000;
+
+// --- Персонализация ассистента ------------------------------------------------
+// Дефолты каждого поля продублированы в тестах: это контракт модалки.
+// instructions — текст в системный промпт (пустой блок не попадает),
+// contextDays — окно записей в снимке данных, temperature/max_tokens —
+// параметры генерации в payload (OpenAI-совместимый snake_case для лимита),
+// shiftEnter — разрешить перенос строки по Shift+Enter в поле ввода.
+const PERSONA_DEFAULTS = {
+  instructions: '',
+  contextDays: 14,
+  temperature: 0.3,
+  maxTokens: 1000,
+  shiftEnter: false,
+};
+const PERSONA_INSTRUCTIONS_MAX = 2000;   // инструкции не должны раздувать промпт
+
+// Читатель одного поля с откатом на дефолт: тип/диапазон не сошлись — поле
+// мусорное, берём дефолт и НЕ роняем соседние поля (валидация по-полевая,
+// как обещано в контракте readAssistantPersona).
+function personaInt(value, min, max, fallback) {
+  if (typeof value !== 'number' || !Number.isInteger(value)) return fallback;
+  return value >= min && value <= max ? value : fallback;
+}
+
+function personaNumber(value, min, max, fallback) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
+  return value >= min && value <= max ? value : fallback;
+}
+
+function personaInstructions(value) {
+  if (typeof value !== 'string') return PERSONA_DEFAULTS.instructions;
+  const trimmed = value.trim();
+  return trimmed.slice(0, PERSONA_INSTRUCTIONS_MAX);
+}
+
+// Единая нормализация записи персонализации: и чтение из хранилища, и сбор
+// с контролов модалки прогоняются через одни и те же проверки — мусор в
+// localStorage и кривое значение слайдера не могут дать разное поведение.
+function normalizeAssistantPersona(raw) {
+  const source = raw && typeof raw === 'object' && !Array.isArray(raw) ? raw : {};
+  return {
+    instructions: personaInstructions(source.instructions),
+    contextDays: personaInt(source.contextDays, 2, 30, PERSONA_DEFAULTS.contextDays),
+    temperature: personaNumber(source.temperature, 0, 1, PERSONA_DEFAULTS.temperature),
+    maxTokens: personaInt(source.maxTokens, 100, 4000, PERSONA_DEFAULTS.maxTokens),
+    shiftEnter: source.shiftEnter === true,
+  };
+}
+
+// Чтение персонализации с устройства. Битый JSON и отсутствие записи дают
+// объект целиком из дефолтов; частично битая запись теряет только битые поля.
+export function readAssistantPersona() {
+  try {
+    const raw = localStorage.getItem(ASSISTANT_PERSONA_KEY);
+    return normalizeAssistantPersona(raw ? JSON.parse(raw) : {});
+  } catch (e) {
+    // хранилище недоступно или JSON битый — работают дефолты по каждому полю
+    return normalizeAssistantPersona({});
+  }
+}
+
+// Русское склонение слова «день» для подписи слайдера и заголовка снимка:
+// диапазон слайдера 2..30, но «2 дней» читать стыдно.
+function assistantPluralDays(n) {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return 'день';
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'дня';
+  return 'дней';
+}
 
 export function readAssistantApiKey() {
   try {
@@ -182,7 +264,11 @@ function lastDays(records, days) {
 // Разделы снимка берутся поимённо из реестров ключей (STORAGE_KEYS и
 // константы доменных модулей): строки те же, но расхождение с доменом
 // теперь поймает компилятор/тесты, а не пользователь.
-function buildContext() {
+// contextDays — окно записей из персонализации (слайдер 2..30): переданное
+// значение прогоняется через ту же проверку, что и при чтении хранилища,
+// поэтому кривой вызов деградирует на дефолтные 14 дней.
+function buildContext(contextDays) {
+  const days = personaInt(contextDays, 2, 30, PERSONA_DEFAULTS.contextDays);
   const parts = [];
 
   const habits = readSection(STORAGE_KEYS.habits);
@@ -194,8 +280,11 @@ function buildContext() {
 
   const records = readSection(STORAGE_KEYS.records);
   if (records) {
-    const days = lastDays(records, 14);
-    if (days.length) parts.push('Записи за 14 дней:\n' + days.join('\n'));
+    const windowDays = lastDays(records, days);
+    if (windowDays.length) {
+      parts.push('Записи за ' + days + ' ' + assistantPluralDays(days) + ':\n'
+        + windowDays.join('\n'));
+    }
   }
 
   const qaza = readSection(QAZA_STORAGE_KEY);
@@ -229,10 +318,19 @@ function lastUserQuestion() {
 }
 
 function buildMessages() {
-  const context = buildContext();
+  // Персонализация читается на каждый запрос: правки в модалке вступают
+  // в силу без перезапуска, а хранилище остаётся единственным источником
+  const persona = readAssistantPersona();
+  const context = buildContext(persona.contextDays);
   let system = 'Ты — ИИ-ассистент трекера привычек YouPlanner. Отвечай кратко '
-    + 'и по-русски, опираясь на данные пользователя. Если данных нет — так и скажи.\n'
-    + (context ? 'Данные пользователя:\n' + context : 'Данных пока нет.');
+    + 'и по-русски, опираясь на данные пользователя. Если данных нет — так и скажи.\n';
+  // Инструкции пользователя стоят после первой фразы и ДО данных трекера:
+  // модель сначала читает правила, потом фактуру. Пустой блок не пишется —
+  // промпт без персонализации остаётся ровно прежним.
+  if (persona.instructions) {
+    system += 'Инструкции пользователя: ' + persona.instructions + '\n';
+  }
+  system += context ? 'Данные пользователя:\n' + context : 'Данных пока нет.';
   // PDF прикрепляется к каждому запросу, пока файл не сброшен: модель отвечает
   // по документу, а история диалога остаётся лёгкой — текст в неё не пишется.
   // Длинный документ уходит фрагментами, отобранными по последнему вопросу:
@@ -344,11 +442,21 @@ export function onAssistantPdfClear() {
 
 // --- Ход к API ---------------------------------------------------------------
 // Тонкая обёртка сохраняет прежнее имя и нулевую сигнатуру: payload
-// ({model, messages}) собирается из состояния ассистента, ключ читается
-// с устройства, сам HTTP ход — в js/ui/assistant-media.js (postAssistantChat).
+// ({model, messages, temperature, max_tokens}) собирается из состояния
+// ассистента, ключ читается с устройства, сам HTTP ход — в
+// js/ui/assistant-media.js (postAssistantChat). temperature и max_tokens —
+// OpenAI-совместимые параметры генерации (snake_case для лимита) из
+// персонализации: температура правит «фантазийность», лимит не даёт
+// Qwen писать простыни.
 async function requestAssistantReply() {
+  const persona = readAssistantPersona();
   return postAssistantChat(
-    { model: readAssistantModel(), messages: buildMessages() },
+    {
+      model: readAssistantModel(),
+      messages: buildMessages(),
+      temperature: persona.temperature,
+      max_tokens: persona.maxTokens,
+    },
     readAssistantApiKey()
   );
 }
@@ -463,7 +571,119 @@ function reattachTyping(chat) {
   chat.appendChild(typingNode);
 }
 
-export function openAssistantKeyModal() {
+// --- Модалка «Настройки ассистента»: два таба --------------------------------
+// Таб 1 «Персонализация» — инструкции и параметры генерации, таб 2 «API Ключ» —
+// ключ и модель. Переключение — чистый DOM (hidden на панелях), без
+// hash-роутинга: модалка не является экраном приложения. Капля-индикатор
+// у сегмента та же, что у переключателей приложения: контейнер внесён в
+// LIQUID_SWITCH_SELECTORS (app.js) и в списки day-view.css.
+const ASSISTANT_TAB_PERSONA = 'persona';
+const ASSISTANT_TAB_API = 'api';
+
+// Стартовая вкладка модалки: без ключа — «API Ключ» (модалка и так сама
+// открывается при первом вопросе — человеку сразу нужно поле ключа),
+// с ключом — «Персонализация». Явный аргумент перебивает вычисление:
+// сценарии «ключ не принят» и «модель без зрения» обязаны открыть таб API.
+function defaultAssistantTab() {
+  return readAssistantApiKey() ? ASSISTANT_TAB_PERSONA : ASSISTANT_TAB_API;
+}
+
+// Переключение таба: кнопки сегмента (is-active + aria-selected) и панели
+// (hidden). Класс переставляется через remove+add даже при неизменном
+// состоянии: мутация атрибута — то, по чему MutationObserver в app.js
+// пересчитывает каплю-индикатор после открытия модалки (из display:none
+// ширины кнопок не измерить).
+function applyAssistantSettingsTab(tab) {
+  const container = document.getElementById('assistant-settings-switch');
+  if (!container) return;
+  const buttons = container.querySelectorAll('.view-switch-btn');
+  for (let i = 0; i < buttons.length; i++) {
+    const active = buttons[i].getAttribute('data-assistant-tab') === tab;
+    buttons[i].classList.remove('is-active');
+    if (active) buttons[i].classList.add('is-active');
+    buttons[i].setAttribute('aria-selected', active ? 'true' : 'false');
+  }
+  const personaPanel = document.getElementById('assistant-persona-panel');
+  const apiPanel = document.getElementById('assistant-api-panel');
+  if (personaPanel) personaPanel.hidden = tab !== ASSISTANT_TAB_PERSONA;
+  if (apiPanel) apiPanel.hidden = tab !== ASSISTANT_TAB_API;
+}
+
+// Клик по сегменту табов (делегирование по контейнеру — тот же паттерн, что
+// у schedule-switch в app.js). Чужое значение data-assistant-tab игнорируется.
+export function onAssistantSettingsTabClick(event) {
+  if (!event || !event.target || typeof event.target.closest !== 'function') return;
+  const btn = event.target.closest('.view-switch-btn');
+  if (!btn) return;
+  const tab = btn.getAttribute('data-assistant-tab');
+  if (tab !== ASSISTANT_TAB_PERSONA && tab !== ASSISTANT_TAB_API) return;
+  applyAssistantSettingsTab(tab);
+}
+
+// Формат подписи значения слайдера. Формат зашит в data-format разметки,
+// поэтому обработчик ввода и заполнение при открытии модалки не расходятся.
+function formatAssistantRangeValue(field) {
+  const value = Number(field.value);
+  switch (field.getAttribute('data-format')) {
+    case 'days':
+      return value + ' ' + assistantPluralDays(value);
+    case 'temperature':
+      return String(value);
+    case 'tokens':
+      return value + ' симв.';
+    default:
+      return field.value;
+  }
+}
+
+// Живое обновление подписи под слайдером (input-событие; сохранение — кнопкой
+// «Сохранить», как у всего остального в этой модалке)
+export function onAssistantPersonaRangeInput(event) {
+  const field = event && event.target ? event.target : null;
+  if (!field || !field.id) return;
+  const label = document.getElementById(field.id + '-value');
+  if (label) label.textContent = formatAssistantRangeValue(field);
+}
+
+// Контролы персонализации заполняются из хранилища при каждом открытии:
+// модалка — единственный редактор, и её поля не должны помнить прошлое
+function fillAssistantPersonaControls(persona) {
+  const instructions = document.getElementById('assistant-persona-instructions');
+  if (instructions) instructions.value = persona.instructions;
+  const shiftEnter = document.getElementById('assistant-shift-enter');
+  if (shiftEnter) shiftEnter.checked = persona.shiftEnter === true;
+  const ranges = ['assistant-context-days', 'assistant-temperature', 'assistant-max-tokens'];
+  for (let i = 0; i < ranges.length; i++) {
+    const field = document.getElementById(ranges[i]);
+    if (!field) continue;
+    field.value = String(ranges[i] === 'assistant-context-days' ? persona.contextDays
+      : ranges[i] === 'assistant-temperature' ? persona.temperature
+      : persona.maxTokens);
+    const label = document.getElementById(ranges[i] + '-value');
+    if (label) label.textContent = formatAssistantRangeValue(field);
+  }
+}
+
+// Сбор персонализации с контролов модалки. Значения прогоняются через ту же
+// нормализацию, что и чтение хранилища: в localStorage не может попасть
+// ничего вне диапазонов, даже если разметку сломают. Отсутствующий контрол —
+// NaN → дефолт поля, открытие модалки без панели не роняет сохранение.
+function collectAssistantPersona() {
+  const instructions = document.getElementById('assistant-persona-instructions');
+  const contextDays = document.getElementById('assistant-context-days');
+  const temperature = document.getElementById('assistant-temperature');
+  const maxTokens = document.getElementById('assistant-max-tokens');
+  const shiftEnter = document.getElementById('assistant-shift-enter');
+  return normalizeAssistantPersona({
+    instructions: instructions ? instructions.value : '',
+    contextDays: contextDays ? Number(contextDays.value) : NaN,
+    temperature: temperature ? Number(temperature.value) : NaN,
+    maxTokens: maxTokens ? Number(maxTokens.value) : NaN,
+    shiftEnter: shiftEnter ? shiftEnter.checked === true : false,
+  });
+}
+
+export function openAssistantKeyModal(initialTab) {
   const modal = document.getElementById('assistant-key-modal');
   const input = document.getElementById('assistant-key-input');
   const error = document.getElementById('assistant-key-error');
@@ -485,8 +705,18 @@ export function openAssistantKeyModal() {
     }
     select.value = readAssistantModel();
   }
+  fillAssistantPersonaControls(readAssistantPersona());
   modal.hidden = false;
-  if (input) input.focus();
+  // Вкладку можно задать явно ('api' из сценариев «ключ не принят»/«модель
+  // без зрения»); иначе — по наличию ключа. Шестерёнка app.js зовёт без
+  // аргумента: клик пришёл бы сюда объектом события и был бы отброшен.
+  const tab = initialTab === ASSISTANT_TAB_PERSONA || initialTab === ASSISTANT_TAB_API
+    ? initialTab
+    : defaultAssistantTab();
+  applyAssistantSettingsTab(tab);
+  // Автофокус — только в поле ключа: на вкладке персонализации самопро-
+  // выльная клавиатура на телефоне мешала бы читать настройки
+  if (input && tab === ASSISTANT_TAB_API) input.focus();
 }
 
 export function closeAssistantKeyModal() {
@@ -498,8 +728,10 @@ export function closeAssistantKeyModal() {
 // у всех окон один жест «верхнее — первым», а не два независимых обработчика,
 // закрывавших две модалки одним нажатием.
 
-// Сохранение ключа: пустая строка ключом не считается — это «ключа нет»,
-// как и у уразы, где ноль и отсутствие счётчика различаются сознательно.
+// Сохранение: кнопка пишет и ключ, и персонализацию. Пустая строка ключом
+// не считается — это «ключа нет», как и у уразы, где ноль и отсутствие
+// счётчика различаются сознательно; с пустым ключом ничего не пишется,
+// чтобы правка персонализации не закрыла окно и не ушла незамеченной.
 export function onAssistantKeySave() {
   const input = document.getElementById('assistant-key-input');
   const error = document.getElementById('assistant-key-error');
@@ -508,15 +740,24 @@ export function onAssistantKeySave() {
     if (error) error.textContent = 'Введите ключ или закройте окно кнопкой «Отмена».';
     return;
   }
+  // Персонализация собирается до записи: сбор не меняет хранилище, и если
+  // ключ не сохранится (отказ хранилища), окно останется открытым с ошибкой
+  const persona = collectAssistantPersona();
   try {
     localStorage.setItem(ASSISTANT_API_KEY, value);
   } catch (e) {
     if (error) error.textContent = 'Браузер не дал сохранить ключ: память недоступна.';
     return;
   }
+  try {
+    localStorage.setItem(ASSISTANT_PERSONA_KEY, JSON.stringify(persona));
+  } catch (e) {
+    // Персонализация — настройка-расходник: переполненная квота не должна
+    // отменять уже сохранившийся ключ и закрывать окно с ошибкой
+  }
   closeAssistantKeyModal();
   renderAssistantView();
-  showToast('Ключ сохранён на устройстве');
+  showToast('Настройки сохранены');
 }
 
 export function onAssistantKeyCancel() {
@@ -625,14 +866,20 @@ function updateAssistantControls() {
     pendingSubmitText = null;
     if (Date.now() - pendingSubmitAt > PENDING_SUBMIT_LIMIT_MS) {
       // Зависшее сжатие: текст возвращаем в поле, решение за владельцем
-      if (input) input.value = text;
+      if (input) {
+        input.value = text;
+        autosizeAssistantInput();   // многострочный текст — поле должно вырасти
+      }
       showErrorToast('Фото обрабатывались слишком долго — отправьте реплику '
         + 'ещё раз');
       return;
     }
     if (!onAssistantSubmit(text)) {
       // Не ушла (нет ключа и т.п.) — возвращаем текст в поле, не теряем
-      if (input) input.value = text;
+      if (input) {
+        input.value = text;
+        autosizeAssistantInput();
+      }
     }
   }
 }
@@ -673,13 +920,14 @@ export function onAssistantSubmit(text) {
   const attached = (getImageContext() || []).concat(getPdfPageImages() || []);
   const images = attached.slice();
   // Фото при модели без зрения не отправляются вовсе: API ответил бы
-  // непонятной ошибкой. Модалка модели уже открыта — переключение рядом.
+  // непонятной ошибкой. Модалка настроек открывается сразу на табе «API Ключ»:
+  // селект модели живёт там, и «переключение рядом» должно его показать.
   if (images.length && !assistantModelSupportsVision(readAssistantModel())) {
     console.warn('[vision] отправка отсечена: модель без зрения — '
       + readAssistantModel());
     showErrorToast('Текущая модель не принимает изображения — переключитесь '
       + 'на Qwen (шестерёнка в шапке)');
-    openAssistantKeyModal();
+    openAssistantKeyModal(ASSISTANT_TAB_API);
     return false;
   }
   const names = images.map(function (img) { return img.name; }).join(', ');
@@ -723,8 +971,11 @@ async function runAssistantReply() {
     setAssistantBusy(false);
   }
   if (error) {
+    // «Ключ не принят» — прямая дорога на таб «API Ключ», даже если ключ
+    // формально сохранён: модалка с дефолтной вкладкой открыла бы
+    // «Персонализацию» мимо проблемы
     if (String(error.message).indexOf('Ключ не принят') === 0) {
-      openAssistantKeyModal();
+      openAssistantKeyModal(ASSISTANT_TAB_API);
     }
     return;
   }
@@ -733,13 +984,58 @@ async function runAssistantReply() {
   if (generation === assistantGeneration) pushHistory('assistant', reply);
 }
 
-// Обработчик формы: гасит перезагрузку; чистит поле только после принятой
-// отправки — блокировка (читается PDF / идёт запрос) текст не теряет
-export function onAssistantFormSubmit(event) {
-  event.preventDefault();
+// Общая отправка текста из поля: чистит его только после принятой отправки —
+// блокировка (читается PDF / идёт запрос) текст не теряет. После очистки
+// высота textarea сбрасывается на одну строку.
+function submitAssistantInput() {
   const input = document.getElementById('assistant-input');
   if (!input) return;
-  if (onAssistantSubmit(input.value)) input.value = '';
+  if (onAssistantSubmit(input.value)) {
+    input.value = '';
+    autosizeAssistantInput();
+  }
+}
+
+// Обработчик формы: гасит перезагрузку, дальше — общая отправка
+export function onAssistantFormSubmit(event) {
+  if (event && typeof event.preventDefault === 'function') event.preventDefault();
+  submitAssistantInput();
+}
+
+// Потолок высоты поля ввода: 5 строк по ~21px (15px × 1.4) + вертикальные
+// отступы. Дальше текст прокручивается внутри поля (overflow-y в CSS), док
+// чата не съедает ленту
+const ASSISTANT_INPUT_MAX_HEIGHT = 119;
+
+// Авто-высота textarea: классический приём «height: auto → scrollHeight».
+// scrollHeight есть только у живого узла — в песочнице тестов и на пустом
+// DOM функция молча выходит. CSS max-height страхует, если JS-вызов пропустить.
+function autosizeAssistantInput() {
+  const input = document.getElementById('assistant-input');
+  if (!input || !input.style || typeof input.scrollHeight !== 'number') return;
+  input.style.height = 'auto';
+  input.style.height = Math.min(input.scrollHeight, ASSISTANT_INPUT_MAX_HEIGHT) + 'px';
+}
+
+// Ввод текста — только рост высоты. Вешается в app.js рядом с keydown.
+export function onAssistantInputInput() {
+  autosizeAssistantInput();
+}
+
+// Клавиатура textarea: Enter — отправка (у textarea нативный Enter вставляет
+// перенос, поэтому отправка живёт здесь, а не в submit формы), Shift+Enter —
+// перенос строки только при включённом тумблере персонализации, при
+// выключенном — ничего (ни отправки, ни переноса). Вешается в app.js рядом
+// с остальными обработчиками ассистента.
+export function onAssistantInputKeydown(event) {
+  if (!event || event.key !== 'Enter') return;
+  const shiftEnter = readAssistantPersona().shiftEnter;
+  if (event.shiftKey && shiftEnter) {
+    return;   // перенос строки — нативное поведение textarea, не мешаем
+  }
+  if (typeof event.preventDefault === 'function') event.preventDefault();
+  if (!event.shiftKey) submitAssistantInput();
+  // Shift+Enter при выключенном тумблере: только preventDefault, без действий
 }
 
 // Чипы делегированы по контейнеру: текст команды — в data-chip.

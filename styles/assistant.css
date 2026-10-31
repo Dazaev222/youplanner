@@ -260,17 +260,26 @@ body.view-assistant #app {
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
 }
 
+/* Поле ввода — textarea (не input): тумблер «Shift+Enter — новая строка» в
+   настройках ассистента требует многострочного поля. Высота растёт с текстом
+   до ~5 строк: её ставит autosizeAssistantInput (assistant-view.js), а
+   max-height здесь страхует, если JS не успел. Переполнение прокручивается
+   внутри поля, док не съедает ленту */
 #assistant-input {
   flex: 1 1 auto;
   min-width: 0;
   min-height: 36px;
-  padding: 0 6px;
+  max-height: 119px;   /* 5 строк × 21px (15px × 1.4) + 14px вертикальных отступов */
+  padding: 7px 6px;
   border: 0;
   outline: none;
   background: transparent;
   color: var(--text);
   font: inherit;
   font-size: 15px;
+  line-height: 1.4;
+  resize: none;
+  overflow-y: auto;
 }
 
 /* Круглая кнопка отправки — акцентная, как в композере iOS */
@@ -329,8 +338,8 @@ body.view-assistant #app {
 }
 
 /* Поле ввода при блокировке просто приглушается. Цвет текста здесь не
-   переопределить — его задаёт !important-правило для input в tokens.css,
-   поэтому приглушение сделано прозрачностью, как и раньше */
+   переопределить — его задаёт !important-правило для input/textarea в
+   tokens.css, поэтому приглушение сделано прозрачностью, как и раньше */
 #assistant-input:disabled {
   opacity: 0.5;
   cursor: not-allowed;
