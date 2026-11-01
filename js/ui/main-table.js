@@ -6,7 +6,7 @@ import { appState, isMainDayView, isMobileView, ui } from './state.js';
 import { openLevelSheet } from './level-sheet.js';
 import { CIRCLE_CENTER, CIRCLE_LENGTH, CIRCLE_RADIUS, CIRCLE_SIZE, MONTHS_GENITIVE, MONTHS_NOMINATIVE, MONTHS_SHORT } from './constants.js';
 import { LEVEL_LATE, LEVEL_ON_TIME, LEVEL_TWO_MIN, QURAN_HABIT_ID, SPORT_VALUES, SPORT_VALUE_LABELS, calcProgress, defaultLevel, getEntry, getRecord, habitMarkDate, hasLevelPopup, isChoiceLevelHabit, isLevelHabit, writeHabitEntry } from '../data/records.js';
-import { cssEscape, escapeHtml, pad2 } from '../core/dom.js';
+import { cssEscape, escapeHtml, pad2, setHidden } from '../core/dom.js';
 import { CHOICE_OPTIONS, loadHabits } from '../data/habits.js';
 // Привычка из текущего состояния по id
 export function findHabit(habitId) {
@@ -276,6 +276,9 @@ export function renderDayCards() {
   }
 
   box.innerHTML = html;
+
+  // Карточки только что собраны — снимок для диффа следует за DOM
+  refreshMainSnapshot();
 }
 // Полная перерисовка шапки и тела таблицы.
 // Разметка собирается строками и вставляется через DocumentFragment
@@ -332,6 +335,10 @@ export function renderTable() {
   if (tbodyEl) tbodyEl.replaceChildren(bodyTemplate.content);
 
   updateMobileTabs();
+
+  // Таблица только что собрана — снимок данных для точечного диффа
+  // (syncMainViewFromData) обязан соответствовать тому, что на экране
+  refreshMainSnapshot();
 }
 // Контейнер ячейки: в таблице это <td class="cell">, в режиме «День» — блок
 // управления карточки. Нужен, чтобы после изменения обновить оба контрола
@@ -486,6 +493,12 @@ export function onCellChange(habit, date, value, level) {
   }
 
   updateRowCircle(habit.id);
+  // Снимок главного экрана обновляется вслед за данными: следующий
+  // sync:applied сравнивается с тем, что реально видно (правка уже в DOM
+  // через syncBooleanCell/syncLevelCell у вызывающего), а не с состоянием
+  // до правки — иначе чужая сверка «перезаписала бы» локальную правку
+  // фиктивным диффом или, что хуже, пропустила бы её откат
+  refreshMainSnapshot();
   return true;
 }
 // Перерисовка круга одной строки (полная перерисовка таблицы не нужна)
@@ -532,4 +545,308 @@ export function choiceOptionsMarkup(current, habitId) {
       (option === current ? ' selected' : '') + '>' + escapeHtml(label) + '</option>';
   }
   return html;
+}
+
+/* --- Точечное обновление главного экрана после чужих данных ----------------
+   Каждая пересинхронизация (sync:applied) раньше собирала видимый экран
+   заново целиком, хотя чаще всего снимок не менял ни одной видимой ячейки:
+   сверок «ничего нового» большинство. На телефоне это микро-лаги и потеря
+   скролла при каждом периодическом обмене. Здесь два уровня защиты:
+
+   Уровень 1 — снимок-сигнатура. После каждой перерисовки (renderTable,
+   renderDayCards) запоминается снимок данных, которые экран реально
+   показывает: режим, день, даты, список привычек, значение+уровень каждой
+   видимой ячейки, проценты кругов и плашка «данные не загружены».
+   При sync:applied снимок сравнивается с новым: совпал — ни одного DOM-узла.
+
+   Уровень 2 — точечный дифф. Если изменились отдельные ячейки или круги,
+   обновляются только они: существующие DOM-узлы переиспользуются, меняются
+   checked/value/классы/textContent. Структурные изменения (режим «День/
+   Неделя», смена дня, списка привычек, недели) точечно не чинятся — это
+   честный сигнал вызывающему к полному рендеру.
+
+   Броня живёт у вызывающего (renderAfterRemoteDataGuarded в js/app.js):
+   любое исключение диффа откатывает экран к полному рендеру, поэтому
+   полудом невозможен даже при сбое самого диффа. */
+
+// Снимок данных, отображённых главным экраном в последний рендер.
+// null — экран ещё не рисовался (или снимок не удался): дифф невозможен,
+// вызывающему остаётся полный рендер.
+let mainSnapshot = null;
+
+// Снимок экрана главного вида. Дешёвый: дат на привычку не больше семи,
+// сигнатуры — JSON примитивов, проценты берутся из кэша calcProgress.
+export function captureMainSnapshot() {
+  const dayView = isMainDayView();
+  const today = toISODate(new Date());
+  const weekStart = appState.weekStart;
+
+  // Даты видимых колонок — те же, что строит renderTable; в режиме «День»
+  // карточка одна и она всегда про сегодня
+  const dates = [];
+  if (dayView) {
+    dates.push(today);
+  } else if (weekStart) {
+    const visible = getVisibleDays();
+    for (let i = 0; i < visible.length; i++) {
+      dates.push(toISODate(addDays(weekStart, visible[i])));
+    }
+  }
+
+  // Список привычек влияет на структуру: имена, единицы, тип ячеек, цель
+  // в процентах. Порядок значим — строки идут в этом порядке. goal/time
+  // нормализуются к null, чтобы undefined и null не казались разными.
+  let habitsSig = null;
+  try {
+    habitsSig = JSON.stringify(appState.habits.map(function (h) {
+      return [h.id, h.name, h.unit, h.type,
+        h.goal === undefined ? null : h.goal,
+        h.time === undefined ? null : h.time];
+    }));
+  } catch (e) {
+    habitsSig = null;  // циклические данные — снимок бесполезен, полный рендер
+  }
+
+  // Значение+уровень каждой видимой ячейки — ровно то, что читают
+  // cellMarkup и renderDayCards. Ключ «дата|привычка», значение —
+  // JSON-пара или null («записи нет»).
+  const cells = {};
+  for (let h = 0; h < appState.habits.length; h++) {
+    const habit = appState.habits[h];
+    for (let i = 0; i < dates.length; i++) {
+      const entry = getEntry(dates[i], habit.id);
+      cells[dates[i] + '|' + habit.id] =
+        entry ? JSON.stringify([entry.value, entry.level]) : null;
+    }
+  }
+
+  // Круги прогресса — только в режиме недели (у карточек их нет). Проценты
+  // детерминированы данными и периодом, поэтому сравнение по === валидно:
+  // одинаковые данные дают одинаковые числа.
+  const circles = {};
+  if (!dayView) {
+    for (let h = 0; h < appState.habits.length; h++) {
+      const habit = appState.habits[h];
+      circles[habit.id] = [weekPercent(habit), monthPercent(habit)];
+    }
+  }
+
+  // Плашка «данные не загружены» зависит от состояния сверки, а не записей:
+  // cloudReachable может перевернуться без sync:applied, поэтому она —
+  // часть снимка наравне с ячейками
+  const note = Boolean(cloudReady && !cloudReachable && appState.habits.length === 0);
+
+  return {
+    kind: dayView ? 'day' : 'week',
+    today: today,
+    dates: dates,
+    habitsSig: habitsSig,
+    cells: cells,
+    circles: circles,
+    note: note,
+  };
+}
+
+// Запомнить, что главный экран сейчас показывает. Ошибка снимка не должна
+// ломать сам рендер: снимок обнуляется, и следующий sync:applied даст полный
+// рендер — безопасный откат к прежнему поведению.
+export function refreshMainSnapshot() {
+  try {
+    mainSnapshot = captureMainSnapshot();
+  } catch (e) {
+    mainSnapshot = null;
+  }
+}
+
+// Точечная синхронизация главного экрана с данными после sync:applied.
+// Возвращает true, если экран уже актуален (снимок совпал — ни одного узла,
+// либо дифф наложен успешно); false — нужен полный рендер (снимка нет или
+// структура экрана изменилась). Исключение — не авария, а броня вызывающего:
+// экран будет пересобран целиком.
+export function syncMainViewFromData() {
+  const snap = captureMainSnapshot();
+  const old = mainSnapshot;
+  if (!old) return false;
+
+  // Структурные различия: другой режим, другой день (карточки), другая
+  // неделя, другой список привычек — это другая таблица, точечно не чинится
+  if (old.kind !== snap.kind || old.today !== snap.today ||
+      old.habitsSig !== snap.habitsSig ||
+      old.dates.length !== snap.dates.length) {
+    return false;
+  }
+  for (let i = 0; i < snap.dates.length; i++) {
+    if (old.dates[i] !== snap.dates[i]) return false;
+  }
+
+  // Дифф ячеек: совпали ключи (структура проверена выше), сравниваются
+  // только сигнатуры значений
+  const cellKeys = [];
+  for (const key in snap.cells) {
+    if (snap.cells[key] !== old.cells[key]) cellKeys.push(key);
+  }
+
+  // Дифф кругов: у привычек с тем же id, но сдвинувшимся процентом
+  const circleHabits = [];
+  for (let h = 0; h < appState.habits.length; h++) {
+    const habit = appState.habits[h];
+    const was = old.circles[habit.id];
+    const now = snap.circles[habit.id];
+    if (!was || !now || was[0] !== now[0] || was[1] !== now[1]) {
+      circleHabits.push(habit);
+    }
+  }
+
+  // Уровень 1: ни одной видимой разницы — ни одного DOM-узла. Плашка
+  // проверяется отдельно: она умеет меняться без записей
+  if (cellKeys.length === 0 && circleHabits.length === 0) {
+    if (old.note !== snap.note) setHidden('habits-note', snap.note);
+    mainSnapshot = snap;
+    return true;
+  }
+
+  // Уровень 2: переписываются только изменившиеся ячейки и круги
+  for (let i = 0; i < cellKeys.length; i++) {
+    const key = cellKeys[i];
+    const sep = key.indexOf('|');
+    const date = key.slice(0, sep);
+    const habit = findHabit(key.slice(sep + 1));
+    if (!habit) throw new Error('ячейка неизвестной привычки: ' + key);
+    if (snap.kind === 'day') patchDayCardControls(habit, date);
+    else patchWeekCell(habit, date);
+  }
+  for (let i = 0; i < circleHabits.length; i++) {
+    patchWeekCircle(circleHabits[i]);
+  }
+  if (old.note !== snap.note) setHidden('habits-note', snap.note);
+
+  // Дифф применён: снимок теперь описывает экран достоверно
+  mainSnapshot = snap;
+  return true;
+}
+
+// Поиск ребёнка по классу и (опционально) значению атрибута. Прямой обход
+// children вместо querySelector: строк у таблицы десяток, а такой вызов
+// одинаково работает и в браузере, и в песочнице тестов.
+function childBy(parent, className, attrName, attrValue) {
+  const children = parent.children;
+  for (let i = 0; i < children.length; i++) {
+    const child = children[i];
+    if (!child || typeof child.classList !== 'object') continue;
+    if (!child.classList.contains(className)) continue;
+    if (attrName !== null && child.getAttribute(attrName) !== attrValue) continue;
+    return child;
+  }
+  return null;
+}
+
+function childByClass(parent, className) {
+  return childBy(parent, className, null, null);
+}
+
+// Обновление одной ячейки таблицы недели: td.cell ищется по строке привычки
+// и дате, контролы внутри переписываются на текущие данные. Новые узлы
+// не создаются — скролл и фокус таблицы не затрагиваются.
+function patchWeekCell(habit, date) {
+  const tbody = document.getElementById('habits-tbody');
+  if (!tbody) throw new Error('тела таблицы нет');
+  const row = childBy(tbody, 'habit-row', 'data-habit-id', habit.id);
+  if (!row) throw new Error('строки привычки нет: ' + habit.id);
+  const td = childBy(row, 'cell', 'data-date', date);
+  if (!td) throw new Error('ячейки нет: ' + habit.id + ' ' + date);
+  patchCellControls(td, habit, date);
+}
+
+// То же для карточки дня. Карточки идут в порядке appState.habits
+// (renderDayCards), а сигнатура списка проверена выше — порядок совпадает,
+// поэтому карточка находится по индексу привычки.
+function patchDayCardControls(habit, date) {
+  const box = document.getElementById('day-cards');
+  if (!box) throw new Error('контейнера карточек нет');
+  const index = appState.habits.indexOf(habit);
+  const card = index >= 0 ? box.children[index] : null;
+  if (!card) throw new Error('карточки привычки нет: ' + habit.id);
+  const controls = childByClass(card, 'day-card-controls');
+  if (!controls) throw new Error('контролов карточки нет: ' + habit.id);
+  patchCellControls(controls, habit, date);
+}
+
+// Переписывание контролов одной ячейки под текущие данные. Контейнер —
+// td.cell в таблице или .day-card-controls в карточке: наборы классов
+// контролов у них совпадают, поэтому одна функция обслуживает оба режима.
+// Правила вида значения повторяют cellMarkup — расхождение с полной
+// перерисовкой означало бы, что после диффа ячейка выглядит иначе, чем
+// выглядела бы после полного рендера.
+function patchCellControls(container, habit, date) {
+  const entry = getEntry(date, habit.id);
+
+  if (habit.type === 'boolean') {
+    // Галочка = true, «✗» = false, пусто = записи нет
+    syncBooleanCell(container, entry ? entry.value : undefined);
+    return;
+  }
+
+  if (habit.id === QAZA_HABIT_ID) {
+    // Каза ведётся во вкладке, ячейка только показывает счётчик дня
+    const span = childByClass(container, 'cell-qaza');
+    if (!span) throw new Error('ячейки каза нет: ' + date);
+    const value = entry ? entry.value : undefined;
+    const isEmpty = typeof value !== 'number';
+    span.textContent = isEmpty ? '—' : String(value);
+    span.classList.toggle('is-empty', isEmpty);
+    return;
+  }
+
+  if (habit.id === QURAN_HABIT_ID || habit.type === 'number') {
+    const field = childByClass(container, 'cell-number');
+    if (!field) throw new Error('числового поля нет: ' + habit.id + ' ' + date);
+    const value = entry ? entry.value : undefined;
+    field.value = typeof value === 'number' ? String(value) : '';
+    syncLevelCell(container, habit.id, date);
+    return;
+  }
+
+  const field = childByClass(container, 'cell-select');
+  if (!field) throw new Error('списка выбора нет: ' + habit.id + ' ' + date);
+  const value = entry && typeof entry.value === 'string' ? entry.value : '';
+  field.value = value;
+  syncLevelCell(container, habit.id, date);
+}
+
+// Круг прогресса одной строки: обновление атрибутов живого svg вместо
+// пересборки (circleMarkup создаёт около пяти узлов, здесь — ноль). Числа
+// те же, что в circleMarkup: метка, цвет и смещение дуги считаются по
+// одному правилу.
+function patchWeekCircle(habit) {
+  const tbody = document.getElementById('habits-tbody');
+  if (!tbody) throw new Error('тела таблицы нет');
+  const row = childBy(tbody, 'habit-row', 'data-habit-id', habit.id);
+  if (!row) throw new Error('строки привычки нет: ' + habit.id);
+  const cell = childByClass(row, 'progress-cell');
+  if (!cell) throw new Error('ячейки прогресса нет: ' + habit.id);
+  const svg = childByClass(cell, 'progress-circle');
+  if (!svg) throw new Error('круга прогресса нет: ' + habit.id);
+
+  const week = weekPercent(habit);
+  const month = monthPercent(habit);
+
+  const raw = Number(week);
+  const safe = isFinite(raw) ? raw : 0;
+  const clamped = Math.min(Math.max(safe, 0), 100);
+  const dashoffset = CIRCLE_LENGTH * (1 - clamped / 100);
+  const label = Math.round(safe) + '%';
+
+  const monthRaw = Number(month);
+  const monthLabel = 'М: ' + Math.round(isFinite(monthRaw) ? monthRaw : 0) + '%';
+
+  const arc = childByClass(svg, 'progress-arc');
+  if (arc) {
+    arc.style.stroke = safe >= 100 ? 'var(--success)' : 'var(--accent)';
+    arc.setAttribute('stroke-dashoffset', dashoffset.toFixed(3));
+  }
+  const text = childByClass(svg, 'progress-text');
+  if (text) text.textContent = label;
+  const monthText = childByClass(svg, 'progress-month');
+  if (monthText) monthText.textContent = monthLabel;
+  svg.setAttribute('aria-label', 'Неделя ' + label + ', месяц ' + monthLabel);
 }
