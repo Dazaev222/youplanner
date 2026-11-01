@@ -32,7 +32,7 @@ import { PRAYER_KEY } from '../data/prayer.js';
 import { QAZA_LOG_KEY, QAZA_STORAGE_KEY } from '../data/qaza.js';
 import { SLEEP_KEY } from '../data/sleep.js';
 import { STORAGE_KEYS } from '../data/storage.js';
-import { postAssistantChat } from './assistant-media.js';
+import { isHeaderSafeKey, postAssistantChat } from './assistant-media.js';
 import { buildHabitsAnalysisRequest } from './assistant-analysis.js';
 import {
   PDF_MAX_CHARS,
@@ -107,7 +107,12 @@ function personaNumber(value, min, max, fallback) {
 
 function personaInstructions(value) {
   if (typeof value !== 'string') return PERSONA_DEFAULTS.instructions;
-  const trimmed = value.trim();
+  // Невидимые символы (zero-width, BOM, слово-разделители) — мусор
+  // копирования из веба: в промпт они не добавляют смысла, но выдают себя
+  // за «непустые» инструкции. Вычищаются до трима, и у нормального текста
+  // тоже — по краям и внутри.
+  const cleaned = value.replace(/[\u200b-\u200f\u2060\ufeff]/g, '');
+  const trimmed = cleaned.trim();
   return trimmed.slice(0, PERSONA_INSTRUCTIONS_MAX);
 }
 
@@ -690,23 +695,30 @@ export function openAssistantKeyModal(initialTab) {
   const error = document.getElementById('assistant-key-error');
   const select = document.getElementById('assistant-model-select');
   if (!modal) return;
+  // Модалка может быть уже на экране: 401 пришёл, пока человек правит ключ,
+  // или шестерёнка нажата повторно. Повторное заполнение с устройства
+  // затёрло бы недопечатанное — поля трогаем только при открытии; залежалую
+  // ошибку валидации при этом снимаем.
+  const alreadyOpen = !modal.hidden;
   if (error) error.textContent = '';
-  if (input) {
-    input.value = readAssistantApiKey() || '';
-  }
-  if (select) {
-    if (!select.options.length) {
-      // варианты ставятся один раз: каталог моделей в коде, не в разметке
-      for (const m of ASSISTANT_MODELS) {
-        const opt = document.createElement('option');
-        opt.value = m.id;
-        opt.textContent = m.label;
-        select.appendChild(opt);
-      }
+  if (!alreadyOpen) {
+    if (input) {
+      input.value = readAssistantApiKey() || '';
     }
-    select.value = readAssistantModel();
+    if (select) {
+      if (!select.options.length) {
+        // варианты ставятся один раз: каталог моделей в коде, не в разметке
+        for (const m of ASSISTANT_MODELS) {
+          const opt = document.createElement('option');
+          opt.value = m.id;
+          opt.textContent = m.label;
+          select.appendChild(opt);
+        }
+      }
+      select.value = readAssistantModel();
+    }
+    fillAssistantPersonaControls(readAssistantPersona());
   }
-  fillAssistantPersonaControls(readAssistantPersona());
   modal.hidden = false;
   // Вкладку можно задать явно ('api' из сценариев «ключ не принят»/«модель
   // без зрения»); иначе — по наличию ключа. Шестерёнка app.js зовёт без
@@ -739,6 +751,16 @@ export function onAssistantKeySave() {
   const value = input ? input.value.trim() : '';
   if (!value) {
     if (error) error.textContent = 'Введите ключ или закройте окно кнопкой «Отмена».';
+    return;
+  }
+  // Ключ с символами вне ISO-8859-1 (вставка с кириллицей и т.п.) никогда не
+  // валиден: fetch падает на таком заголовке ещё до сети. Ловим при
+  // сохранении с внятной ошибкой и ничего не пишем в хранилище.
+  if (!isHeaderSafeKey(value)) {
+    if (error) {
+      error.textContent = 'Ключ должен содержать только латиницу, цифры и '
+        + 'символы — проверьте вставку.';
+    }
     return;
   }
   // Персонализация собирается до записи: сбор не меняет хранилище, и если
@@ -840,15 +862,29 @@ let assistantGeneration = 0;
 // большой PDF ещё читался, уходил в API вообще без текста файла — модель
 // честно отвечала «в отрывке нет содержания». Ввод текста при разборе PDF
 // остаётся доступным: печатать можно, отправится после.
-// Отложенная реплика (баг 1 из iPhone-теста Vision, 2026-11-01): отправка
+// Отложенные реплики (баг 1 из iPhone-теста Vision, 2026-11-01): отправка
 // во время сжатия фото больше не отбивается ошибкой «ещё сжимается» — текст
 // встаёт в очередь и уходит сам, когда сжатие закончится (flush в
 // updateAssistantControls, его зовёт compressChatImages в finally).
+// Очередь FIFO, а не одна строка: вторая отправка во время сжатия раньше
+// ЗАТИРАЛА первую (текст терялся бесследно). Реплики уходят по одной: после
+// отправки первой запрос делает assistantBusy — оставшиеся ждут его снятия
+// (setAssistantBusy(false) снова зовёт updateAssistantControls).
 // Тост с ошибкой загрузки теперь честный: только при реальной неудаче
 // обработки фото, а не как ложная тревога при уже ушедшем ответе.
-let pendingSubmitText = null;
-let pendingSubmitAt = 0;
+let pendingSubmitQueue = [];   // [{ text, at }]
 const PENDING_SUBMIT_LIMIT_MS = 35000;
+
+// Очередь не ушла и не дождалась (протухла или отказ без ключа): все
+// накопленные реплики возвращаются в поле — текст не теряется.
+function restorePendingToInput() {
+  const input = document.getElementById('assistant-input');
+  if (input) {
+    input.value = pendingSubmitQueue.map(function (p) { return p.text; }).join('\n');
+    autosizeAssistantInput();   // многострочный текст — поле должно вырасти
+  }
+  pendingSubmitQueue = [];
+}
 
 function updateAssistantControls() {
   const input = document.getElementById('assistant-input');
@@ -861,26 +897,20 @@ function updateAssistantControls() {
   if (pdfBtn) pdfBtn.classList.toggle('is-disabled', blocked);
   if (imageBtn) imageBtn.classList.toggle('is-disabled', blocked);
   // Flush очереди: сжатие закончилось и запрос в полёте не идёт
-  if (pendingSubmitText && !isImageCompressing() && !assistantBusy
+  if (pendingSubmitQueue.length && !isImageCompressing() && !assistantBusy
       && !isPdfParsing()) {
-    const text = pendingSubmitText;
-    pendingSubmitText = null;
-    if (Date.now() - pendingSubmitAt > PENDING_SUBMIT_LIMIT_MS) {
-      // Зависшее сжатие: текст возвращаем в поле, решение за владельцем
-      if (input) {
-        input.value = text;
-        autosizeAssistantInput();   // многострочный текст — поле должно вырасти
-      }
+    const head = pendingSubmitQueue[0];
+    if (Date.now() - head.at > PENDING_SUBMIT_LIMIT_MS) {
+      // Зависшее сжатие: тексты возвращаем в поле, решение за владельцем
+      restorePendingToInput();
       showErrorToast('Фото обрабатывались слишком долго — отправьте реплику '
         + 'ещё раз');
       return;
     }
-    if (!onAssistantSubmit(text)) {
-      // Не ушла (нет ключа и т.п.) — возвращаем текст в поле, не теряем
-      if (input) {
-        input.value = text;
-        autosizeAssistantInput();
-      }
+    pendingSubmitQueue.shift();
+    if (!onAssistantSubmit(head.text)) {
+      // Не ушла (нет ключа и т.п.) — возвращаем всё накопленное, не теряем
+      restorePendingToInput();
     }
   }
 }
@@ -903,8 +933,7 @@ export function onAssistantSubmit(text) {
     // Баг 1 (iPhone-тест Vision): вместо отказа «ещё сжимается» реплика
     // встаёт в очередь и уходит сама после сжатия (flush в
     // updateAssistantControls). Поле чистим — текст уже пойман в очередь.
-    pendingSubmitText = message;
-    pendingSubmitAt = Date.now();
+    pendingSubmitQueue.push({ text: message, at: Date.now() });
     showToast('Фото обрабатываются — реплика уйдёт сразу после сжатия');
     return true;
   }
@@ -972,10 +1001,12 @@ async function runAssistantReply() {
     setAssistantBusy(false);
   }
   if (error) {
-    // «Ключ не принят» — прямая дорога на таб «API Ключ», даже если ключ
-    // формально сохранён: модалка с дефолтной вкладкой открыла бы
-    // «Персонализацию» мимо проблемы
-    if (String(error.message).indexOf('Ключ не принят') === 0) {
+    // «Ключ не принят» и «Ключ повреждён» — прямая дорога на таб «API Ключ»,
+    // даже если ключ формально сохранён: модалка с дефолтной вкладкой
+    // открыла бы «Персонализацию» мимо проблемы
+    const message = String(error.message);
+    if (message.indexOf('Ключ не принят') === 0
+      || message.indexOf('Ключ повреждён') === 0) {
       openAssistantKeyModal(ASSISTANT_TAB_API);
     }
     return;
@@ -1030,6 +1061,10 @@ export function onAssistantInputInput() {
 // с остальными обработчиками ассистента.
 export function onAssistantInputKeydown(event) {
   if (!event || event.key !== 'Enter') return;
+  // IME-композиция (китайский/японский ввод): Enter в это время подтверждает
+  // выбор вариантов, а не отправляет реплику. isComposing — стандартный
+  // флаг; keyCode 229 — дубль для старых браузеров, где флага нет.
+  if (event.isComposing || event.keyCode === 229) return;
   const shiftEnter = readAssistantPersona().shiftEnter;
   if (event.shiftKey && shiftEnter) {
     return;   // перенос строки — нативное поведение textarea, не мешаем
@@ -1041,8 +1076,11 @@ export function onAssistantInputKeydown(event) {
 
 // Чипы делегированы по контейнеру: текст команды — в data-chip. Кнопка
 // «Анализ привычек» (data-action="analysis") вместо статического текста
-// шлёт реплику, собранную из живой статистики (assistant-analysis.js)
+// шлёт реплику, собранную из живой статистики (assistant-analysis.js).
+// Гвард события — как у onAssistantSettingsTabClick: обработчик может быть
+// вызван и без честного клика (синтетические события, будущие вызовы).
 export function onAssistantChipClick(event) {
+  if (!event || !event.target || typeof event.target.closest !== 'function') return;
   const chip = event.target.closest('.assistant-chip');
   if (!chip) return;
   if (chip.getAttribute('data-action') === 'analysis') {

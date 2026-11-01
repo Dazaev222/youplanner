@@ -116,3 +116,64 @@ test('анализ: обычные чипы не перехватываются,
   const after = JSON.parse(sandbox.localStorage.getItem('youplanner.assistant_history') || '[]');
   assert.equal(after.length, history.length, 'мусорный event не пишет в историю');
 });
+
+// ── Аудит 2026-11-01: мусор в хранилище не должен ронять снимок и не должен ──
+// превращаться в выдуманные цифры (бэкап/синхронизация пишут в те же ключи).
+
+test('анализ: даты-мусор, привычка без имени, каза строкой, sleep строкой — честная деградация', () => {
+  const { sandbox, context } = loadApp();
+  const records = {};
+  // 8 дней подряд в окне: 2026-10-25..11-01
+  for (let d = 25; d <= 31; d++) {
+    records['2026-10-' + String(d).padStart(2, '0')] = { h1: true, h6: 2 };
+  }
+  records['2026-11-01'] = { h1: true, h6: 1 };
+  records['2026-13-45'] = { h1: true };   // несуществующая дата
+  records['прошлая неделя'] = { h1: true };   // ключ не ISO-даты
+  records['2026-10-40'] = { h1: true };   // несуществующий день месяца
+  sandbox.localStorage.setItem('youplanner.records', JSON.stringify(records));
+  sandbox.localStorage.setItem('youplanner.habits', JSON.stringify([
+    { id: 'h6', name: null, type: 'number' },        // каза-привычка без имени
+    { id: 'h1', name: 'Фаджр', type: 'boolean', unit: '', goal: null },
+    { id: 'h9', name: 'Коран', type: 'number', unit: 'стр.', goal: null },
+  ]));
+  sandbox.localStorage.setItem('youplanner.qaza', JSON.stringify('5'));   // строка вместо числа
+  sandbox.localStorage.setItem('youplanner.sleep', JSON.stringify('строка вместо объекта'));
+  context.invalidateRecordsCache();
+
+  const snapshot = context.buildHabitsAnalysisSnapshot(TODAY);
+
+  // Никаких «undefined»/«null» в человеческом тексте
+  assert.ok(snapshot.indexOf('undefined') === -1, 'undefined просочился: ' + snapshot);
+  assert.ok(snapshot.indexOf('null') === -1, 'null просочился: ' + snapshot);
+  // Привычка без имени пропущена, живая — посчитана (8 дней серия)
+  assert.ok(snapshot.indexOf('«Фаджр»: серия 8 дн.') !== -1, 'строка Фаджра: ' + snapshot);
+  // Каза: очередь строкой не превращается в ложную цифру «в очереди 5»
+  assert.ok(snapshot.indexOf('Каза-намазы: серия 8 дн., выполнено 15 за 30 дней') !== -1,
+    'строка каза: ' + snapshot);
+  assert.ok(snapshot.indexOf('в очереди') === -1,
+    'строковая очередь не должна попадать в снимок как число');
+  // Сон-строка выводится как есть (компактный JSON), без падения
+  assert.ok(snapshot.indexOf('Сон: ') !== -1, 'сон-строка должна остаться разделом');
+  // Запрос целиком собирается
+  assert.ok(context.buildHabitsAnalysisRequest(TODAY).indexOf(snapshot) !== -1);
+});
+
+test('анализ: привычка без id не роняет расчёт серии и прогресса', () => {
+  const { sandbox, context } = loadApp();
+  const records = {};
+  for (let d = 25; d <= 31; d++) {
+    records['2026-10-' + String(d).padStart(2, '0')] = { h1: true };
+  }
+  records['2026-11-01'] = { h1: true };
+  sandbox.localStorage.setItem('youplanner.records', JSON.stringify(records));
+  sandbox.localStorage.setItem('youplanner.habits', JSON.stringify([
+    { id: null, name: 'Без id', type: 'boolean' },
+    { id: 'h1', name: 'Фаджр', type: 'boolean' },
+  ]));
+  context.invalidateRecordsCache();
+
+  const snapshot = context.buildHabitsAnalysisSnapshot(TODAY);
+  assert.ok(snapshot.indexOf('«Фаджр»: серия 8 дн.') !== -1, 'живая привычка посчитана');
+  assert.ok(!snapshot.includes('undefined'), 'undefined просочился: ' + snapshot);
+});

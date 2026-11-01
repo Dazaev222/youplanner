@@ -770,3 +770,63 @@ test('onAssistantSubmit: реплика во время сжатия фото у
   assert.equal(app.run('readHistory().length'), 2,
     'в истории вопрос и ответ: реплика ушла один раз, без дубля');
 });
+
+// ── Аудит 2026-11-01: очередь отложенных реплик ──────────────────────────────
+// Раньше очередь была одной строкой pendingSubmitText: вторая отправка во
+// время сжатия ЗАТИРАЛА первую (текст терялся бесследно — пузыря не было и в
+// истории не было). Теперь очередь FIFO из {text, at}, реплики уходят по
+// одной: каждая дожидается снятия busy (flush зовётся из setAssistantBusy).
+
+test('onAssistantSubmit: две реплики во время сжатия — обе уходят, первая не затирается', async () => {
+  const bodies = [];
+  const app = loadApp({
+    fetchImpl: (url, opts) => {
+      bodies.push(JSON.parse(opts.body));
+      return Promise.resolve(okReply('ответ'));
+    },
+  });
+  bindVisionDom(app.sandbox);
+  app.sandbox.localStorage.setItem('youplanner.api_key', 'test-key');
+  app.run('imageCompressing = true;');
+
+  assert.equal(app.context.onAssistantSubmit('Первый вопрос'), true);
+  assert.equal(app.context.onAssistantSubmit('Второй вопрос'), true);
+  app.run('imageCompressing = false;');
+  app.run('updateAssistantControls();');   // flush: первая реплика
+  await settle();                          // ответ пришёл, busy снялся → flush второй
+
+  const texts = bodies.map((b) => {
+    const user = b.messages.filter((m) => m.role === 'user').pop();
+    return user && user.content;
+  });
+  assert.deepEqual(texts, ['Первый вопрос', 'Второй вопрос'],
+    'одна из отложенных реплик потерялась: ' + JSON.stringify(texts));
+  assert.equal(app.run('readHistory().length'), 4,
+    'в истории два вопроса и два ответа');
+});
+
+test('очередь протухла (сжатие висело дольше 35 с): обе реплики вернулись в поле, сеть не тронута', async () => {
+  const bodies = [];
+  const app = loadApp({
+    fetchImpl: (url, opts) => {
+      bodies.push(JSON.parse(opts.body));
+      return Promise.resolve(okReply('ответ'));
+    },
+  });
+  const { els } = bindVisionDom(app.sandbox);
+  app.sandbox.localStorage.setItem('youplanner.api_key', 'test-key');
+  // Очередь с протухшей головой ставится изнутри контекста (внутренняя
+  // переменная модуля): сжатие «висело» больше PENDING_SUBMIT_LIMIT_MS
+  app.run('pendingSubmitQueue = ['
+    + '{ text: "Первый вопрос", at: Date.now() - 40000 }, '
+    + '{ text: "Второй вопрос", at: Date.now() - 30000 } ];');
+  app.run('updateAssistantControls();');
+  await settle();
+
+  assert.equal(bodies.length, 0, 'протухшая очередь не должна уходить в сеть');
+  assert.equal(els['assistant-input'].value, 'Первый вопрос\nВторой вопрос',
+    'обе реплики должны вернуться в поле для решения владельца: '
+    + JSON.stringify(els['assistant-input'].value));
+  assert.ok(els.toast.textContent.indexOf('слишком долго') !== -1,
+    'тост объясняет возврат: ' + els.toast.textContent);
+});

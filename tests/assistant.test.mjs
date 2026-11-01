@@ -848,7 +848,9 @@ function bindAssistantSettingsDom(sandbox, overrides) {
 test('onAssistantKeySave: сохраняет и ключ, и персонализацию одним «Сохранить»', () => {
   const { sandbox, context } = loadApp();
   const els = bindAssistantSettingsDom(sandbox);
-  els['assistant-key-input'].value = '  новый-ключ  ';
+  // ASCII-ключ — реальный формат ключа NeuralDeep (кириллица теперь
+  // отсекается валидацией, см. тест ниже)
+  els['assistant-key-input'].value = '  new-key-123  ';
   els['assistant-persona-instructions'].value = '  Кратко, без воды  ';
   els['assistant-context-days'].value = '21';
   els['assistant-temperature'].value = '0.5';
@@ -857,7 +859,7 @@ test('onAssistantKeySave: сохраняет и ключ, и персонали�
 
   context.onAssistantKeySave();
 
-  assert.equal(sandbox.localStorage.getItem('youplanner.api_key'), 'новый-ключ',
+  assert.equal(sandbox.localStorage.getItem('youplanner.api_key'), 'new-key-123',
     'ключ должен сохраниться тримленным');
   assert.deepEqual(JSON.parse(sandbox.localStorage.getItem(PERSONA_KEY)), {
     instructions: 'Кратко, без воды',
@@ -1048,4 +1050,305 @@ test('onAssistantInputKeydown: Enter отправляет всегда, Shift+En
   assert.equal(letter.prevented, false);
   assert.equal(users(), 2, 'нажатие буквы не должно отправлять реплику');
   assert.ok(created.length > 0, 'пузыри реплик должны были создаться');
+});
+
+// ═════════════════════════════════════════════════════════════════════════════
+// Аудит 2026-11-01 (коммиты 15965f0, 5b12e3b, d81884b + рабочий tree):
+// слой сохранения ключа, модалка настроек, чипы, IME, бюджеты промпта.
+// ═════════════════════════════════════════════════════════════════════════════
+
+// --- Гипотеза №0, слой (а): валидация ключа при сохранении -------------------
+// Ключ с кириллицей никогда не валиден (fetch падает ещё до сети), поэтому
+// ловим его при сохранении: внятная ошибка и НИЧЕГО в хранилище.
+
+test('onAssistantKeySave: ключ с кириллицей — внятная ошибка, в хранилище не пишется ничего', () => {
+  const { sandbox, context } = loadApp();
+  const els = bindAssistantSettingsDom(sandbox);
+  els['assistant-key-modal'].hidden = false;   // модалка открыта, как в жизни
+  els['assistant-key-input'].value = 'тест';
+  els['assistant-persona-instructions'].value = 'Кратко, без воды';
+
+  context.onAssistantKeySave();
+
+  assert.match(els['assistant-key-error'].textContent, /латиниц/,
+    'ошибка должна называть причину: ' + els['assistant-key-error'].textContent);
+  assert.equal(sandbox.localStorage.getItem('youplanner.api_key'), null,
+    'кривой ключ не должен оседать в хранилище');
+  assert.equal(sandbox.localStorage.getItem(PERSONA_KEY), null,
+    'персонализация не пишется, пока ключ не принят');
+  assert.equal(els['assistant-key-modal'].hidden, false,
+    'модалка остаётся открытой: пользователю нужно исправить вставку');
+});
+
+test('onAssistantKeySave: эмодзи в ключе отсекается тем же правилом', () => {
+  const { sandbox, context } = loadApp();
+  const els = bindAssistantSettingsDom(sandbox);
+  els['assistant-key-input'].value = 'abc 🔑';
+
+  context.onAssistantKeySave();
+
+  assert.match(els['assistant-key-error'].textContent, /латиниц/);
+  assert.equal(sandbox.localStorage.getItem('youplanner.api_key'), null);
+});
+
+test('onAssistantKeySave: двойной клик «Сохранить» идемпотентен — запись одна, ошибки нет', () => {
+  const { sandbox, context } = loadApp();
+  const els = bindAssistantSettingsDom(sandbox);
+  els['assistant-key-input'].value = '  ascii-key  ';
+
+  context.onAssistantKeySave();
+  context.onAssistantKeySave();   // второй клик по той же кнопке (dblclick)
+
+  assert.equal(sandbox.localStorage.getItem('youplanner.api_key'), 'ascii-key');
+  assert.equal(els['assistant-key-error'].textContent, '', 'ошибки быть не должно');
+  assert.equal(els['assistant-key-modal'].hidden, true, 'модалка закрыта');
+  assert.deepEqual(JSON.parse(sandbox.localStorage.getItem(PERSONA_KEY)), {
+    instructions: '', contextDays: 14, temperature: 0.3, maxTokens: 1000, shiftEnter: false,
+  }, 'повторное сохранение не портит персонализацию');
+});
+
+// --- Гипотеза: повторное открытие модалки затирает недопечатанную правку -----
+// 401 посреди запроса (или повторный клик по шестерёнке) зовёт
+// openAssistantKeyModal, когда модалка УЖЕ открыта и в поля недопечатано:
+// заполнение с устройства стирает работу пользователя.
+
+test('openAssistantKeyModal: модалка уже открыта — недопечатанное не затирается', () => {
+  const { sandbox, context } = loadApp();
+  const els = bindAssistantSettingsDom(sandbox);
+  sandbox.localStorage.setItem('youplanner.api_key', 'старый-ключ');
+  els['assistant-key-modal'].hidden = false;   // пользователь уже правит
+  els['assistant-key-input'].value = 'половина нового';
+  els['assistant-persona-instructions'].value = 'черновик инструкций';
+  els['assistant-key-error'].textContent = 'старая ошибка';
+
+  context.openAssistantKeyModal();
+
+  assert.equal(els['assistant-key-input'].value, 'половина нового',
+    'правка ключа стёрта повторным открытием');
+  assert.equal(els['assistant-persona-instructions'].value, 'черновик инструкций',
+    'правка инструкций стёрта повторным открытием');
+  assert.equal(els['assistant-key-error'].textContent, '',
+    'залежалая ошибка валидации снимается');
+  assert.equal(els['assistant-key-modal'].hidden, false);
+});
+
+test('openAssistantKeyModal: закрытая модалка заполняется с устройства (прежнее поведение)', () => {
+  const { sandbox, context } = loadApp();
+  const els = bindAssistantSettingsDom(sandbox);
+  sandbox.localStorage.setItem('youplanner.api_key', 'старый-ключ');
+  sandbox.localStorage.setItem(PERSONA_KEY, JSON.stringify({ instructions: 'Кратко' }));
+  els['assistant-key-modal'].hidden = true;
+
+  context.openAssistantKeyModal();
+
+  assert.equal(els['assistant-key-input'].value, 'старый-ключ',
+    'при открытии поля обязаны заполниться с устройства');
+  assert.equal(els['assistant-persona-instructions'].value, 'Кратко');
+});
+
+test('401 во время запроса при открытой модалке: поднимается модалка, правка не стёрта', async () => {
+  const chat = makeChat();
+  const fetchImpl = () => Promise.resolve({
+    ok: false, status: 401, text: () => Promise.resolve('unauthorized'),
+  });
+  const { sandbox, context } = loadApp({ fetchImpl });
+  const created = bindAssistantDom(sandbox, chat);
+  const els = bindAssistantSettingsDom(sandbox);
+  // лента ассистента поверх заглушек модалки
+  const baseGet = sandbox.document.getElementById;
+  sandbox.document.getElementById = (id) => (id === 'assistant-chat' ? chat : baseGet(id));
+
+  sandbox.localStorage.setItem('youplanner.api_key', 'stale-key');   // ASCII: тест про 401, не про повреждённый формат
+  // модалка открыта, пользователь недопечатал новый ключ
+  els['assistant-key-modal'].hidden = false;
+  els['assistant-key-input'].value = 'половина нового';
+
+  assert.equal(context.onAssistantSubmit('Вопрос'), true);
+  await settle();
+
+  assert.ok(created.some((el) => String(el.textContent).indexOf('Ключ не принят') !== -1),
+    'ошибка 401 должна показаться в ленте');
+  assert.equal(els['assistant-key-modal'].hidden, false,
+    '401 обязан поднять модалку ключа');
+  assert.equal(els['assistant-key-input'].value, 'половина нового',
+    '401 стёр недопечатанный ключ повторным заполнением');
+});
+
+// --- Гипотеза: чип-путь и анти-спам ------------------------------------------
+
+test('onAssistantChipClick: нет события или кривое событие — страница не роняется', () => {
+  const { sandbox, context } = loadApp();
+  const chat = makeChat();
+  bindAssistantDom(sandbox, chat);
+
+  assert.doesNotThrow(() => context.onAssistantChipClick(undefined), 'нет события');
+  assert.doesNotThrow(() => context.onAssistantChipClick({}), 'target нет');
+  assert.doesNotThrow(() => context.onAssistantChipClick({ target: {} }), 'closest нет');
+  assert.doesNotThrow(() => context.onAssistantChipClick({ target: { closest: () => null } }),
+    'чип не найден');
+});
+
+test('чип «Анализ привычек» при busy: повтор погашен тем же гейтом onAssistantSubmit', async () => {
+  const chat = makeChat();
+  const fetchImpl = makeDeferredFetch();
+  const { sandbox, context } = loadApp({ fetchImpl });
+  const created = bindAssistantDom(sandbox, chat);
+  sandbox.localStorage.setItem('youplanner.api_key', 'тест-ключ');
+  const chip = { getAttribute: (n) => (n === 'data-action' ? 'analysis' : null) };
+  const chipEvent = () => ({
+    target: { closest: (s) => (s === '.assistant-chip' ? chip : null) },
+  });
+
+  context.onAssistantChipClick(chipEvent());   // первая — принята
+  const usersBefore = storedHistory(sandbox).filter((m) => m.role === 'user').length;
+  assert.equal(usersBefore, 1, 'первый чип должен осесть в истории');
+
+  context.onAssistantChipClick(chipEvent());   // двойной клик — busy
+  const usersAfter = storedHistory(sandbox).filter((m) => m.role === 'user').length;
+  assert.equal(usersAfter, 1, 'анти-спам пропустил второй чип: ловили бы 429');
+
+  fetchImpl.resolveReply('ОТВЕТ');
+  await settle();
+  const users = storedHistory(sandbox).filter((m) => m.role === 'user');
+  assert.equal(users.length, 1, 'в истории должен остаться ровно один вопрос');
+});
+
+test('чип при читающемся PDF: отправка отбивается тостом, реплика не теряется', () => {
+  const { sandbox, context, run } = loadApp();
+  const chat = makeChat();
+  bindAssistantDom(sandbox, chat);
+  const els = bindAssistantSettingsDom(sandbox);
+  const baseGet = sandbox.document.getElementById;
+  sandbox.document.getElementById = (id) => (id === 'assistant-chat' ? chat : baseGet(id));
+  sandbox.localStorage.setItem('youplanner.api_key', 'тест-ключ');
+
+  run('pdfParsing = true;');   // внутренний флаг assistant-pdf.js
+  const chip = { getAttribute: (n) => (n === 'data-action' ? 'analysis' : null) };
+  context.onAssistantChipClick({ target: { closest: (s) => (s === '.assistant-chip' ? chip : null) } });
+
+  assert.ok(els.toast.textContent.indexOf('PDF ещё читается') !== -1,
+    'честный тост про читающийся PDF: ' + els.toast.textContent);
+  assert.equal(storedHistory(sandbox).length, 0,
+    'реплика во время разбора PDF не должна оседать в истории');
+});
+
+// --- Гипотеза: IME-композиция (keyCode 229) ----------------------------------
+
+test('onAssistantInputKeydown: Enter во время IME-композиции не отправляет реплику', async () => {
+  const chat = makeChat();
+  const fetchImpl = makeDeferredFetch();
+  const { sandbox, context } = loadApp({ fetchImpl });
+  bindAssistantDom(sandbox, chat);
+  const inputEl = { value: 'にほんご下書き', disabled: false, style: {} };
+  const baseGet = sandbox.document.getElementById;
+  sandbox.document.getElementById = (id) => (id === 'assistant-input' ? inputEl : baseGet(id));
+  sandbox.localStorage.setItem('youplanner.api_key', 'тест-ключ');
+
+  // Стандартный флаг isComposing: Enter подтверждает композицию, а не шлёт
+  const composing = makeKeyEvent('Enter', false);
+  composing.isComposing = true;
+  context.onAssistantInputKeydown(composing);
+  assert.equal(composing.prevented, false,
+    'preventDefault посреди композиции ломает подтверждение IME');
+  assert.equal(storedHistory(sandbox).length, 0,
+    'черновик композиции ушёл в чат вместо подтверждения');
+
+  // Старые браузеры без isComposing сигналят keyCode 229
+  const legacy = makeKeyEvent('Enter', false);
+  legacy.keyCode = 229;
+  context.onAssistantInputKeydown(legacy);
+  assert.equal(legacy.prevented, false, 'keyCode 229 должен распознаваться как композиция');
+  assert.equal(storedHistory(sandbox).length, 0);
+
+  // Обычный Enter после композиции работает как прежде
+  inputEl.value = 'Привет';
+  const plain = makeKeyEvent('Enter', false);
+  context.onAssistantInputKeydown(plain);
+  assert.equal(plain.prevented, true);
+  assert.equal(storedHistory(sandbox).filter((m) => m.role === 'user').length, 1);
+  fetchImpl.resolveReply('ОК');
+  await settle();
+});
+
+// --- Гипотезы персонализации: экстремумы и невидимые символы -----------------
+
+test('readAssistantPersona: экстремумы (1e9, -1, «yes») откатываются на дефолты', () => {
+  const { sandbox, context } = loadApp();
+  sandbox.localStorage.setItem(PERSONA_KEY, JSON.stringify({
+    maxTokens: 1e9, temperature: -1, contextDays: 1e9, shiftEnter: 'yes',
+  }));
+  assert.deepEqual(personaOf(context), {
+    instructions: '', contextDays: 14, temperature: 0.3, maxTokens: 1000, shiftEnter: false,
+  }, 'гигантские лимиты и строковые булевы — мусор, работают дефолты');
+});
+
+test('readAssistantPersona: инструкции из невидимых символов — пустой блок в промпт не пишется', () => {
+  const { sandbox, context } = loadApp();
+
+  // Только zero-width символы: это НЕ инструкции
+  sandbox.localStorage.setItem(PERSONA_KEY, JSON.stringify({
+    instructions: '\u200b\u200b\u200b',
+  }));
+  assert.equal(personaOf(context).instructions, '',
+    'zero-width мусор не должен выдавать себя за инструкции');
+  assert.equal(context.buildMessages()[0].content.indexOf('Инструкции пользователя'), -1,
+    '«пустой» блок инструкций не должен попадать в системный промпт');
+
+  // Невидимый мусор внутри полезного текста вычищается, текст живёт
+  sandbox.localStorage.setItem(PERSONA_KEY, JSON.stringify({
+    instructions: 'Отвечай\u200b кратко\ufeff',
+  }));
+  assert.equal(personaOf(context).instructions, 'Отвечай кратко');
+});
+
+// --- Гипотеза: конфликт бюджетов (контекст 30 дней, maxTokens 4000) ----------
+
+test('бюджеты: 30 дней контекста и 50 реплик истории — системный промпт в потолке, история хвостом', () => {
+  const { sandbox, context } = loadApp();
+  const records = {};
+  const now = new Date();
+  for (let i = 0; i < 35; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth(), now.getDate() - i);
+    const iso = d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0')
+      + '-' + String(d.getDate()).padStart(2, '0');
+    records[iso] = { note: 'x'.repeat(400) };   // жирные дни, каждая запись ~400 симв.
+  }
+  sandbox.localStorage.setItem('youplanner.records', JSON.stringify(records));
+  const history = [];
+  for (let i = 0; i < 50; i++) {
+    history.push({ role: i % 2 ? 'assistant' : 'user', content: 'реплика ' + i + ' ' + 'z'.repeat(60) });
+  }
+  sandbox.localStorage.setItem('youplanner.assistant_history', JSON.stringify(history));
+  sandbox.localStorage.setItem(PERSONA_KEY, JSON.stringify({
+    contextDays: 30, maxTokens: 4000, temperature: 1,
+  }));
+
+  const messages = context.buildMessages();
+  const system = messages[0].content;
+  assert.ok(system.length <= 21000,
+    'системный промпт распух за потолок CONTEXT_MAX_CHARS: ' + system.length);
+  assert.ok(system.indexOf('Записи за 30 дней') !== -1, 'окно 30 дней названо в снимке');
+  assert.equal(messages.length - 1, 20, 'в запрос уходит хвост из 20 реплик, не вся история');
+});
+
+// --- Гипотеза: битая персонализация не роняет payload ------------------------
+
+test('payload: битый JSON персонализации — дефолты в теле, запрос не падает', async () => {
+  const bodies = [];
+  const fetchImpl = (_url, opts) => {
+    bodies.push(JSON.parse(opts.body));
+    return Promise.resolve(okReply('ок'));
+  };
+  const chat = makeChat();
+  const { sandbox, context } = loadApp({ fetchImpl });
+  bindAssistantDom(sandbox, chat);
+  sandbox.localStorage.setItem('youplanner.api_key', 'тест-ключ');
+  sandbox.localStorage.setItem(PERSONA_KEY, '{битый json');
+
+  assert.equal(context.onAssistantSubmit('Вопрос'), true);
+  await settle();
+
+  assert.equal(bodies.length, 1, 'битая персонализация не должна отменять запрос');
+  assert.equal(bodies[0].temperature, 0.3);
+  assert.equal(bodies[0].max_tokens, 1000);
 });

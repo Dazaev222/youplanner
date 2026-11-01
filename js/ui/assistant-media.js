@@ -77,18 +77,56 @@ function timeoutGuard(ms) {
   };
 }
 
+// Проверка ключа на допустимость в HTTP-заголовке. fetch принимает значения
+// заголовков только в ISO-8859-1 (ByteString по спеке fetch): кириллица или
+// эмодзи в 'Bearer ' + apiKey роняют fetch TypeError'ом ЕЩЁ ДО сети, и без
+// этой проверки пользователь видел «Нет связи…» при исправной сети (баг
+// e2e №6). Реальный ключ NeuralDeep всегда ASCII — не-ISO символы в ключе
+// это всегда мусор вставки. Экспортируется: тот же предикат гейтит
+// сохранение ключа в модалке (assistant-view.js).
+export function isHeaderSafeKey(apiKey) {
+  if (typeof apiKey !== 'string') return false;
+  for (let i = 0; i < apiKey.length; i++) {
+    if (apiKey.charCodeAt(i) > 255) return false;
+  }
+  return true;
+}
+
+// Ключ, безопасный для заголовка: символы вне ISO-8859-1 вырезаются. Вызов
+// только после isHeaderSafeKey — для уже сохранённых кривых ключей, чтобы
+// запрос всё же уходил в сеть (сервис ответит 401 — см. ниже).
+function stripUnsafeHeaderChars(apiKey) {
+  if (typeof apiKey !== 'string') return '';
+  let out = '';
+  for (let i = 0; i < apiKey.length; i++) {
+    if (apiKey.charCodeAt(i) <= 255) out += apiKey[i];
+  }
+  return out;
+}
+
 // payload — готовое тело запроса { model, messages } из assistant-view.js;
 // apiKey — сохранённый на устройстве ключ. Имя наружу не «requestAssistantReply»:
 // под этим именем в assistant-view.js осталась тонкая обёртка, собирающая
 // payload из состояния ассистента (её зовут тесты таймеров).
 export async function postAssistantChat(payload, apiKey) {
+  // Уже сохранённый кривой ключ не должен ни ронять fetch до сети («Нет
+  // связи» при исправной сети), ни блокировать запрос: не-ISO символы
+  // вырезаются, сервис отклонит обрезанный ключ 401-й — и ниже это
+  // превращается в честное «Ключ повреждён», а не в «Нет связи».
+  const keyDamaged = !isHeaderSafeKey(apiKey);
+  const headerKey = keyDamaged ? stripUnsafeHeaderChars(apiKey) : apiKey;
+  if (keyDamaged) {
+    console.warn('[assistant] в сохранённом ключе есть символы вне ISO-8859-1 '
+      + '— вырезаны перед отправкой. Вставьте ключ заново в настройках '
+      + '(шестерёнка в шапке).');
+  }
   let response;
   const guard = timeoutGuard(REQUEST_TIMEOUT_MS);
   try {
     response = await fetch(ASSISTANT_API_URL, {
       method: 'POST',
       headers: {
-        'Authorization': 'Bearer ' + apiKey,
+        'Authorization': 'Bearer ' + headerKey,
         'Content-Type': 'application/json',
       },
       body: JSON.stringify(payload),
@@ -119,6 +157,12 @@ export async function postAssistantChat(payload, apiKey) {
       // тело ошибки не прочиталось — статус уже показан ниже
     }
     console.error('[assistant] HTTP ' + response.status, ASSISTANT_API_URL, detail);
+    // Повреждённый ключ сервис отклоняет generic-401/403, а локальная
+    // проверка выше уже знает точный диагноз — текст для пользователя честнее
+    if (keyDamaged && (response.status === 401 || response.status === 403)) {
+      throw new Error('Ключ повреждён — откройте настройки и вставьте его '
+        + 'заново (шестерёнка в шапке).');
+    }
     throw new Error(friendlyError(response.status));
   }
 
