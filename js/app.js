@@ -4,17 +4,18 @@ import { cssEscape, handleNetworkError, showErrorToast, showToast, syncSheetToKe
 import { compressBgImage, loadBgBlob, loadBgDim, resetBg, saveBgBlob, saveBgDim } from './data/background.js';
 import { applyBackup, buildBackup, parseBackup } from './data/backup.js';
 import { archiveHistories } from './data/archive.js';
+import { loadFast } from './data/fast.js';
 import { loadHabits } from './data/habits.js';
 import { migrateDropTasks } from './data/migrations.js';
-import { QAZA_HABIT_ID, loadQaza } from './data/qaza.js';
+import { QAZA_HABIT_ID, kazaDayFor, loadQaza } from './data/qaza.js';
+import { loadPrayer, prayerDateISO } from './data/prayer.js';
 import { invalidateRecordsCache } from './data/records.js';
-import { SCHEDULE_TYPES } from './data/schedule.js';
+import { loadSchedule, SCHEDULE_TYPES } from './data/schedule.js';
 import { STATS_PERIOD_BOXES, saveStatsPeriod } from './data/stats.js';
 import { STORAGE_KEYS } from './data/storage.js';
 import { APP_BUILD, APP_VERSION } from './ui/constants.js';
 import { SYNC_STATUS_MS, clearSyncPending, syncPending } from './sync/core.js';
 import { flushPendingSync, markCloudReady, scheduleSync, settleHabitsAfterSync, syncFromCloud, syncToCloud } from './sync/sync.js';
-import { onFastAdd, onFastDone, onFastEdit, onFastInitCancel, onFastInitSave, renderFastView, resetFastForm } from './ui/fast-view.js';
 import {
   closeAssistantKeyModal, onAssistantChipClick, onAssistantClear,
   onAssistantFormSubmit, onAssistantImageClear, onAssistantImagePick,
@@ -23,11 +24,12 @@ import {
   onAssistantPdfPick, onAssistantPersonaRangeInput, onAssistantSettingsTabClick,
   openAssistantKeyModal, renderAssistantView,
 } from './ui/assistant-view.js';
+import { fastInitMode, onFastAdd, onFastDone, onFastEdit, onFastInitCancel, onFastInitSave, renderFastView, resetFastForm } from './ui/fast-view.js';
 import { closeModal, onFormSubmit, onHabitListClick, onHabitsEditChange, onHabitsEditClick, openModal, renderHabitsEditList, setFormError, updateFormFields } from './ui/habits-edit.js';
 import { closeLevelSheet, onLevelPick } from './ui/level-sheet.js';
-import { changeWeek, goToday, onTableChange, onTableClick, renderDayCards, renderHeader, renderMainView, renderTable, updateRowCircle } from './ui/main-table.js';
+import { changeWeek, goToday, onTableChange, onTableClick, refreshMainSnapshot, renderDayCards, renderHeader, renderMainView, renderTable, syncMainViewFromData, updateRowCircle } from './ui/main-table.js';
 import { onPrayerGeo, onPrayerMadhhabChange, onPrayerManualSave, onPrayerMethodChange, onPrayerRefresh, onPrayerShowAll, renderPrayerSettings, renderPrayerView, resetPrayerShowAll, startPrayerClock } from './ui/prayer-view.js';
-import { ensureQazaState, onQazaAddPick, onQazaAddSubmit, onQazaDone, onQazaStartChange, onQazaUndo, qazaCellMarkup, renderQazaView, setQazaState } from './ui/qaza-view.js';
+import { ensureQazaState, getQazaState, onQazaAddPick, onQazaAddSubmit, onQazaDone, onQazaStartChange, onQazaUndo, qazaCellMarkup, renderQazaView, setQazaState } from './ui/qaza-view.js';
 import { applyScreen, SCREENS } from './ui/router.js';
 import { onScheduleAddSubmit, onScheduleEditListClick, renderScheduleEditView, renderScheduleView } from './ui/schedule-view.js';
 import { flushPendingSleepSave, onSleepFieldChange, renderSleepView } from './ui/sleep-view.js';
@@ -1017,6 +1019,9 @@ export function switchAppView(name) {
   applyScreen(name);
   const render = ROUTE_RENDER[name];
   if (render) render();
+  // Экран показал текущие данные — гвард sync:applied сравнивает следующие
+  // сверки с тем, что на самом деле видно, а не с устаревшей сигнатурой
+  noteViewRendered(name);
 
   window.scrollTo(0, 0);
   currentView = name;
@@ -1161,6 +1166,11 @@ export function updateQazaCells() {
 
   // В режиме «День» таблица скрыта — обновляем ещё и карточки
   if (isMainDayView()) renderDayCards();
+
+  // Ячейки каза переписаны мимо renderTable — снимок главного экрана
+  // должен узнать новые значения, иначе следующий sync:applied примет
+  // эти счетчики за неприменённый дифф и перепишет их вслепую
+  refreshMainSnapshot();
 }
 
 /* --- Проводка слоёв через шину событий -------------------------------------
@@ -1176,6 +1186,86 @@ bus.on('qaza:changed', function () {
   updateQazaCells();
   updateRowCircle(QAZA_HABIT_ID);
 });
+/* --- Гвард перерисовки после чужих данных -----------------------------------
+   sync:applied прилетает на каждую сверку с Firebase, и чаще всего — на
+   «ничего нового»: версии совпали, диффы пусты. Полная перерисовка видимого
+   экрана на таких сверках — чистый расход: на телефоне это микро-лаги и
+   потеря скролла при каждом периодическом обмене. Поэтому проводка двухуровневая:
+
+   Уровень 1 — сигнатура данных. Для каждого экрана ниже хранится дешёвый
+   снимок того, от чего зависит его отрисовка; не изменился — перерисовки нет.
+   Главный экран ведёт полный снимок видимых ячеек и умеет уровень 2:
+   точечный дифф ячеек и кругов (syncMainViewFromData в main-table.js).
+
+   Броня — общая для обоих уровней: любое исключение из сравнения или диффа
+   откатывает экран к полному рендеру. Экран обязан быть целым, дифф обязан
+   лишь экономить работу. */
+
+// Сигнатуры данных экранов на момент последней отрисовки. null — экран ещё
+// не рисовался через эту проводку: сигнатуры снимаются в switchAppView
+// (noteViewRendered) и после полного рендера в гварде.
+const VIEW_SIGNATURES = {
+  qaza: null,
+  prayer: null,
+  fast: null,
+  schedule: null,
+};
+
+// Экран каза зависит от очереди: курсор (список «сейчас»), остатки (сумма,
+// строки), дата последней записи (кнопка «Отменить» жива только сегодня) и
+// сам день каза — в полночь план перестраивается при тех же данных.
+function qazaViewSignature() {
+  const qaza = getQazaState();
+  if (!qaza) return null;
+  const history = qaza.history;
+  const lastDate = history.length > 0 ? history[history.length - 1].date : null;
+  return JSON.stringify([qaza.cursor, qaza.remaining, lastDate, kazaDayFor(new Date())]);
+}
+
+// Экран молитв зависит только от раздела координат. День в сигнатуре — на
+// случай полуночи между сверками: времена нового дня не должны рисоваться
+// только по минутному таймеру
+function prayerViewSignature() {
+  return JSON.stringify([loadPrayer() || null, prayerDateISO(new Date())]);
+}
+
+// Экран уразы — раздел счётчика плюс открытая форма: заголовок и видимость
+// блоков зависят от fastInitMode, а он к данным не сводится
+function fastViewSignature() {
+  return JSON.stringify([loadFast() || null, fastInitMode]);
+}
+
+// Экран расписания — раздел целиком (списки короткие) и выбранный тип дня
+function scheduleViewSignature() {
+  return JSON.stringify([loadSchedule(), ui.scheduleType]);
+}
+
+function viewSignature(view) {
+  switch (view) {
+    case 'qaza': return qazaViewSignature();
+    case 'prayer': return prayerViewSignature();
+    case 'fast': return fastViewSignature();
+    case 'schedule': return scheduleViewSignature();
+  }
+  return null;
+}
+
+// Экран только что отрисован — его сигнатура теперь равна текущим данным.
+// Вызывается из switchAppView (вход на экран) и из гварда ниже (полный
+// рендер после реально изменившихся данных). Сбой снимка не критичен:
+// следующий sync:applied просто снова даст полный рендер.
+function noteViewRendered(view) {
+  if (view === 'main') {
+    // Снимок главного экрана ставится самим renderTable/renderDayCards;
+    // здесь только страховка на случай их раннего возврата
+    refreshMainSnapshot();
+    return;
+  }
+  if (Object.prototype.hasOwnProperty.call(VIEW_SIGNATURES, view)) {
+    VIEW_SIGNATURES[view] = viewSignature(view);
+  }
+}
+
 // Точечная перерисовка после чужих данных (аудит 2026-10-31): раньше синк
 // на каждое применение перерисовывал все вкладки, включая скрытые. Теперь
 // перерисовывается только видимый экран: скрытые собираются заново при входе
@@ -1191,12 +1281,55 @@ function renderAfterRemoteData() {
     case 'schedule': renderScheduleView(); return;
   }
 }
+
+// Гвард: true — видимый экран уже актуален (сигнатура совпала или точечный
+// дифф главного экрана наложен), false — нужен полный рендер.
+function applyRemoteDataToVisibleView() {
+  const view = currentView;
+
+  if (view === 'main') {
+    // Главный экран — единственный с уровнем 2: дифф сам решает, пропускать
+    // ли перерисовку, и бросает исключение, если точечный путь не удался
+    return syncMainViewFromData();
+  }
+  if (!Object.prototype.hasOwnProperty.call(VIEW_SIGNATURES, view)) {
+    return false;  // экраны вне гварда (stats, settings, ...) — как раньше
+  }
+  const sig = viewSignature(view);
+  if (sig !== null && sig === VIEW_SIGNATURES[view]) {
+    return true;  // уровень 1: данные экрана не менялись
+  }
+  return false;
+}
+
+function renderAfterRemoteDataGuarded() {
+  let handled = false;
+  try {
+    handled = applyRemoteDataToVisibleView();
+  } catch (e) {
+    // Броня: дифф не обязан быть безошибочным, экран обязан быть целым.
+    // Полный рендер ниже пересобирает видимое с нуля
+    console.error('[sync-render] точечное обновление экрана «' + currentView + '» не удалось, полный рендер:', e);
+    handled = false;
+  }
+  if (!handled) {
+    renderAfterRemoteData();
+    // Рендер показал текущие данные — фиксируем снимок/сигнатуру, чтобы
+    // следующая «пустая» сверка прошла мимо перерисовки. Храним сигнатуру
+    // только ПОСЛЕ успешного рендера: упавший рендер не должен оставлять
+    // снимок, по которому следующий sync:applied пропустит перерисовку
+    try {
+      noteViewRendered(currentView);
+    } catch (e) { /* снимок — оптимизация, а не корректность */ }
+  }
+}
+
 bus.on('data:replaced', function () {
   appState.habits = loadHabits();
   setQazaState(loadQaza(true));
   // Файл копии мог привезти полные истории: срезаем старше года
   archiveHistories();
-  renderAfterRemoteData();
+  renderAfterRemoteDataGuarded();
 });
 bus.on('sync:applied', function () {
   // сначала состояние (его раньше обновлял сам слой синхронизации),
@@ -1205,7 +1338,7 @@ bus.on('sync:applied', function () {
   appState.habits = loadHabits();
   setQazaState(loadQaza(true));
   archiveHistories();
-  renderAfterRemoteData();
+  renderAfterRemoteDataGuarded();
 });
 bus.on('storage:error', function () {
   showToast('Не удалось сохранить: хранилище переполнено');
@@ -1357,11 +1490,15 @@ export function observeLiquidSwitchSizes() {
   });
 }
 
+// Число на иконке календаря в нижнем таб-баре фиксировано: владелец решил
+// всегда показывать 27 вместо текущего дня месяца (решение от 2026-11-01).
+// Это не забытый баг — вернуться к динамической дате можно, заменив
+// строку ниже на String(new Date().getDate()).
 export function updateTabCalendarDate() {
   const dateElement = document.getElementById('tab-calendar-date');
   if (!dateElement) return;
 
-  dateElement.textContent = String(new Date().getDate());
+  dateElement.textContent = '27';
 }
 
 document.addEventListener('DOMContentLoaded', function () {
