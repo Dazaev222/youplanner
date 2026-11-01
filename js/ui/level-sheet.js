@@ -1,6 +1,6 @@
 import { LEVEL_TWO_MIN, QURAN_HABIT_ID, defaultLevel, getEntry, habitMarkDate, hasLevelPopup, writeHabitEntry } from '../data/records.js';
 import { isMainDayView } from './state.js';
-import { findHabit, renderDayCards, syncLevelCell, updateRowCircle } from './main-table.js';
+import { findHabit, refreshMainSnapshot, renderDayCards, syncLevelCell, updateRowCircle } from './main-table.js';
 import { cssEscape, syncSheetToKeyboard } from '../core/dom.js';
 // Привычка и день, для которых открыт попап. День здесь уже выправленный
 // правилом полуночи (§4): попап пишет туда же, куда писала бы клетка.
@@ -84,6 +84,10 @@ export function onLevelPick(event) {
   closeLevelSheet();
   syncLevelCells(habit.id, date);
   updateRowCircle(habit.id);
+  // Ячейка и круг переписаны мимо renderTable — снимок главного экрана
+  // обязан узнать новые значение и уровень, иначе следующая сверка
+  // sync:applied посчитает их неприменённым диффом и перепишет заново
+  refreshMainSnapshot();
 }
 // Вид полей уровня после выбора в попапе: клетки таблицы и, если открыт режим
 // «День», карточки. Так же поступает updateQazaCells: на телефоне таблица

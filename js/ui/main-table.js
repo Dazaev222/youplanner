@@ -625,9 +625,22 @@ export function captureMainSnapshot() {
   // одинаковые данные дают одинаковые числа.
   const circles = {};
   if (!dayView) {
+    // Период один на все строки: массивы дат строятся один раз, а не по разу
+    // на привычку. weekPercent/monthPercent строят свои массивы внутри —
+    // на каждую сверку выходило 24 сборки дат (замер: 1.47 из 1.66 мс),
+    // теперь — две, дальше тёплые попадания в кэш calcProgress.
+    const weekStart = appState.weekStart;
+    const weekPeriod = weekStart ? getWeekDates(weekStart) : [];
+    const monthPeriod = weekStart
+      ? getMonthDatesToToday(weekStart.getFullYear(), weekStart.getMonth())
+      : [];
     for (let h = 0; h < appState.habits.length; h++) {
       const habit = appState.habits[h];
-      circles[habit.id] = [weekPercent(habit), monthPercent(habit)];
+      // Значения те же, что дают weekPercent/monthPercent: тот же
+      // calcProgress на тех же датах того же appState.weekStart
+      circles[habit.id] = weekStart
+        ? [calcProgress(habit, weekPeriod), calcProgress(habit, monthPeriod)]
+        : [0, 0];
     }
   }
 
