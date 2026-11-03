@@ -28,6 +28,9 @@ export const SCREENS = {
   'stats-fast': { el: 'stats-fast-view', tab: 'settings', bodyClass: 'view-stats' },
   'stats-sleep': { el: 'stats-sleep-view', tab: 'settings', bodyClass: 'view-stats' },
   'sleep': { el: 'sleep-view', tab: 'settings', bodyClass: 'view-settings' },
+  // Матрица открывается из того же «Меню», что и статистика, но к разделу
+  // статистики не относится: вкладка — главная, как у «Цикла сна»
+  'matrix': { el: 'matrix-view', tab: 'main', bodyClass: 'view-matrix' },
   'schedule': { el: 'schedule-view', tab: 'schedule' },
   'schedule-edit': { el: 'schedule-edit-view', tab: 'schedule-edit' },
   'assistant': { el: 'assistant-view', tab: 'assistant', bodyClass: 'view-assistant' },

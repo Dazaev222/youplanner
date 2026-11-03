@@ -33,6 +33,7 @@ import { ensureQazaState, getQazaState, onQazaAddPick, onQazaAddSubmit, onQazaDo
 import { applyScreen, SCREENS } from './ui/router.js';
 import { onScheduleAddSubmit, onScheduleEditListClick, renderScheduleEditView, renderScheduleView } from './ui/schedule-view.js';
 import { flushPendingSleepSave, onSleepFieldChange, renderSleepView } from './ui/sleep-view.js';
+import { renderMatrixView } from './ui/matrix-view.js';
 import { appState, isMainDayView, isMobileView, ui } from './ui/state.js';
 import { closeStatsMenu, isStatsMenuOpen, isStatsView, openStatsMenu, renderStatsCategory, renderStatsFastView, renderStatsHabitView, renderStatsHabitsView, renderStatsQazaView, renderStatsSleepView, renderStatsView, setStatsHabitId } from './ui/stats-view.js';
 /* YouPlanner — точка сборки интерфейса (app.js).
@@ -289,6 +290,11 @@ export function bindEvents() {
       if (item.hasAttribute('data-sleep-view')) {
         closeStatsMenu();
         switchAppView('sleep');
+        return;
+      }
+      if (item.hasAttribute('data-matrix-view')) {
+        closeStatsMenu();
+        switchAppView('matrix');
         return;
       }
       if (item.hasAttribute('data-stats-view')) {
@@ -969,6 +975,7 @@ const ROUTE_RENDER = {
   'stats-fast': renderStatsFastView,
   'stats-sleep': renderStatsSleepView,
   'sleep': renderSleepView,
+  'matrix': renderMatrixView,
   'schedule': renderScheduleView,
   // Список времён открывается свёрнутым: «Показать все» — разовый взгляд
   'prayer': function () { resetPrayerShowAll(); renderPrayerView(); },

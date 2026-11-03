@@ -10,7 +10,7 @@
 // Цифры совпадают с экраном «Статистика» по построению — иначе ассистент
 // и приложение спорили бы друг с другом.
 
-import { addDays, toISODate } from '../core/dates.js';
+import { addDays, isDateLike, toISODate } from '../core/dates.js';
 import { calcProgress, loadRecords } from '../data/records.js';
 import {
   habitBestStreak,
@@ -72,19 +72,10 @@ function analysisHabitLine(habit, dates, today) {
     + percent + '%';
 }
 
-// «Сегодня» как дата, проверенное без instanceof: песочница тестов (node:vm)
-// живёт в другом realm, и `hostDate instanceof vmDate` там ложно даже на
-// настоящую Date — фиксированная дата подмены терялась, а цифры съезжали на
-// реальные часы машины (тесты падали на любой день, кроме того, что вшит в
-// них). Invalid Date тоже не годится: из неё не собрать окно.
-function isDateLike(value) {
-  return Object.prototype.toString.call(value) === '[object Date]'
-    && !Number.isNaN(value.getTime());
-}
-
 // Снимок статистики для запроса. Пустые разделы пропускаются; совсем без
 // данных — честная фраза вместо выдуманных цифр. «Сегодня» — параметр для
-// тестов; в приложении зовётся без аргумента
+// тестов; в приложении зовётся без аргумента (isDateLike — в js/core/dates.js:
+// без неё фиксированная дата из песочницы node:vm терялась из-за реалмов).
 export function buildHabitsAnalysisSnapshot(today) {
   if (!isDateLike(today)) today = new Date();
   const dates = analysisWindow(today, ANALYSIS_DAYS);

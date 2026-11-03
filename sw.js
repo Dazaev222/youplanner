@@ -1,4 +1,4 @@
-const CACHE = 'youplanner-v36';
+const CACHE = 'youplanner-v37';
 // Иконки — все из manifest.json: отсутствующая в кэше иконка ломала бы
 // офлайн-установку PWA (аудит 2026-10-31: icon-512.png не кэшировался)
 const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon-512.png', './icon.svg',
@@ -8,7 +8,7 @@ const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './ic
   './styles/schedule.css', './styles/sheets.css', './styles/prayer.css',
   './styles/toast.css', './styles/settings.css', './styles/stats.css',
   './styles/habits-edit.css', './styles/assistant.css', './styles/background.css',
-  './styles/mobile.css',
+  './styles/mobile.css', './styles/matrix.css', './styles/sparkline.css',
   // pdf.js для чтения PDF в ассистенте: локальные копии вместо CDN —
   // офлайн-PWA разбирает файлы без сети
   './js/vendor/pdf.min.mjs', './js/vendor/pdf.worker.min.mjs',
@@ -41,6 +41,10 @@ const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './ic
   './js/data/stats.js', './js/data/backup.js', './js/data/background.js',
   './js/data/archive.js', './js/data/image.js',
   './js/ui/constants.js',
+  // Матрица Эйзенхауэра и спарклайны в статистике
+  './js/data/matrix.js',
+  './js/ui/matrix-view.js',
+  './js/ui/sparkline.js',
   './js/sync/core.js', './js/sync/merge.js'];
 
 self.addEventListener('install', function (e) {

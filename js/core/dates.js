@@ -6,7 +6,17 @@ export function toISODate(d) {
   const day = String(d.getDate()).padStart(2, '0');
   return year + '-' + month + '-' + day;
 }
-// 'YYYY-MM-DD' → Date в локальной зоне
+// Дата, проверенная без instanceof: песочница тестов (node:vm) живёт в другом
+// реалме, и `hostDate instanceof vmDate` там ложно даже на настоящую Date —
+// подставленная фиксированная дата терялась и цифры съезжали на часы машины.
+// Invalid Date тоже не годится: из неё не собрать ни окно, ни сравнение.
+export function isDateLike(value) {
+  return Object.prototype.toString.call(value) === '[object Date]'
+    && !Number.isNaN(value.getTime());
+}
+// 'YYYY-MM-DD' → Date в локальной зоне; на мусоре возвращает Invalid Date,
+// поэтому проверяйте результат через isDateLike, а не на истинность (объект
+// ложен только по getTime()).
 export function parseISODate(s) {
   const parts = String(s).split('-');
   const year = parseInt(parts[0], 10);

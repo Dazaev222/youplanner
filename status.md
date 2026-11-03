@@ -1,13 +1,13 @@
 # YouPlanner — текущий статус
 
-Обновлено: 2026-10-31
+Обновлено: 2026-11-03
 
 ## Расположение
 
 - Папка: `C:\Users\Admin\Desktop\youplanner-new`
 - Код: `index.html` (разметка) + `styles/` (CSS по секциям) + `js/`
   (ES-модули: `core/`, `data/`, `sync/`, `ui/`, `vendor/`); сборки нет.
-- PWA: `manifest.json`, `sw.js` (кэш `youplanner-v29`), иконки.
+- PWA: `manifest.json`, `sw.js` (кэш `youplanner-v37`), иконки.
 - Документация: `README.md`, `Spec.md`, `status.md`.
 - Репозиторий: https://github.com/Dazaev222/youplanner
 - Сайт: https://dazaev222.github.io/youplanner/
@@ -78,6 +78,22 @@
   и импорт в файл, PWA на iPhone.
 
 ## Заходы
+
+- 2026-11-03 — Матрица Эйзенхауэра и спарклайны. Раздел `#matrix-view`
+  (четыре карточки 2×2 в духе TickTick: чекбокс, точка приоритета, пилюля
+  срока, лист переноса по «⋯»), данные — `js/data/matrix.js`, ключ
+  `youplanner.matrix.tasks`. Квадрант НЕ хранится: он считается из пары
+  независимых осей (срок → срочность, приоритет → важность), поэтому
+  завтрашняя задача сегодня становится срочной сама, а перенос карточки
+  меняет причину, а не метку. Спарклайны — `js/ui/sparkline.js` (чистая
+  функция «числа → SVG», 14 дней) в строках «Привычки» в статистике; шкала
+  та же, что у процентов ряда, поэтому цифра и линия не спорят.
+  `isDateLike` (проверка даты без `instanceof` для vm-песочницы) вынесена из
+  `assistant-analysis.js` в `js/core/dates.js` — второй копии больше нет.
+  Тесты 317 → 339 (matrix 14, sparkline 8), SW v36 → v37. Раздел пока живёт
+  только на устройстве: в `STORAGE_KEYS` и в снимке синхронизации его нет,
+  пока `js/sync/merge.js` не научится сливать задачи по `updatedAt` и
+  надгробиям.
 
 - 2026-10-31 — Vision в ассистенте: фото прикрепляются к вопросам (qwen3.8-27b,
   флаг vision в каталоге моделей). Общее сжатие вынесено из фонового
@@ -392,7 +408,10 @@
 
 ## В работе
 
-Ничего.
+- Матрица (`js/data/matrix.js`) не участвует в синхронизации: раздел не
+  входит в `STORAGE_KEYS`, потому что слияние задач по `updatedAt` и
+  надгробия удалений для него ещё не написаны. Второе устройство вернёт
+  удалённое — правило выключено до появления слияния.
 
 ## Следующее
 
@@ -413,13 +432,16 @@ youplanner.app_bg (затемнение фона; фото фона — Blob в 
 
 ## Тесты
 
-Штатный прогон (без браузера): `npm test` → **90/90** в 14 файлах
-`tests/*.test.mjs` (smoke, bus, backup, sync, sync-merge, archive, debounce,
-core, modules, timers, xss, assistant, sw-assets, sleep, qaza-done,
-schedule, fast, records, firebase-auth). Покрывают граф модулей и висячие
-id, шину, бэкапы, single-flight синхронизации и слияние снимков,
-архивацию историй, debounce, XSS-экранирование, fallback-таймеры fetch,
-PDF-чанкинг и покрытие `ASSETS` в `sw.js`.
+Штатный прогон (без браузера): `npm test` → **339/339** в 32 файлах
+`tests/*.test.mjs` (smoke, bus, backup, sync, sync-merge, sync-render,
+sync-render-audit, archive, debounce, core, modules, timers, xss, assistant, assistant-api,
+assistant-vision, assistant-analysis, sw-assets, sleep, qaza-done, qaza-load,
+schedule, fast, records, habits, habits-edit, calcprogress-stress,
+firebase-auth, migrations, tombstones, matrix, sparkline). Покрывают граф
+модулей и висячие id, шину, бэкапы, single-flight синхронизации и слияние
+снимков, архивацию историй, debounce, XSS-экранирование, fallback-таймеры
+fetch, PDF-чанкинг, покрытие `ASSETS` в `sw.js`, квадранты матрицы и
+спарклайны.
 
 Браузерный chaos-E2E: `node tests/e2e/chaos.e2e.mjs` → **7/7** (Playwright,
 внешняя сеть заблокирована, Firebase — заглушка): недоступный Firebase,
@@ -435,7 +457,7 @@ PDF-чанкинг и покрытие `ASSETS` в `sw.js`.
 
 1. Правки — в `index.html`, `styles/` или `js/`; сборки нет.
 2. При изменении списка ассетов поднять `CACHE` в `sw.js` (сейчас
-   `youplanner-v26`) и прогнать `sw-assets` вместе с `npm test`.
+   `youplanner-v37`) и прогнать `sw-assets` вместе с `npm test`.
 3. `npm test` и `node tests/e2e/chaos.e2e.mjs`.
 4. Коммит и push в `main`; GitHub Pages публикует статику.
 5. iPhone: закрыть иконку и открыть заново — новый Service Worker

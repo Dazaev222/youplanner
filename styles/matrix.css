@@ -1,0 +1,381 @@
+/* Матрица Эйзенхауэра. Визуальный язык — TickTick: белые карточки,
+   спокойные рамки, цвет только в смыслах (приоритет, срок, квадрант),
+   круглые чекбоксы, пилюли дат. Палитра и радиусы — исключительно токены:
+   цвета квадрантов собраны из уже существующих (--danger, --success,
+   --two-min, --text-tertiary), новых значений не заводим. */
+
+#matrix-view {
+  padding: 16px 14px 96px;
+  max-width: 900px;
+  margin: 0 auto;
+}
+
+.matrix-header { margin-bottom: 14px; }
+
+.matrix-title {
+  margin: 0;
+  font-size: 26px;
+  font-weight: 700;
+  letter-spacing: -0.4px;
+  color: var(--text);
+}
+
+.matrix-sub {
+  margin: 4px 0 0;
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+
+/* 2×2 на широком экране, столбиком на узком: квадранты читаются парами
+   «важно/не важно», и в один столбик эта сетка превращается в список */
+.matrix-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+@media (max-width: 620px) {
+  .matrix-grid { grid-template-columns: 1fr; }
+}
+
+.matrix-card {
+  background: var(--surface-card);
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  padding: 12px 12px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* Полоса квадранта — единственная «декорация» карточки: по ней за
+   полсекунды видно, куда смотришь. Цвет сверху, а не слева, потому что
+   карточка может быть ниже экрана, и вертикальная полоса исчезает из вида */
+.matrix-card::before {
+  content: '';
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: var(--q);
+}
+
+.matrix-card.q-q1 { --q: var(--danger); }
+.matrix-card.q-q2 { --q: var(--success); }
+.matrix-card.q-q3 { --q: var(--two-min); }
+.matrix-card.q-q4 { --q: var(--text-tertiary); }
+
+.matrix-card-head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.matrix-card-head h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.matrix-count {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Просроченные — отдельной пилюлей, а не второй цифрой рядом с первой:
+   «1 · 2» читается как одно значение, и человек не понимает, какая цифра
+   про что. */
+.matrix-overdue {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 12%, transparent);
+  padding: 2px 7px;
+  border-radius: var(--radius-pill);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.matrix-add {
+  margin-left: auto;
+  width: 28px;
+  height: 28px;
+  border-radius: var(--radius-pill);
+  border: none;
+  background: color-mix(in srgb, var(--q) 14%, transparent);
+  color: var(--q);
+  font-size: 18px;
+  line-height: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.matrix-add:active { transform: scale(0.92); }
+
+.matrix-hint {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--text-tertiary);
+}
+
+.matrix-card-body {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-height: 44px;
+}
+
+.matrix-empty {
+  margin: 8px 0;
+  font-size: 13px;
+  color: var(--text-tertiary);
+  text-align: center;
+}
+
+/* Строка задачи */
+.matrix-task {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 8px 6px;
+  border-radius: var(--radius-md);
+}
+
+.matrix-task:active { background: var(--surface-alt); }
+
+.matrix-check {
+  flex: none;
+  width: 22px;
+  height: 22px;
+  margin-top: 1px;
+  border-radius: var(--radius-pill);
+  border: 1.6px solid var(--border-soft);
+  background: transparent;
+  color: var(--surface-card);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+
+.matrix-check-mark { opacity: 0; }
+
+/* Отметка о выполнении живёт в данных, а не в DOM: галочка появляется
+   вместе с заливкой круга, чтобы «сделано» было видно одним движением глаза */
+.matrix-task.is-done .matrix-check {
+  background: var(--q, var(--success));
+  border-color: transparent;
+}
+
+.matrix-task.is-done .matrix-check-mark { opacity: 1; }
+.matrix-task.is-done .matrix-task-title {
+  text-decoration: line-through;
+  color: var(--text-tertiary);
+}
+
+.matrix-task-body { flex: 1 1 auto; min-width: 0; }
+
+.matrix-task-title {
+  font-size: 14.5px;
+  line-height: 1.35;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.matrix-task-meta {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 3px;
+  min-height: 16px;
+}
+
+.matrix-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: var(--radius-pill);
+  flex: none;
+}
+
+.matrix-dot.p1 { background: var(--text-tertiary); }
+.matrix-dot.p2 { background: var(--two-min); }
+.matrix-dot.p3 { background: var(--danger); }
+
+.matrix-due {
+  font-size: 11.5px;
+  font-weight: 600;
+  padding: 2px 8px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-alt);
+  color: var(--text-muted);
+}
+
+.matrix-due.is-overdue {
+  background: color-mix(in srgb, var(--danger) 14%, transparent);
+  color: var(--danger);
+}
+
+.matrix-note-hint { font-size: 11.5px; color: var(--text-tertiary); }
+
+.matrix-more {
+  flex: none;
+  width: 30px;
+  height: 30px;
+  margin: -2px -4px 0 0;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 17px;
+}
+
+.matrix-more:active { background: var(--surface-pressed); }
+
+/* Форма добавления */
+.matrix-composer {
+  border-top: 1px solid var(--separator);
+  padding-top: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.matrix-composer-title {
+  font: inherit;
+  font-size: 14.5px;
+  padding: 9px 11px;
+  border-radius: var(--radius-md);
+  border: 1px solid var(--border-soft);
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+.matrix-composer-title:focus {
+  outline: none;
+  border-color: var(--accent);
+  background: var(--surface-card);
+}
+
+.matrix-composer-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.matrix-composer-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--text-tertiary);
+}
+
+.matrix-composer-field input,
+.matrix-composer-field select {
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border-soft);
+  background: var(--surface-card);
+  color: var(--text);
+}
+
+.matrix-composer-add {
+  margin-left: auto;
+  padding: 8px 14px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: var(--on-accent);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.matrix-composer-cancel {
+  padding: 8px 10px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-tertiary);
+  font-size: 13px;
+}
+
+/* Лист переноса — как остальные шторки приложения: подложка, панель снизу.
+   z-index выше таб-бара (1000 в styles/mobile.css): на телефоне капсула
+   висит над экраном и иначе закрывала бы последние пункты листа. */
+.matrix-sheet-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1050;
+  background: color-mix(in srgb, var(--text) 34%, transparent);
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+}
+
+.matrix-sheet {
+  width: 100%;
+  max-width: 520px;
+  background: var(--surface-card);
+  border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+  padding: 14px 14px calc(16px + env(safe-area-inset-bottom));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.matrix-sheet-title {
+  margin: 0 0 6px;
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+
+.matrix-sheet-item {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 11px 12px;
+  min-height: 44px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
+  font: inherit;
+  text-align: left;
+  border-left: 3px solid var(--q, var(--border));
+}
+
+.matrix-sheet-item.q-q1 { --q: var(--danger); }
+.matrix-sheet-item.q-q2 { --q: var(--success); }
+.matrix-sheet-item.q-q3 { --q: var(--two-min); }
+.matrix-sheet-item.q-q4 { --q: var(--text-tertiary); }
+.matrix-sheet-item.is-archive { --q: var(--surface-pressed); color: var(--text-muted); }
+.matrix-sheet-item:active { background: var(--surface-alt); }
+
+.matrix-sheet-name { font-size: 14.5px; font-weight: 600; color: var(--text); }
+.matrix-sheet-hint { font-size: 11.5px; color: var(--text-tertiary); }
+
+.matrix-sheet-cancel {
+  margin-top: 4px;
+  padding: 12px;
+  min-height: 44px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 14px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .matrix-add:active,
+  .matrix-more:active { transform: none; }
+}

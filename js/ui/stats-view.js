@@ -1,5 +1,6 @@
-import { parseISODate } from '../core/dates.js';
+import { addDays, parseISODate, toISODate } from '../core/dates.js';
 import { escapeHtml } from '../core/dom.js';
+import { sparkValues, sparklineSvg } from './sparkline.js';
 import { fastHistorySince } from '../data/archive.js';
 import { FAST_HISTORY_MIN, fastPeriodStats, loadFast } from '../data/fast.js';
 import { loadHabits } from '../data/habits.js';
@@ -8,6 +9,20 @@ import { calcProgress, loadRecords } from '../data/records.js';
 import { loadSleep, sleepAverageDurationMin, sleepAverageMinutes, sleepEntriesInPeriod, sleepFormatDuration, sleepMinutesByDay, sleepTimeLabel, sleepTimeMinutes, sleepWakeMinutes } from '../data/sleep.js';
 import { STATS_PERIOD_BOXES, habitBestStreak, habitCurrentStreak, habitMarked, habitMarkedDays, habitsAveragePercent, loadStatsPeriod, qazaStreak, statsPeriodDates } from '../data/stats.js';
 import { ensureQazaState, getQazaState } from './qaza-view.js';
+
+// Дней в микро-тренде строки списка привычек. Две недели: за неделю линия
+// состоит из одного ритма («в выходные не делаю») и выглядит трендом,
+// которого нет; за месяц мелкие провалы сливаются в кашу.
+const SPARK_DAYS = 14;
+
+// Даты последних n дней, от самого старого к сегодня — тот порядок, в котором
+// читается линия. toISODate даёт ключ хранилища, поэтому расчёт идёт по тем
+// же дням, что и круги прогресса в таблице.
+function lastDates(today, n) {
+  const out = [];
+  for (let back = n - 1; back >= 0; back--) out.push(toISODate(addDays(today, -back)));
+  return out;
+}
 // Панель открыта — на панели класс is-open: по нему едет transform,
 // а visibility снимается без задержки. Подложка отдельным элементом
 // и гасится атрибутом hidden.
@@ -263,13 +278,22 @@ export function renderStatsHabitsView() {
 
   const dates = statsPeriodDates(loadStatsPeriod('habits'), new Date());
   const habits = loadHabits();
+  // Спарклайн — за последние SPARK_DAYS дней НЕЗАВИСИМО от выбранного периода:
+  // процент справа уже отвечает на «как за период», а микро-тренд нужен на
+  // вопрос «что с этим происходит в последние две недели». Один и тот же
+  // период дал бы линию, повторяющую цифру, и строка стала бы шумом.
+  const sparkDates = lastDates(new Date(), SPARK_DAYS);
 
   // Строка — кнопка, как строка хаба: <div> выпал бы из таб-навигации
   let markup = '';
   for (let i = 0; i < habits.length; i++) {
     const habit = habits[i];
+    const spark = sparklineSvg(sparkValues(sparkDates, d => calcProgress(habit, [d])), {
+      label: habit.name + ', тренд за ' + SPARK_DAYS + ' дней',
+    });
     markup += '<li><button type="button" class="settings-row" data-habit-id="' +
       escapeHtml(habit.id) + '"><span>' + escapeHtml(habit.name) + '</span>' +
+      '<span class="stats-row-spark" aria-hidden="false">' + spark + '</span>' +
       '<span class="stats-row-value">' + escapeHtml(Math.round(calcProgress(habit, dates))) +
       '%</span></button></li>';
   }

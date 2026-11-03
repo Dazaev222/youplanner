@@ -32,6 +32,8 @@
   <link rel="stylesheet" href="styles/toast.css">
   <link rel="stylesheet" href="styles/settings.css">
   <link rel="stylesheet" href="styles/stats.css">
+  <link rel="stylesheet" href="styles/matrix.css">
+  <link rel="stylesheet" href="styles/sparkline.css">
   <link rel="stylesheet" href="styles/habits-edit.css">
   <link rel="stylesheet" href="styles/assistant.css">
   <link rel="stylesheet" href="styles/background.css">
@@ -714,6 +716,13 @@
     <p id="stats-sleep-empty-note" class="stats-empty-note" hidden></p>
   </section>
 
+  <!-- Раздел «Матрица Эйзенхауэра»: четыре квадранта, задачи. Данные пока
+       только на устройстве (youplanner.matrix.tasks) — в снимок синхронизации
+       узел не добавлен, потому что без правил слияния по updatedAt и без
+       надгробий второе устройство верну бы удалённую задачу (обоснование —
+       в шапке js/data/matrix.js) -->
+  <section id="matrix-view" hidden></section>
+
   <!-- Раздел «Цикл сна»: концы циклов по времени отхода, засыпания и подъёма.
        Открывается пунктом гамбургера на главной, данные живут на устройстве
        (youplanner.sleep). Полей три, и все три нужны расчёту: пустое любое —
@@ -811,6 +820,10 @@
          data-stats-view — экран берётся из него, и общего обработчика
          панели это не ломает -->
     <button type="button" class="stats-menu-item" data-sleep-view>Цикл сна</button>
+    <!-- Матрица — не раздел статистики, поэтому у неё свой атрибут, как у
+         «Цикла сна»: экран не лежит в data-stats-view и общий обработчик
+         статистики его не открыл бы -->
+    <button type="button" class="stats-menu-item" data-matrix-view>Матрица Эйзенхауэра</button>
   </aside>
 
   <!-- Нижний таб-бар: переключает разделы. Виден только на телефоне,
