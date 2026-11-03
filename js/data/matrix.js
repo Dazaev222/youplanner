@@ -184,6 +184,9 @@ export function compareTasks(a, b, today) {
   const dueB = b.due || '9999-12-31';
   if (dueA !== dueB) return dueA < dueB ? -1 : 1;
   if (a.order !== b.order) return a.order - b.order;
+  // Полная ничья — ноль, а не «1»: компаратор, враньём разводящий равные
+  // элементы, превращает стабильную сортировку в перестановку на пустом месте.
+  if (a.createdAt === b.createdAt) return 0;
   return a.createdAt < b.createdAt ? -1 : 1;
 }
 
@@ -200,9 +203,32 @@ export function activeTasks(tasks) {
   return (Array.isArray(tasks) ? tasks : []).filter(t => t && !t.done && !t.archived);
 }
 
-export function groupByQuadrant(tasks, today) {
+// Сделанные задачи видны только по просьбе: отметка «выполнено» убирает их из
+// матрицы, и без этой выборки человек теряет всякий след о том, куда делись
+// строки. Архивные живут своей списочной выборкой (см. archiveTasks).
+export function doneTasks(tasks) {
+  return (Array.isArray(tasks) ? tasks : [])
+    .filter(t => t && t.done && !t.archived);
+}
+
+export function archiveTasks(tasks) {
+  return (Array.isArray(tasks) ? tasks : []).filter(t => t && t.archived);
+}
+
+// `showDone` — единственный случай, когда список матрицы включает выполненное:
+// молча менять состав выборки в одном месте и не менять в другом — классика
+// расхождения, поэтому форма списка задаётся здесь, а не на вызовах.
+export function listForQuadrant(tasks, quadrant, today, showDone) {
+  const list = (showDone ? activeTasks(tasks).concat(doneTasks(tasks)) : activeTasks(tasks))
+    .filter(t => quadrantOf(t, today) === quadrant);
+  return list.sort((a, b) => compareTasks(a, b, today));
+}
+
+export function groupByQuadrant(tasks, today, showDone) {
   const groups = { q1: [], q2: [], q3: [], q4: [] };
-  const list = activeTasks(tasks);
+  const list = showDone
+    ? activeTasks(tasks).concat(doneTasks(tasks))
+    : activeTasks(tasks);
   for (let i = 0; i < list.length; i++) {
     groups[quadrantOf(list[i], today)].push(list[i]);
   }
@@ -210,34 +236,52 @@ export function groupByQuadrant(tasks, today) {
   return groups;
 }
 
-// Перенос карточки между квадрантами меняет ПРИЧИНУ, а не «квадрант»:
-// в срочные ставим близкий срок, из срочных — снимаем, в q4 — архивируем.
-// Иначе drag стал бы второй легендой правды, расходящейся с датой.
+// Причина, по которой задача попадает в квадрант: срок и приоритет. Вынесено
+// из переноса, потому что его используют двое — перенос карточки и выбор
+// квадранта в форме добавления. Расхождение этих двух мест означало бы, что
+// «срочно и важно» из drag и из формы означает разное.
 //
 // Срок ставится ТОЛЬКО если он не делает квадрант сам: у задачи «важно, срок
 // через неделю» перенос в q1 обязан перенести и срок на сегодня, иначе
 // карточка уедет в q1 по анимации и вернётся в q2 при первой же перерисовке.
-export function applyQuadrantMove(task, quadrant, today) {
+export function quadrantShape(quadrant, source, today) {
   const base = isDateLike(today) ? today : new Date();
-  const next = Object.assign({}, task);
-  next.archived = false;
+  const raw = source && typeof source === 'object' ? source : {};
+  const due = isoOrNull(raw.due);
+  const priority = PRIORITY_VALUES.indexOf(raw.priority) >= 0
+    ? raw.priority : PRIORITY_NONE;
+  const urgent = isUrgent({ due }, base);
+
   if (quadrant === 'q1') {
-    next.priority = Math.max(PRIORITY_MEDIUM, Number(task.priority) || 0);
-    if (!isUrgent(next, base)) next.due = toISODate(base);
-  } else if (quadrant === 'q2') {
-    next.priority = Math.max(PRIORITY_MEDIUM, Number(task.priority) || 0);
-    next.due = null;
-  } else if (quadrant === 'q3') {
-    next.priority = Math.min(PRIORITY_LOW, Number(task.priority) || 0);
-    if (!isUrgent(next, base)) next.due = toISODate(addDays(base, 1));
-  } else if (quadrant === 'q4') {
-    next.priority = Math.min(PRIORITY_LOW, Number(task.priority) || 0);
-    next.due = null;
-    next.archived = true;
-  } else {
-    return null;
+    return { priority: Math.max(PRIORITY_MEDIUM, priority), due: urgent ? due : toISODate(base) };
   }
-  next.updatedAt = new Date().toISOString();
+  if (quadrant === 'q2') {
+    return { priority: Math.max(PRIORITY_MEDIUM, priority), due: null };
+  }
+  if (quadrant === 'q3') {
+    return { priority: Math.min(PRIORITY_LOW, priority), due: urgent ? due : toISODate(addDays(base, 1)) };
+  }
+  if (quadrant === 'q4') {
+    return { priority: Math.min(PRIORITY_LOW, priority), due: null };
+  }
+  return null;
+}
+
+// Перенос карточки между квадрантами меняет ПРИЧИНУ, а не «квадрант»:
+// в срочные ставим близкий срок, из срочных — снимаем. Иначе drag стал бы
+// второй легендой правды, расходящейся с датой.
+//
+// Архив — НЕ следствие квадранта. «Не срочно и не важно» — настоящий
+// четвёртый квадрант, и перенос в него обязан оставить задачу видимой:
+// иначе форма добавления, где человек выбрал именно этот квадрант, прятала
+// бы задачу в архив молча. Снятие в архив — отдельное действие (archiveTask).
+export function applyQuadrantMove(task, quadrant, today) {
+  const shape = quadrantShape(quadrant, task, today);
+  if (!shape) return null;
+  const next = Object.assign({}, task, shape, {
+    archived: task && task.archived === true,
+    updatedAt: new Date().toISOString(),
+  });
   return sanitizeTask(next);
 }
 
@@ -248,6 +292,21 @@ export function markDone(task, done) {
     updatedAt: new Date().toISOString(),
   });
   return sanitizeTask(next);
+}
+
+// Возврат из архива и удаление безвозвратное — два разных действия, и оба
+// должны быть в данных, а не в экране: экран обязан показывать архив, прежде
+// чем предлагать его очистить.
+export function restoreTask(task) {
+  const next = Object.assign({}, task, { archived: false, done: false, doneAt: null });
+  next.updatedAt = new Date().toISOString();
+  return sanitizeTask(next);
+}
+
+export function purgeTask(tasks, taskId) {
+  const list = Array.isArray(tasks) ? tasks : [];
+  const out = list.filter(t => t && t.id !== taskId);
+  return out.length === list.length ? list : out;
 }
 
 // Сколько задач в квадранте и сколько из них горит — для подписи заголовка.

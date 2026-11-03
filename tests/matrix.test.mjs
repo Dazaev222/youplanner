@@ -82,7 +82,8 @@ test('перенос в квадрант меняет причину, а не м
   assert.equal(ctx.quadrantOf(toQ3, TODAY), 'q3');
 
   const toQ4 = ctx.applyQuadrantMove(task(ctx, { priority: 3, due: iso(0) }), 'q4', TODAY);
-  assert.equal(toQ4.archived, true, 'в «не стоит» задача уходит из матрицы');
+  assert.equal(toQ4.archived, false,
+    'перенос в «не срочно и не важно» не прячет задачу: архив — отдельное действие');
   assert.equal(ctx.quadrantOf(toQ4, TODAY), 'q4');
 
   assert.equal(ctx.applyQuadrantMove(plainTask, 'q99', TODAY), null,
@@ -106,10 +107,7 @@ test('перенос всегда долетает до целевого ква�
   for (const [quadrant, source] of moves) {
     const moved = ctx.applyQuadrantMove(source, quadrant, TODAY);
     assert.notEqual(moved, null);
-    if (quadrant === 'q4') {
-      assert.equal(moved.archived, true, 'q4 — архивом, а не меткой');
-      continue;
-    }
+    assert.equal(moved.archived, false, 'перенос не прячет задачу в архив');
     assert.equal(ctx.quadrantOf(moved, TODAY), quadrant,
       `перенос ${quadrant} из ${JSON.stringify({ p: source.priority, d: source.due })} не долетел`);
   }
@@ -221,15 +219,139 @@ test('статистика квадранта считает и просрочк
 // Лист переноса — единственное место экрана, где решение о смысле, а не про
 // то, оно вынесено в чистую функцию и проверяется здесь (остальной matrix-view
 // это DOM, недоступный песочнице).
-test('лист переноса не предлагает текущий квадрант и не дублирует архив', (t) => {
+test('лист переноса не предлагает текущий квадрант', (t) => {
   const { context: ctx } = loadApp();
   const ids = (over) => plain(ctx.moveOptions(task(ctx, over), TODAY).map(q => q.id));
-  assert.deepEqual(ids({ priority: 3, due: iso(0) }), ['q2', 'q3'], 'из «сделать сразу»');
-  assert.deepEqual(ids({ priority: 3, due: null }), ['q1', 'q3'], 'из «запланировать»');
-  assert.deepEqual(ids({ priority: 1, due: iso(1) }), ['q1', 'q2'], 'из «делегировать»');
-  assert.deepEqual(ids({ priority: 0, due: null }), ['q1', 'q2', 'q3'],
-    'из «не стоит» — все три, архив всё равно отдельной кнопкой');
+  assert.deepEqual(ids({ priority: 3, due: iso(0) }), ['q2', 'q3', 'q4'], 'из «срочно и важно»');
+  assert.deepEqual(ids({ priority: 3, due: null }), ['q1', 'q3', 'q4'], 'из «не срочно, но важно»');
+  assert.deepEqual(ids({ priority: 1, due: iso(1) }), ['q1', 'q2', 'q4'], 'из «срочно, но не важно»');
+  assert.deepEqual(ids({ priority: 0, due: null }), ['q1', 'q2', 'q3'], 'из «не срочно и не важно»');
   for (const over of [{ priority: 3, due: iso(0) }, { priority: 0, due: iso(40) }]) {
-    assert.ok(!ids(over).includes('q4'), 'q4 = «В архив», двумя такими пунктами лист не работает');
+    const current = ctx.quadrantOf(task(ctx, over), TODAY);
+    const others = ['q1', 'q2', 'q3', 'q4'].filter(id => id !== current);
+    assert.deepEqual(ids(over), others,
+      'остальные три квадранта, включая q4: архив — отдельная кнопка, а не четвёртый квадрант');
   }
+});
+
+// Выбор квадранта в форме добавления и перенос карточки обязаны означать
+// одно и то же: для этого у правила есть одна функция (quadrantShape), и
+// тест проверяет её напрямую, а не через DOM.
+test('quadrantShape — одна причина для переноса и для формы', (t) => {
+  const { context: ctx } = loadApp();
+  assert.deepEqual(plain(ctx.quadrantShape('q1', { due: null, priority: 0 }, TODAY)),
+    { priority: 2, due: iso(0) }, 'срок сегодня, важность не ниже средней');
+  assert.deepEqual(plain(ctx.quadrantShape('q2', { due: iso(-3), priority: 3 }, TODAY)),
+    { priority: 3, due: null }, 'срок снимается, важность остаётся');
+  assert.deepEqual(plain(ctx.quadrantShape('q3', { due: iso(30), priority: 3 }, TODAY)),
+    { priority: 1, due: iso(1) }, 'далёкий срок заменяется завтрашним');
+  assert.deepEqual(plain(ctx.quadrantShape('q4', { due: iso(0), priority: 1 }, TODAY)),
+    { priority: 1, due: null });
+  assert.equal(ctx.quadrantShape('q7', {}, TODAY), null, 'несуществующий квадрант');
+  assert.equal(ctx.quadrantShape('q1', null, TODAY).due, iso(0), 'пустой источник — не падение');
+  assert.equal(ctx.quadrantShape('q1', { priority: '3' }, TODAY).priority, 2,
+    'приоритет строкой не проходит проверку набора и становится «нет»');
+});
+
+test('срок, который уже делает квадрант срочным, сохраняется', (t) => {
+  const { context: ctx } = loadApp();
+  assert.equal(ctx.quadrantShape('q1', { due: iso(1), priority: 3 }, TODAY).due, iso(1),
+    'завтрашний срок в «срочно и важно» двигать не нужно');
+  assert.equal(ctx.quadrantShape('q3', { due: iso(-2), priority: 0 }, TODAY).due, iso(-2),
+    'просроченный срок остаётся просроченным, а не становится завтрашним');
+});
+
+test('выполненные и архивные выборки не смешиваются', (t) => {
+  const { context: ctx } = loadApp();
+  const list = [
+    task(ctx, { id: 'живая', priority: 3, due: iso(0) }),
+    task(ctx, { id: 'сделанная', priority: 3, due: iso(0), done: true }),
+    task(ctx, { id: 'архивная', priority: 3, due: iso(0), archived: true }),
+  ];
+  assert.deepEqual(plain(ctx.activeTasks(list).map(x => x.id)), ['живая']);
+  assert.deepEqual(plain(ctx.doneTasks(list).map(x => x.id)), ['сделанная']);
+  assert.deepEqual(plain(ctx.archiveTasks(list).map(x => x.id)), ['архивная']);
+
+  assert.deepEqual(plain(ctx.listForQuadrant(list, 'q1', TODAY, false).map(x => x.id)),
+    ['живая'], 'по умолчанию выполненных не видно');
+  assert.deepEqual(plain(ctx.listForQuadrant(list, 'q1', TODAY, true).map(x => x.id)),
+    ['живая', 'сделанная'], 'по просьбе — видно, и просроченная первая');
+  assert.deepEqual(plain(ctx.groupByQuadrant(list, TODAY, true).q1.map(x => x.id)),
+    ['живая', 'сделанная'], 'сетка и список квадранта должны сходиться');
+  assert.equal(ctx.groupByQuadrant(list, TODAY, true).q4.length, 0,
+    'архив не попадает ни в один квадрант');
+});
+
+test('из архива возвращаются и удаляют его осознанно', (t) => {
+  const { context: ctx } = loadApp();
+  const archived = task(ctx, { id: 'a', archived: true, done: true, priority: 2, due: iso(-1) });
+
+  const back = ctx.restoreTask(archived);
+  assert.equal(back.archived, false);
+  assert.equal(back.done, false, 'возврат — это возвращение в работу, а не в «выполнено»');
+  assert.equal(back.due, iso(-1), 'возврат не переписывает срок и приоритет');
+
+  const list = [task(ctx, { id: 'keep' }), archived];
+  assert.deepEqual(plain(ctx.purgeTask(list, 'a').map(x => x.id)), ['keep']);
+  assert.equal(ctx.purgeTask(list, 'нет-такого').length, 2, 'чужой id не меняет список');
+});
+
+/* --- Строка ввода: выбор квадранта как причина --------------------------- */
+
+// Здесь today() модуля — реальные часы машины, поэтому даты считаются тем же
+// локальным способом, а не берутся из TODAY.
+function realIso(offsetDays) {
+  const d = new Date();
+  d.setDate(d.getDate() + (offsetDays || 0));
+  return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0')
+    + '-' + String(d.getDate()).padStart(2, '0');
+}
+
+test('выбор квадранта в строке ввода переставляет причину и ведёт за собой экран', (t) => {
+  const { context: ctx } = loadApp();
+
+  ctx.openQuadrantView('q1', true);
+  let st = ctx.matrixDebugState();
+  assert.equal(st.openQuadrant, 'q1');
+  assert.ok(st.draft.due, 'в срочный квадрант срок вписывается сразу');
+
+  assert.equal(ctx.pickDraftQuadrant('q2'), true);
+  st = ctx.matrixDebugState();
+  assert.equal(st.openQuadrant, 'q2',
+    'экран переезжает вместе с выбором: иначе добавленная карточка уходит из вида');
+  assert.equal(st.draft.quadrant, 'q2');
+  assert.equal(st.draft.due, null, 'q2 — без срока');
+  assert.ok(st.draft.priority >= 2, 'q2 — важно');
+
+  // Из «без срока» в «горит» срок обязан появиться сам: с пустой датой
+  // карточка осталась бы в q2 при первой же перерисовке.
+  assert.equal(ctx.pickDraftQuadrant('q1'), true);
+  assert.equal(ctx.matrixDebugState().draft.due, realIso(0), 'q1 из q2 берёт сегодня');
+
+  // Правило то же, что у переноса карточки: дата меняется только тогда, когда
+  // она сама не делает квадрант, поэтому проверяем не конкретную дату, а прилёт.
+  for (const id of ['q3', 'q4', 'q2', 'q1']) {
+    assert.equal(ctx.pickDraftQuadrant(id), true);
+    const d = ctx.matrixDebugState().draft;
+    assert.equal(d.quadrant, id);
+    assert.equal(ctx.matrixDebugState().openQuadrant, id, id + ': экран идёт за выбором');
+    assert.equal(ctx.quadrantOf({ due: d.due, priority: d.priority }, new Date()), id,
+      id + ': черновик долетает до обещанного квадранта');
+  }
+
+  assert.equal(ctx.pickDraftQuadrant('q9'), false, 'несуществующего квадранта нет');
+  assert.equal(ctx.matrixDebugState().openQuadrant, 'q1', 'неудачный выбор ничего не меняет');
+});
+
+test('задача из строки ввода долетает ровно до выбранного квадранта', (t) => {
+  const { context: ctx } = loadApp();
+  ctx.openQuadrantView('q1', true);
+  ctx.pickDraftQuadrant('q2');
+  const draft = ctx.matrixDebugState().draft;
+  const added = ctx.addTask(draft.quadrant, {
+    title: 'Из строки ввода', notes: '', due: draft.due, priority: draft.priority,
+  });
+  assert.ok(added, 'задача не добавилась');
+  assert.equal(ctx.quadrantOf(added, new Date()), 'q2',
+    'то, что обещает пилюля, и то, где карточка лежит, — одно и то же');
 });

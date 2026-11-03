@@ -1,21 +1,22 @@
-/* Матрица Эйзенхауэра — экран 2×2 по эталону TickTick. Файл переписан с нуля,
-   и вот правила, из-за которых прежний вариант был мусор:
+/* Матрица Эйзенхауэра — экран 2×2, полноэкранный вид квадранта и инлайн-
+   строка ввода. Всё по эталону TickTick; правила, из-за которых так:
 
    1. Карточка отделяется ЗАЛИВКОЙ и мягкой тенью, а не рамкой и не цветной
-      полосой сверху. Полоса — это «странная линия»: она не значит ничего,
-      кроме того, что кто-то хотел цвета. Цвет квадранта живёт там, где он
-      работает — в бейдже с римской цифрой и в заголовке.
-   2. Белый карточке нужен серый холст: на --bg (#FEFEFE) белое не отделяется
-      ничем, и тень начинает делать работу рамки. Поэтому экран лежит на
-      --surface-alt — как в эталоне.
+      полосой. Полоса — «странная линия», которая не значит ничего. Цвет
+      квадранта живёт там, где он работает: в бейдже с римской цифрой, в
+      заголовке и в пилюле.
+   2. Белому карточке нужен серый холст: на --bg (#FEFEFE) белое не
+      отделяется ничем, и тень начинала делать работу рамки.
    3. Воздух — это отступ, а не рамка: 12–14px внутри карточки, 10px между
-      строками, 14px между карточками. Разделителей между строками нет:
-      группы держит расстояние.
-   4. Пустой список — иллюстрация с воронкой, а не голая надпись: пустая
-      карточка с текстом в углу выглядит сломанной, а не готовой.
+      строками, 14px между карточками. Разделителей между строками нет.
+   4. Строка ввода — часть экрана, а не модалка: она лежит внизу, растёт
+      вместе с текстом и остаётся над клавиатурой, поэтому человек видит
+      список, куда пишет.
+   5. Пустой список — воронка с конфетти: большая на пустом экране квадранта,
+      маленькая в карточке сетки.
 
-   Вся палитра и радиусы — из styles/tokens.css (--matrix-qN, --radius-*,
-   --shadow-card); новых значений здесь не заводится. */
+   Палитра квадрантов и тени — токены (styles/tokens.css); новых значений
+   здесь не заводится. */
 
 /* --- Холст и заголовок --------------------------------------------------- */
 
@@ -24,6 +25,7 @@ body.view-matrix {
 }
 
 #matrix-view {
+  position: relative;
   max-width: 760px;
   margin: 0 auto;
   padding: 6px 14px calc(120px + env(safe-area-inset-bottom, 0px));
@@ -48,6 +50,31 @@ body.view-matrix {
   margin: 5px 0 0;
   font-size: 12px;
   color: var(--matrix-q1);
+}
+
+/* Кнопки-кружки «⋯» и «назад»: белый круг на мягком холсте, как в эталоне. */
+.matrix-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--surface-card);
+  color: var(--text-muted);
+  box-shadow: var(--shadow-card);
+}
+
+.matrix-icon:hover { color: var(--text); }
+
+.matrix-head-menu {
+  position: absolute;
+  top: 6px;
+  right: 14px;
+  width: 38px;
+  height: 38px;
 }
 
 /* --- Сетка 2×2 и карточки ------------------------------------------------ */
@@ -77,12 +104,21 @@ body.view-matrix {
 .q-q3 { --qb: var(--matrix-q3); --qb-soft: var(--matrix-q3-soft); }
 .q-q4 { --qb: var(--matrix-q4); --qb-soft: var(--matrix-q4-soft); }
 
+/* Шапка карточки — кнопка: тап по ней открывает квадрант целиком. */
 .matrix-card-head {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 0 2px;
+  margin: 0;
+  padding: 0 2px 2px;
+  border: none;
+  background: transparent;
+  box-shadow: none;
+  border-radius: var(--radius-sm);
+  text-align: left;
 }
+
+.matrix-card-head:hover { background: var(--surface-alt); }
 
 /* Бейдж: залит пастелью квадранта, цифра — тем же тоном, что заголовок.
    Белая цифра на пастели была бы красивее эталона и читалась бы хуже. */
@@ -101,15 +137,13 @@ body.view-matrix {
   letter-spacing: .01em;
 }
 
-/* Заголовок квадранта — одна строка: перенос «не срочно, но / важно» ломает
-   оптическую пару с бейджем, а счётчик справа отнимает как раз те пиксели,
-   из-за которых он и переносится. */
+/* Заголовок квадранта — одна строка: перенос ломает оптическую пару с
+   бейджем, а на узком телефоне ему как раз не хватает нескольких пикселей. */
 .matrix-card-title {
-  margin: 0;
   min-width: 0;
   font-size: 13px;
   font-weight: 650;
-  line-height: 22px;     /* высота бейджа: базовая линия заголовка на одной с ним */
+  line-height: 22px;
   color: var(--qb);
   white-space: nowrap;
   overflow: hidden;
@@ -118,10 +152,12 @@ body.view-matrix {
 
 /* --- Строка задачи -------------------------------------------------------- */
 
-.matrix-list {
+.matrix-list,
+.matrix-detail-list {
   display: flex;
   flex-direction: column;
-  margin-top: 4px;
+  gap: 10px;
+  margin-top: 6px;
 }
 
 .matrix-task {
@@ -129,8 +165,13 @@ body.view-matrix {
   grid-template-columns: 22px minmax(0, 1fr) 26px;
   align-items: start;
   gap: 10px;
-  padding: 10px 2px;
-  border-radius: var(--radius-sm);
+}
+
+.matrix-detail-item {
+  padding: 12px;
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-card);
 }
 
 .matrix-check {
@@ -145,18 +186,25 @@ body.view-matrix {
   border-radius: var(--radius-pill);
   background: transparent;
   color: transparent;
+  box-shadow: none;
   transition: border-color .15s, color .15s, background-color .15s;
 }
 
 .matrix-check:hover { border-color: var(--accent); color: var(--accent); }
 .matrix-check:active { background: var(--accent-soft); }
 
+.matrix-task.is-done .matrix-check {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.matrix-task.is-done .matrix-task-title { color: var(--text-tertiary); }
+
 .matrix-task-body { min-width: 0; }
 
-/* В узкой карточке строка задачи — не больше двух строк: пять строк у
-   длинного названия раздувают квадрант и ломают силуэт сетки 2×2, а одна
-   строка съедает слишком много текста. Два ряда — ровно столько, сколько
-   видно, не разрывая карточку. */
+/* Две строки заголовка — максимум: пять строк раздувают квадрант и ломают
+   силуэт 2×2, одна строка съедает слишком много текста. */
 .matrix-task-title {
   display: -webkit-box;
   -webkit-box-orient: vertical;
@@ -168,8 +216,6 @@ body.view-matrix {
   color: var(--text);
 }
 
-/* Мета — вторая строка того же блока: 4px между заголовком и пилюлями,
-   воздух даёт паддинг строки, а не раздвинутые линии. */
 .matrix-task-meta {
   display: flex;
   flex-wrap: wrap;
@@ -206,17 +252,21 @@ body.view-matrix {
 .matrix-note-hint {
   font-size: 11.5px;
   color: var(--text-tertiary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100%;
 }
 
 .matrix-more {
   flex: none;
   width: 26px;
   height: 26px;
-  margin: 0;
   padding: 0;
   border: none;
   border-radius: var(--radius-pill);
   background: transparent;
+  box-shadow: none;
   color: var(--text-tertiary);
   font-size: 15px;
   line-height: 1;
@@ -224,32 +274,28 @@ body.view-matrix {
 
 .matrix-more:hover { background: var(--surface-alt); color: var(--text-muted); }
 
-/* --- Фокус ---------------------------------------------------------------- */
-
-/* Тот же приём, что у остальных полей приложения (buttons.css, modal.css):
-   заводское кольцо браузера — жёлтое, и на сером поле оно выглядит вставкой
-   из другой системы. */
-.matrix-composer-title:focus-visible,
-.matrix-composer-due:focus-visible,
-.matrix-composer-priority:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 1px;
-  border-radius: var(--radius-sm);
+/* Действия в архиве: текстовые кнопки, а не кружки — их две на строку, и
+   кружки спорили бы с чекбоксом. */
+.matrix-act {
+  flex: none;
+  width: auto;
+  height: 28px;
+  padding: 0 10px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--surface-alt);
+  box-shadow: none;
+  color: var(--text-muted);
+  font-size: 12.5px;
 }
 
-.matrix-composer-add:focus-visible,
-.matrix-composer-cancel:focus-visible,
-.matrix-sheet-item:focus-visible,
-.matrix-sheet-cancel:focus-visible,
-.matrix-pick:focus-visible,
-.matrix-fab:focus-visible,
-.matrix-check:focus-visible,
-.matrix-more:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-}
+.matrix-act.is-danger { color: var(--danger); }
 
-/* --- Пустой квадрант: воронка -------------------------------------------- */
+/* В архиве у строки два действия и ни одного чекбокса: заголовок тянется,
+   кнопки стоят справа по своей ширине. */
+.matrix-task.is-archive { grid-template-columns: minmax(0, 1fr) auto auto; }
+
+/* --- Пустой список: воронка ---------------------------------------------- */
 
 .matrix-empty {
   display: flex;
@@ -258,16 +304,38 @@ body.view-matrix {
   align-items: center;
   justify-content: center;
   gap: 2px;
-  margin: 8px 0 2px;
-  font-size: 12.5px;
-  color: var(--text-tertiary);
+  padding: 28px 0;
+  text-align: center;
+}
+
+.matrix-empty.is-card {
+  padding: 10px 0 2px;
 }
 
 .matrix-empty-art {
   display: block;
   width: 54px;
   height: 47px;
-  margin-bottom: 6px;
+  margin-bottom: 8px;
+}
+
+.matrix-empty:not(.is-card) .matrix-empty-art {
+  width: 132px;
+  height: 116px;
+  margin-bottom: 14px;
+}
+
+.matrix-empty-label {
+  margin: 0;
+  font-size: 13px;
+  color: var(--text-tertiary);
+}
+
+.matrix-empty-sub {
+  margin: 2px 0 0;
+  font-size: 12px;
+  color: var(--text-tertiary);
+  opacity: .75;
 }
 
 /* Воронка подкрашивается в цвет своего квадранта: четыре одинаковые серые
@@ -293,11 +361,13 @@ body.view-matrix {
 
 /* --- Кнопка добавления (FAB) --------------------------------------------- */
 
+/* 1020: кнопка живёт и над сеткой, и внутри полноэкранного вида квадранта
+   (1010) — ниже листа (1050) и меню (1060), выше таб-бара (1000). */
 .matrix-fab {
   position: fixed;
   right: 20px;
   bottom: 24px;
-  z-index: 900;
+  z-index: 1020;
   display: grid;
   place-items: center;
   width: 54px;
@@ -314,8 +384,7 @@ body.view-matrix {
 .matrix-fab:hover { filter: brightness(1.06); }
 .matrix-fab:active { transform: scale(.95); }
 
-/* Капсула таб-бара сидит на 20px + 64px высоты: кнопка поднимается над ней,
-   иначе на телефоне она закрывает последний пункт листа. */
+/* Капсула таб-бара сидит на 20px + 64px высоты: кнопка поднимается над ней. */
 @media (max-width: 700px) {
   .matrix-fab {
     right: 16px;
@@ -323,16 +392,233 @@ body.view-matrix {
   }
 }
 
-/* На широком экране колонка контента центрирована и ограничена 760px, а
-   fixed-кнопка прижалась бы к краю окна и повисла бы в пустоте над полем.
-   Поэтому она держится правого края колонки: половина вьюпорта минус половина
-   колонки плюс её внутренний отступ. */
-@media (min-width: 761px) {
-  #matrix-view { padding-bottom: 48px; }
-  .matrix-fab { right: max(24px, calc(50vw - 366px)); }
+/* --- Полноэкранный вид квадранта ----------------------------------------- */
+
+/* Полноэкранный вид квадранта перекрывает таб-бар (1000): он сам себе экран,
+   и строка ввода не должна прятаться под капсулой. Листы (1050) и меню
+   (1060) поднимаются над ним. */
+.matrix-detail {
+  position: fixed;
+  inset: 0;
+  z-index: 1010;
+  display: flex;
+  flex-direction: column;
+  background: var(--surface-alt);
 }
 
-/* --- Листы: выбор квадранта, перенос, добавление ------------------------- */
+.matrix-detail-head {
+  flex: none;
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 40px;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px calc(10px + env(safe-area-inset-top, 0px)) 14px;
+  padding-top: calc(10px + env(safe-area-inset-top, 0px));
+}
+
+.matrix-detail-head .matrix-icon {
+  width: 38px;
+  height: 38px;
+}
+
+.matrix-back { justify-self: start; }
+.matrix-detail-menu { justify-self: end; }
+
+.matrix-detail-title {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 650;
+  text-align: center;
+  color: var(--text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.matrix-detail-body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 6px 14px 18px;
+}
+
+.matrix-detail-body .matrix-empty {
+  min-height: 100%;
+}
+
+.matrix-detail-body .matrix-task {
+  gap: 10px;
+}
+
+/* --- Инлайн-строка ввода -------------------------------------------------- */
+
+.matrix-composer {
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 12px 14px calc(12px + env(safe-area-inset-bottom, 0px));
+  border-radius: 20px 20px 0 0;
+  background: var(--surface-card);
+  box-shadow: 0 -6px 24px rgba(20, 20, 40, .08);
+}
+
+/* Поля без рамок и без подложек: вся строка — одна белая поверхность, и
+   серое поле внутри неё выглядело бы вставкой из другой системы. */
+.matrix-composer-title,
+.matrix-composer-notes {
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: var(--text) !important;
+  font: inherit;
+  resize: none;
+  outline: none;
+}
+
+.matrix-composer-title {
+  font-size: 16px;
+  line-height: 1.4;
+  max-height: 120px;
+  overflow-y: auto;
+}
+
+.matrix-composer-notes {
+  font-size: 13.5px;
+  line-height: 1.4;
+}
+
+.matrix-composer-title::placeholder,
+.matrix-composer-notes::placeholder {
+  color: var(--text-tertiary);
+  opacity: 1;
+}
+
+.matrix-composer-line {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.matrix-quad-pill {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  max-width: 58%;
+  min-height: 30px;
+  padding: 3px 10px 3px 4px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--qb-soft);
+  color: var(--qb);
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 600;
+}
+
+.matrix-quad-pill .matrix-badge {
+  width: 20px;
+  height: 20px;
+  background: color-mix(in srgb, var(--qb) 22%, var(--surface-card));
+  font-size: 9.5px;
+}
+
+.matrix-quad-pill span:last-child {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.matrix-attr {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 32px;
+  padding: 0 9px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-tertiary);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.matrix-attr:hover { background: var(--surface-alt); }
+.matrix-attr.is-set { color: var(--accent); }
+.matrix-attr.is-set.p3 { color: var(--matrix-q1); }
+.matrix-attr.is-set.p2 { color: var(--matrix-q2); }
+.matrix-attr.is-set.p1 { color: var(--text-muted); }
+
+.matrix-attr-label { white-space: nowrap; }
+
+.matrix-send {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 40px;
+  margin-left: auto;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: var(--on-accent);
+  box-shadow: var(--shadow-card);
+  transition: transform .12s, filter .12s;
+}
+
+.matrix-send:hover { filter: brightness(1.06); }
+.matrix-send:active { transform: scale(.95); }
+
+/* --- Всплывающее меню ----------------------------------------------------- */
+
+/* Меню открывается над якорем, координаты считает JS по getBoundingClientRect:
+   fixed, потому что живёт и над сеткой, и над полноэкранным видом квадранта,
+   где контейнер меню смещён. */
+.matrix-pop {
+  position: fixed;
+  left: 12px;
+  top: 12px;
+  z-index: 1060;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 232px;
+  max-width: calc(100% - 28px);
+  padding: 6px;
+  border-radius: var(--radius-lg);
+  background: var(--surface-card);
+  box-shadow: var(--shadow);
+}
+
+.matrix-pop-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 42px;
+  padding: 8px 10px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 14px;
+  text-align: left;
+}
+
+.matrix-pop-item:hover { background: var(--surface-alt); }
+.matrix-pop-item.is-current { color: var(--accent); }
+
+.matrix-pop-label { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.matrix-pop-trailing { margin-left: auto; font-size: 12px; color: var(--text-tertiary); }
+.matrix-pop-icon { display: grid; place-items: center; color: var(--text-muted); }
+
+/* --- Листы (перенос, срок) ------------------------------------------------ */
 
 .matrix-sheet-backdrop {
   position: fixed;
@@ -356,7 +642,13 @@ body.view-matrix {
   box-shadow: var(--shadow);
 }
 
-/* Grabber: единственный «хвост» листа, он же подсказка, что лист тянется. */
+/* Лист срока выше остальных: календарь с месяцами и плашками не должен
+   обрезаться под клавиатурой — он скроллится внутри себя. */
+.matrix-sheet.is-date {
+  max-height: 84vh;
+  overflow: auto;
+}
+
 .matrix-sheet-grabber {
   width: 38px;
   height: 4px;
@@ -366,16 +658,13 @@ body.view-matrix {
 }
 
 .matrix-sheet-title {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin: 0 2px 4px;
-  font-size: 13.5px;
+  margin: 0 2px 2px;
+  font-size: 14px;
   font-weight: 650;
   color: var(--text);
 }
 
-.matrix-sheet-task {
+.matrix-sheet-sub {
   margin: 0 2px 6px;
   font-size: 12px;
   color: var(--text-tertiary);
@@ -398,14 +687,9 @@ body.view-matrix {
 }
 
 .matrix-sheet-item:active { background: var(--surface-pressed); }
-
-.matrix-sheet-hint {
-  margin-left: auto;
-  font-size: 12px;
-  color: var(--text-tertiary);
-}
-
 .matrix-sheet-item.is-archive { color: var(--text-muted); }
+.matrix-sheet-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.matrix-sheet-hint { margin-left: auto; font-size: 12px; color: var(--text-tertiary); }
 
 .matrix-sheet-cancel {
   min-height: 46px;
@@ -418,132 +702,214 @@ body.view-matrix {
   font-size: 14px;
 }
 
-/* --- Форма добавления ----------------------------------------------------- */
-
-.matrix-composer {
-  display: flex;
-  flex-direction: column;
+/* Лист срока: шапка с крестиком, сегментом и галочкой — как в эталоне. */
+.matrix-sheet-head {
+  display: grid;
+  grid-template-columns: 40px minmax(0, 1fr) 40px;
+  align-items: center;
   gap: 10px;
+  margin-bottom: 6px;
 }
 
-.matrix-composer-field {
-  display: block;
-  padding: 11px 12px;
-  border-radius: var(--radius-md);
-  background: var(--surface-alt);
-}
-
-.matrix-composer-field-label {
-  display: block;
-  margin-bottom: 3px;
-  font-size: 11px;
-  color: var(--text-tertiary);
-}
-
-.matrix-composer-title,
-.matrix-composer-due,
-.matrix-composer-priority {
-  width: 100%;
-  border: none;
-  background: transparent;
-  color: var(--text) !important;
-  font: inherit;
-  font-size: 14.5px;
+.matrix-sheet-x,
+.matrix-sheet-ok {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
   padding: 0;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--surface-alt);
+  color: var(--text-muted);
 }
 
-.matrix-composer-title::placeholder { color: var(--text-tertiary); }
-
-.matrix-composer-row {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
-  gap: 10px;
+.matrix-sheet-ok {
+  justify-self: end;
+  background: var(--accent);
+  color: var(--on-accent);
 }
 
-/* Выбор квадранта прямо в форме: четыре пастельные пилюли вместо меню —
-   человек видит, КУДА пишет, до того как нажал «Добавить». */
-.matrix-quadrant-picks {
+.matrix-date-title {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 650;
+  text-align: center;
+  color: var(--text);
+}
+
+.matrix-chips {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 8px;
 }
 
-.matrix-pick {
-  --qb: var(--text-muted);
-  --qb-soft: var(--surface-alt);
+.matrix-chip {
   display: flex;
   align-items: center;
-  gap: 7px;
-  min-height: 38px;
-  padding: 7px 9px;
-  border: 1.5px solid transparent;
-  border-radius: var(--radius-md);
-  background: var(--surface-alt);
-  color: var(--text-muted);
-  font: inherit;
-  font-size: 12.5px;
-  text-align: left;
-}
-
-.matrix-pick .matrix-badge { width: 19px; height: 19px; font-size: 9.5px; }
-
-.matrix-pick[aria-checked="true"] {
-  border-color: var(--qb);
-  background: var(--qb-soft);
-  color: var(--qb);
-}
-
-.matrix-composer-actions {
-  display: flex;
-  gap: 10px;
-  margin-top: 2px;
-}
-
-.matrix-composer-add {
-  flex: 1;
+  justify-content: center;
   min-height: 44px;
+  padding: 8px 6px;
   border: none;
   border-radius: var(--radius-md);
-  background: var(--accent);
-  color: var(--on-accent);
+  background: var(--surface-alt);
+  color: var(--text);
   font: inherit;
-  font-size: 15px;
+  font-size: 13px;
+  text-align: center;
+  white-space: nowrap;
+}
+
+.matrix-chip:active { background: var(--surface-pressed); }
+
+.matrix-chip.is-current {
+  background: var(--accent-soft);
+  color: var(--accent);
   font-weight: 600;
 }
 
-.matrix-composer-add:disabled {
-  background: var(--surface-pressed);
-  color: var(--text-muted);
+/* Календарь месяца. Неделя с понедельника — как во всей таблице приложения.
+   Сегодняшний день — светлый диск, выбранный — залит акцентом: два состояния
+   различаются весом, а не оттенком. */
+.matrix-cal-month {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 2px 0 6px;
 }
 
-.matrix-composer-cancel {
+.matrix-cal-label {
+  font-size: 14px;
+  font-weight: 650;
+  color: var(--text);
+}
+
+.matrix-cal-nav {
   flex: none;
-  min-height: 44px;
-  padding: 0 18px;
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  padding: 0;
   border: none;
-  border-radius: var(--radius-md);
-  background: var(--surface-alt);
-  color: var(--text-muted);
-  font: inherit;
-  font-size: 15px;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-tertiary);
 }
 
-/* --- Телефон: карточки в одну колонку не складываем ---------------------- */
+.matrix-cal-nav:hover { background: var(--surface-alt); color: var(--text); }
+.matrix-cal-nav.is-next svg { transform: rotate(180deg); }
 
-/* Квадранты — это матрица, 2×2 остаётся и на узком экране: в одну колонку
+.matrix-cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  row-gap: 2px;
+}
+
+.matrix-cal-wd {
+  font-size: 11px;
+  text-align: center;
+  padding: 4px 0 6px;
+  color: var(--text-tertiary);
+}
+
+.matrix-cal-day {
+  justify-self: center;
+  display: grid;
+  place-items: center;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.matrix-cal-day:hover { background: var(--surface-alt); }
+
+.matrix-cal-day.is-today {
+  background: var(--surface-alt);
+  color: var(--accent);
+  font-weight: 650;
+}
+
+.matrix-cal-day.is-selected,
+.matrix-cal-day.is-selected.is-today {
+  background: var(--accent);
+  color: var(--on-accent);
+  font-weight: 650;
+}
+
+.matrix-clear {
+  align-self: center;
+  margin-top: 6px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--danger);
+  font: inherit;
+  font-size: 14px;
+}
+
+.matrix-clear:hover { background: color-mix(in srgb, var(--danger) 8%, transparent); }
+
+/* --- Фокус ---------------------------------------------------------------- */
+
+/* Тот же приём, что у остальных контролов приложения (buttons.css):
+   заводское жёлтое кольцо выглядит вставкой из другой системы. */
+.matrix-icon:focus-visible,
+.matrix-card-head:focus-visible,
+.matrix-quad-pill:focus-visible,
+.matrix-attr:focus-visible,
+.matrix-send:focus-visible,
+.matrix-fab:focus-visible,
+.matrix-chip:focus-visible,
+.matrix-sheet-item:focus-visible,
+.matrix-sheet-cancel:focus-visible,
+.matrix-sheet-ok:focus-visible,
+.matrix-sheet-x:focus-visible,
+.matrix-pop-item:focus-visible,
+.matrix-act:focus-visible,
+.matrix-more:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* Кольцо — внутри поля, а не вокруг него: строка ввода прижата к краю экрана,
+   и offset наружу рисовал бы рамку, висящую поверх белых полей соседней строки. */
+.matrix-composer-title:focus-visible,
+.matrix-composer-notes:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+  border-radius: var(--radius-sm);
+}
+
+/* --- Узкий телефон -------------------------------------------------------- */
+
+/* Квадранты — это матрица: 2×2 остаётся и на узком экране, в одну колонку
    четыре карточки превращают экран в простыню и ломают саму идею осей.
-   Поэтому на телефон только уменьшаем воздух, а не перестраиваем сетку. */
+   Поэтому уменьшаем только воздух. */
 @media (max-width: 420px) {
   #matrix-view { padding-left: 10px; padding-right: 10px; }
   .matrix-grid { gap: 10px; }
   .matrix-card { padding: 12px 10px 10px; min-height: 158px; }
   .matrix-card-title { font-size: 12px; }
   .matrix-badge { width: 20px; height: 20px; font-size: 9.5px; }
-  .matrix-task { grid-template-columns: 22px minmax(0, 1fr) 24px; gap: 8px; }
+  .matrix-quad-pill { font-size: 11.5px; }
+  .matrix-attr { padding: 0 7px; font-size: 12px; }
 }
 
 @media (prefers-reduced-motion: reduce) {
   .matrix-check,
-  .matrix-fab { transition: none; }
-  .matrix-fab:active { transform: none; }
+  .matrix-fab,
+  .matrix-send { transition: none; }
+  .matrix-fab:active,
+  .matrix-send:active { transform: none; }
 }
