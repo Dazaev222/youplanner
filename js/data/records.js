@@ -266,6 +266,42 @@ function periodSignature(dates) {
   return dates[0] + '..' + dates[dates.length - 1] + ':' + dates.length;
 }
 
+// Граница «возраста привычки» — самая ранняя дата с записью по этой привычке
+// во ВСЕХ данных, а не внутри конкретного окна. Поля создания у привычки нет
+// (js/data/habits.js хранит id, name, unit, type, goal, time), поэтому граница
+// выводится из минимального ключа даты в youplanner.records, где встретилось
+// непустое значение: дни раньше неё привычка вестись не могла. Дни, вынесенные
+// в архив (js/data/archive.js), в расчёт не входят — они уже не читаются
+// loadRecords, и процент считается по живым данным, как и весь экран.
+// Снимок пересобирается один раз на версию данных записей: calcProgress —
+// самая горячая функция рендера, и скан хранилища на каждый вызов был бы
+// дороже самого подсчёта.
+let habitStartDates = null;
+let habitStartDatesVersion = -1;
+
+function habitFirstRecordDate(habitId) {
+  if (habitStartDates === null || habitStartDatesVersion !== recordsVersion) {
+    const dates = {};
+    const records = loadRecords();
+    // Ключи идут в возрастающем порядке: первый найденный день привычки и
+    // есть её начало, второй проход по тому же habitId не нужен
+    const keys = Object.keys(records).filter(d => /^\d{4}-\d{2}-\d{2}$/.test(d)).sort();
+    for (let i = 0; i < keys.length; i++) {
+      const day = records[keys[i]];
+      if (!day || typeof day !== 'object') continue;
+      const habitIds = Object.keys(day);
+      for (let j = 0; j < habitIds.length; j++) {
+        const id = habitIds[j];
+        if (dates[id] !== undefined) continue;
+        if (recordValue(keys[i], id) !== undefined) dates[id] = keys[i];
+      }
+    }
+    habitStartDates = dates;
+    habitStartDatesVersion = recordsVersion;
+  }
+  return habitStartDates[habitId];
+}
+
 // Тело calcProgress без кэша. Не экспортируется: наружу идёт обёртка
 // ниже, вызывающие (stats, stats-view, main-table) кэш не замечают.
 function calcProgressUncached(habit, dates) {
@@ -278,31 +314,33 @@ function calcProgressUncached(habit, dates) {
   const weights = { 'yes': 1, 'да': 1, 'two-min': 0.5, 'частично': 0.5,
     'no': 0, 'нет': 0, 'rest': 0, 'отдых': 0 };
 
-  // Находим самую раннюю дату с записью по этой привычке
-  let firstIdx = -1;
-  for (let i = 0; i < dates.length; i++) {
-    if (recordValue(dates[i], habit.id) !== undefined) {
-      firstIdx = i;
-      break; // даты идут от младшего к старшему
-    }
-  }
+  // Граница ведения — возраст привычки глобально (habitFirstRecordDate), а не
+  // первая запись внутри окна: week ⊂ month, и при обрезке по окну оба
+  // периода усекались до одного и того же дня и давали побитово одинаковые
+  // проценты. Даты идут от младшего к старшему.
+  const habitStart = habitFirstRecordDate(habit.id);
 
-  // Нет записей — 0%
-  if (firstIdx === -1) return 0;
+  // Привычка ни разу не отмечена — 0%
+  if (habitStart === undefined) return 0;
 
-  // Обрезаем даты до первой записи (индекс уже найден выше: второй проход
-  // indexOf по массиву на 365 дней был бы лишним)
-  const filteredDates = firstIdx > 0 ? dates.slice(firstIdx) : dates;
+  // Из знаменателя выкидываем только дни ДО появления привычки: вести её
+  // пользователь ещё не мог. Пустые дни ПОСЛЕ начала ведения остаются —
+  // непроставленный день и есть пропуск, он честно разбавляет процент.
+  let from = 0;
+  while (from < dates.length && dates[from] < habitStart) from++;
 
-  const base = filteredDates.length;
+  // Всё окно раньше привычки — считать нечего
+  if (from >= dates.length) return 0;
+
+  const base = dates.length - from;
   if (base <= 0) return 0;
 
   let sum = 0;
 
-  for (let i = 0; i < filteredDates.length; i++) {
+  for (let i = from; i < dates.length; i++) {
     // У Корана в прогресс идут введённые страницы, а не число отметок:
     // пустое поле даёт 0, две страницы — 2 (§2.6).
-    const value = recordValue(filteredDates[i], habit.id);
+    const value = recordValue(dates[i], habit.id);
     if (value === undefined) continue;
 
     if (habit.type === 'boolean') {
@@ -326,8 +364,12 @@ function calcProgressUncached(habit, dates) {
 
 // Процент выполнения привычки за набор дат. Может быть больше 100.
 // База — все дни периода, включая пустые: непроставленный день даёт 0.
-// Знаменатель обрезается до первой записи: пользователь видит прогресс за
-// тот период, когда реально вёл привычку, а не за весь календарь.
+// Знаменатель обрезается только днями ДО начала ведения привычки (её
+// «возраст» — самая ранняя запись по привычке во всех данных): пользователь
+// видит прогресс за период, когда реально мог её вести, а не за весь
+// календарь. Внутри периода ведения пустые дни разбавляют процент — иначе
+// любое окно схлопывалось бы в фактический диапазон данных, и неделя с
+// месяцем при пустом начале месяца давали бы одно и то же число.
 //
 // Карточка привычки за «Все время» зовёт это ~1500 раз за рендер (график,
 // сетка и серии — по одному дню), на телефонах это заметные лаги, поэтому

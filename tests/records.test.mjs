@@ -39,9 +39,10 @@ function mayDates(n) {
 
 const recordsCases = [
   {
-    name: 'calcProgress: знаменатель от первой записи — пустые первые дни не разбавляют',
+    name: 'calcProgress: база обрезается возрастом привычки — пустые дни ведения разбавляют',
     run: (context, sandbox) => {
-      // Записи с 3-го дня десятидневного периода: база — восемь дней
+      // Дни ДО начала ведения (привычка заведена 3-го числа) из знаменателя
+      // выпадают: вести привычку пользователь ещё не мог. База — восемь дней
       // (2/8 = 25%), а не все десять (было бы 2/10 = 20%)
       seedRecords(sandbox, {
         '2026-05-03': { h1: true },
@@ -51,8 +52,18 @@ const recordsCases = [
       const h = habit('h1', 'boolean', null);
       assert.equal(context.calcProgress(h, mayDates(10)), 25);
 
-      // Записи в конце периода — тот же принцип. Пишем в хранилище напрямую
-      // (мимо setRecord), как из другой вкладки: кэш надо сбросить руками
+      // А пустые дни ПОСЛЕ начала ведения — разбавляют: это и есть честный
+      // пропуск. Отметки 3-го и 10-го числа при ведении с 3-го дают 2/8, а не
+      // 2/2 = 100% («половина записанных дней»)
+      context.invalidateRecordsCache();
+      seedRecords(sandbox, {
+        '2026-05-03': { h1: true },
+        '2026-05-10': { h1: true },
+      });
+      context.invalidateRecordsCache();
+      assert.equal(context.calcProgress(h, mayDates(10)), 25);
+
+      // Отметки в конце периода: граница — 9-е число, база два дня (1/2 = 50%)
       context.invalidateRecordsCache();
       seedRecords(sandbox, {
         '2026-05-09': { h1: true },
@@ -60,6 +71,132 @@ const recordsCases = [
       });
       context.invalidateRecordsCache();
       assert.equal(context.calcProgress(h, mayDates(10)), 50);
+    },
+  },
+  {
+    name: 'проценты: неделя и месяц разные, когда начало месяца пропущено',
+    run: (context, sandbox) => {
+      // Механика бага: неделя ⊂ месяц, оба окна заканчиваются сегодня. Привычка
+      // ведётся с апреля, а первые дни мая пропущены. Старая обрезка «до
+      // первой записи ВНУТРИ окна» усекала месяц ровно до понедельника —
+      // знаменатель, сумма и процент совпадали с недельными побитово.
+      seedRecords(sandbox, {
+        '2026-04-20': { h1: true },   // начало ведения — до обоих окон
+        '2026-05-18': { h1: true },   // понедельник недели
+        '2026-05-19': { h1: true },
+        '2026-05-20': { h1: false },  // пропуск уже внутри недели
+        '2026-05-21': { h1: true },
+        '2026-05-22': { h1: true },
+      });
+      const h = habit('h1', 'boolean', null);
+      const week = ['2026-05-18', '2026-05-19', '2026-05-20', '2026-05-21', '2026-05-22'];
+      const month = [];
+      for (let d = 1; d <= 22; d++) month.push('2026-05-' + (d < 10 ? '0' + d : String(d)));
+
+      // Неделя: 4 отметки из пяти дней. Месяц: те же 4 отметки, но база — все
+      // 22 дня месяца, пустое начало считается пропуском, а не обрезается
+      assert.equal(context.calcProgress(h, week), 80);
+      assert.equal(context.calcProgress(h, month), 4 / 22 * 100);
+      assert.notEqual(context.calcProgress(h, week), context.calcProgress(h, month),
+        'неделя и месяц схлопнулись в один процент');
+    },
+  },
+  {
+    name: 'проценты: неделя и месяц равны, когда привычка начата в этом же окне',
+    run: (context, sandbox) => {
+      // Легитимное совпадение, его надо закрепить, чтобы не «починить» обратно:
+      // привычка реально заведена в понедельник недели. Граница ведения — та же
+      // дата и для недели, и для месяца, поэтому оба окна дают одну базу (5
+      // дней) и один процент. Разница с прежним поведением — не в обрезке, а в
+      // том, что граница теперь глобальная: стоителям «сегодня созданной»
+      // привычки месяц и неделя честно равны
+      seedRecords(sandbox, {
+        '2026-05-18': { h1: true },
+        '2026-05-19': { h1: true },
+        '2026-05-20': { h1: false },
+        '2026-05-21': { h1: true },
+        '2026-05-22': { h1: true },
+      });
+      const h = habit('h1', 'boolean', null);
+      const week = ['2026-05-18', '2026-05-19', '2026-05-20', '2026-05-21', '2026-05-22'];
+      const month = [];
+      for (let d = 1; d <= 22; d++) month.push('2026-05-' + (d < 10 ? '0' + d : String(d)));
+
+      assert.equal(context.calcProgress(h, week), 80);
+      assert.equal(context.calcProgress(h, month), 80);
+    },
+  },
+  {
+    name: 'проценты: number с goal, choice с весами и одиночный день у новой границы',
+    run: (context, sandbox) => {
+      seedRecords(sandbox, {
+        // h10 заведена 2 мая, h7 — 3 мая: дни раньше начала не в базе
+        '2026-05-02': { h10: 2 },
+        '2026-05-03': { h7: 'да' },
+        '2026-05-04': { h7: 'частично' },
+        '2026-05-05': { h10: 4, h7: 'отдых' },
+      });
+      context.invalidateRecordsCache();
+
+      // number: сумма 6 за 5 дней базы (05-02..05-06) = средний день 1.2 при
+      // цели 2 → 60%. Пустые 05-06 разбавляют, 05-01 — нет
+      const num = habit('h10', 'number', 2);
+      assert.equal(context.calcProgress(num, mayDates(6)), 60);
+
+      // choice: веса «да» 1 + «частично» 0.5 + «отдых» 0 при базе 4 (с 05-03)
+      // → 37.5%, как и раньше, но база задана началом ведения, а не окном
+      const choice = habit('h7', 'choice', null);
+      assert.equal(context.calcProgress(choice, mayDates(6)), 37.5);
+
+      // Одиночный день раньше начала ведения — 0, а не деление на пустоту;
+      // одиночный день внутри ведения — честные 100/0
+      assert.equal(context.calcProgress(num, ['2026-05-01']), 0);
+      assert.equal(context.calcProgress(num, ['2026-05-02']), 100);
+      assert.equal(context.calcProgress(choice, ['2026-05-04']), 50);
+      // Привычка без единой записи — 0 мимо всякой границы
+      assert.equal(context.calcProgress(habit('h99', 'boolean', null), mayDates(6)), 0);
+    },
+  },
+  {
+    name: 'проценты: «Все время» (365 дней) считает по полной базе',
+    run: (context, sandbox) => {
+      // stats.js подменяет «all» окном из STATS_ALL_DAYS дней; проверка, что
+      // новая граница не съедает длинное окно и не схлопывает его в месяц
+      const today = new Date(2026, 4, 31);
+      const all = context.statsPeriodDates('all', today);
+      const month = context.statsPeriodDates('month', today);
+      assert.equal(all.length, 365, 'окно «Все время» — подмена на 365 дней');
+      assert.equal(month.length, 31);
+
+      seedRecords(sandbox, {
+        [all[0]]: { h1: true },     // самый край 365-дневного окна: база полная
+        '2026-05-31': { h1: true },
+      });
+      context.invalidateRecordsCache();
+      const h = habit('h1', 'boolean', null);
+      assert.equal(context.calcProgress(h, all), 2 / 365 * 100);
+      // Месяц той же привычки не схлопывается к «одной отметке из одного дня»:
+      // база — все 31 день мая, отметка одна
+      assert.equal(context.calcProgress(h, month), 1 / 31 * 100);
+    },
+  },
+  {
+    name: 'граница ведения: удаление самой ранней записи сдвигает базу',
+    run: (context, sandbox) => {
+      // Снимок первых записей мемоизирован по версии данных: удалить первую
+      // запись и получить прежний процент кэш не имеет права
+      seedRecords(sandbox, {
+        '2026-04-20': { h1: true },
+        '2026-05-18': { h1: true },
+      });
+      const h = habit('h1', 'boolean', null);
+      const month = [];
+      for (let d = 1; d <= 22; d++) month.push('2026-05-' + (d < 10 ? '0' + d : String(d)));
+      assert.equal(context.calcProgress(h, month), 1 / 22 * 100);
+
+      assert.equal(context.setRecord('2026-04-20', 'h1', undefined), true);
+      // April-записи больше нет: начало ведения — 18 мая, база — пять дней
+      assert.equal(context.calcProgress(h, month), 20);
     },
   },
   {

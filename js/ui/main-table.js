@@ -21,8 +21,9 @@ export function getWeekDates(weekStart) {
   for (let i = 0; i < 7; i++) dates.push(toISODate(addDays(weekStart, i)));
   return dates;
 }
-// Прогресс привычки за отображаемую неделю. Знаменатель всегда 7 дней,
-// поэтому с каждым новым понедельником круг естественно обнуляется.
+// Прогресс привычки за отображаемую неделю. Знаменатель — дни недели от
+// начала ведения привычки (дни до первой записи из него выпадают), поэтому с
+// каждым новым понедельником круг естественно обнуляется.
 export function weekPercent(habit) {
   const weekStart = appState.weekStart;
   if (!weekStart) return 0;
