@@ -1,16 +1,25 @@
-/* Экран «Матрица Эйзенхауэра». Визуальный язык — TickTick: четыре карточки
-   2×2, у каждой заголовок со счётчиком, внутри — строки задач с круглым
-   чекбоксом, цветной точкой приоритета и пилюлей срока. Никаких своих
-   палитр и радиусов: только токены из styles/tokens.css.
+/* Экран «Матрица Эйзенхауэра» — 2×2 по эталону TickTick.
 
-   Перенос между квадрантами — лист на тап по «⋯», а не drag. Причина не в
-   лени: drag на телефоне конфликтует с вертикальным скроллом списка (а
-   список именно вертикальный), а его «призрак» на пол-экрана прячет тот
-   самый квадрант, куда человек целится. Лист даёт три варианта ответа
-   всегда, в том числе под пальцем. */
+   Что здесь решает внешний вид, и почему именно так:
+
+   * Квадрант не красится полосой и не обводится: его опознаватель — бейдж с
+     римской цифрой и цвет заголовка (токены --matrix-qN). Полоса сверху —
+     «странная линия», которая не значит ничего.
+   * Добавляет задачи одна FAB справа снизу, а не четыре «+» в шапках:
+     четыре кнопки делают одно и то же, и человек выбирает квадрант уже в
+     листе — там, где он видит, КУДА пишет.
+   * Перенос — лист на тап по «⋯», а не drag. Причина не в лени: drag на
+     телефоне конфликтует с вертикальным скроллом (а список именно
+     вертикальный), а его «призрак» на пол-экрана прячет тот самый квадрант,
+     куда человек целится.
+
+   Пользовательский текст уходит через textContent, разметка собирается из
+   константных строк: `<img onerror>` в заголовке задачи не должен становиться
+   разметкой (в проекте это правило действует для всех пользовательских
+   строк). */
 
 import { toISODate } from '../core/dates.js';
-import { escapeHtml, showToast } from '../core/dom.js';
+import { showToast } from '../core/dom.js';
 import {
   PRIORITY_MEDIUM,
   PRIORITY_NONE,
@@ -23,7 +32,6 @@ import {
   loadTasks,
   markDone,
   quadrantOf,
-  quadrantStats,
   saveTasks,
 } from '../data/matrix.js';
 
@@ -34,12 +42,33 @@ const PRIORITY_LABEL = {
   3: 'высокий',
 };
 
+// Воронка пустого квадранта — единственная иллюстрация экрана, и она же
+// подкраска из styles/matrix.css: рожок, конфетти над ним и звезда под срезом.
+// Асимметрия сознательная: два одинаковых завитка по бокам читались как
+// усики, а конфетти в эталоне рассыпано неровно.
+const FUNNEL_SVG = '<svg class="matrix-empty-art" viewBox="0 0 62 54" aria-hidden="true">'
+  + '<path class="funnel-curl" d="M15 11c-2.5-3.5 2.5-6.5 3.8-2.6"/>'
+  + '<path class="funnel-mark" d="M38 4l1.2 2.6 2.6 1.2-2.6 1.2L38 12.4l-1.2-2.6-2.6-1.2 2.6-1.2z"/>'
+  + '<circle class="funnel-mark" cx="50" cy="13" r="1.5"/>'
+  + '<ellipse class="funnel-mouth" cx="31" cy="20" rx="15" ry="5.5"/>'
+  + '<path class="funnel-body" d="M16 20l11 14h6l11-14"/>'
+  + '<path class="funnel-body" d="M27 34v10h8V34"/>'
+  + '<path class="funnel-mark" d="M31 45.5l1.5 3.1 3.4.5-2.5 2.3.6 3.4-3-1.6-3 1.6.6-3.4-2.5-2.3 3.4-.5z"/>'
+  + '</svg>';
+
 let tasks = [];
-let composerOpenIn = null;   // id квадранта с открытой формой добавления
-let sheetFor = null;         // id задачи, для которой открыт лист переноса
+let composerQuadrant = null;   // id квадранта открытой формы добавления
+let sheetFor = null;           // id задачи, для которой открыт лист переноса
 
 function today() {
   return new Date();
+}
+
+function quadrantById(id) {
+  for (let i = 0; i < QUADRANTS.length; i++) {
+    if (QUADRANTS[i].id === id) return QUADRANTS[i];
+  }
+  return null;
 }
 
 function dueLabel(task, now) {
@@ -53,153 +82,111 @@ function dueLabel(task, now) {
   return due.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
 }
 
-// Одна строка задачи. Текст уходит через escapeHtml: заголовок — то, что
-// набрал человек, и `<img onerror>` в нём не должен становиться разметкой
-// (в проекте это правило действует для всех пользовательских строк).
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined && text !== null) node.textContent = text;
+  return node;
+}
+
+// Бейдж с римской цифрой. Один и тот же узел и в шапке карточки, и в листе, и
+// в пилюле выбора квадранта — три копии разметки разошлись бы по размеру.
+function badge(quadrant) {
+  return el('span', 'matrix-badge', quadrant.numeral);
+}
+
 function taskRow(task, now) {
   const overdue = isOverdue(task, now);
-  const row = document.createElement('div');
-  row.className = 'matrix-task'
-    + (overdue ? ' is-overdue' : '')
-    + (task.priority >= PRIORITY_MEDIUM ? ' is-important' : '');
+  const row = el('div', 'matrix-task');
   row.dataset.taskId = task.id;
 
-  const check = document.createElement('button');
+  const check = el('button', 'matrix-check');
   check.type = 'button';
-  check.className = 'matrix-check';
   check.setAttribute('aria-label', 'Отметить выполненной: ' + task.title);
-  check.innerHTML = '<svg viewBox="0 0 20 20" width="14" height="14" aria-hidden="true">'
-    + '<path class="matrix-check-mark" d="M4 10.5l3.6 3.6L16 5.6" fill="none" '
-    + 'stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+  check.innerHTML = '<svg viewBox="0 0 20 20" width="13" height="13" aria-hidden="true">'
+    + '<path d="M4 10.5l3.6 3.6L16 5.6" fill="none" stroke="currentColor" '
+    + 'stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
   check.addEventListener('click', () => toggleDone(task.id));
 
-  const body = document.createElement('div');
-  body.className = 'matrix-task-body';
-  const title = document.createElement('div');
-  title.className = 'matrix-task-title';
-  title.textContent = task.title;
+  const body = el('div', 'matrix-task-body');
+  const title = el('div', 'matrix-task-title', task.title);
+  // Название обрезается многоточием — полный текст остаётся доступным:
+  // подсказкой на десктопе и подписью чекбокса ниже.
+  title.title = task.title;
   body.appendChild(title);
 
-  const meta = document.createElement('div');
-  meta.className = 'matrix-task-meta';
+  const meta = el('div', 'matrix-task-meta');
   if (task.priority !== PRIORITY_NONE) {
-    const dot = document.createElement('span');
-    dot.className = 'matrix-dot p' + task.priority;
+    const dot = el('span', 'matrix-dot p' + task.priority);
     dot.title = PRIORITY_LABEL[task.priority];
     meta.appendChild(dot);
   }
   if (task.due) {
-    const chip = document.createElement('span');
-    chip.className = 'matrix-due' + (overdue ? ' is-overdue' : '');
-    chip.textContent = dueLabel(task, now);
-    meta.appendChild(chip);
+    meta.appendChild(el('span', 'matrix-due' + (overdue ? ' is-overdue' : ''),
+      dueLabel(task, now)));
   }
-  if (task.notes) {
-    const note = document.createElement('span');
-    note.className = 'matrix-note-hint';
-    note.textContent = 'заметка';
-    meta.appendChild(note);
-  }
-  body.appendChild(meta);
+  if (task.notes) meta.appendChild(el('span', 'matrix-note-hint', 'заметка'));
+  if (meta.childNodes.length) body.appendChild(meta);
 
-  const more = document.createElement('button');
+  const more = el('button', 'matrix-more', '⋯');
   more.type = 'button';
-  more.className = 'matrix-more';
   more.setAttribute('aria-label', 'Перенести задачу: ' + task.title);
-  more.textContent = '⋯';
   more.addEventListener('click', () => openMoveSheet(task.id));
 
   row.append(check, body, more);
   return row;
 }
 
-function composer(quadrantId) {
-  const form = document.createElement('form');
-  form.className = 'matrix-composer';
-  form.dataset.quadrant = quadrantId;
-  const dueDefault = quadrantId === 'q1' || quadrantId === 'q3'
-    ? toISODate(today()) : '';
-  form.innerHTML = '<input class="matrix-composer-title" name="title" type="text" '
-    + 'placeholder="Новая задача" maxlength="200" autocomplete="off" required>'
-    + '<div class="matrix-composer-row">'
-    + '<label class="matrix-composer-field">Срок<input name="due" type="date" value="'
-    + dueDefault + '"></label>'
-    + '<label class="matrix-composer-field">Приоритет<select name="priority">'
-    + '<option value="0">Нет</option><option value="1">Низкий</option>'
-    + '<option value="2" selected>Средний</option><option value="3">Высокий</option>'
-    + '</select></label>'
-    + '<button type="submit" class="matrix-composer-add">Добавить</button>'
-    + '<button type="button" class="matrix-composer-cancel" name="cancel">Отмена</button>'
-    + '</div>';
-  form.addEventListener('submit', event => {
-    event.preventDefault();
-    const data = new FormData(form);
-    const title = String(data.get('title') || '').trim();
-    if (!title) return;
-    const due = String(data.get('due') || '') || null;
-    const priority = Number(data.get('priority')) || 0;
-    addTask(quadrantId, { title, due, priority });
-  });
-  form.querySelector('.matrix-composer-cancel').addEventListener('click', () => {
-    composerOpenIn = null;
-    renderMatrixView();
-  });
-  return form;
-}
-
 function quadrantCard(quadrant, list, now) {
-  const card = document.createElement('section');
-  card.className = 'matrix-card q-' + quadrant.id;
+  const card = el('section', 'matrix-card q-' + quadrant.id);
   card.dataset.quadrant = quadrant.id;
 
-  const head = document.createElement('header');
-  head.className = 'matrix-card-head';
-  const title = document.createElement('h3');
-  title.textContent = quadrant.title;
-  const count = document.createElement('span');
-  count.className = 'matrix-count';
-  count.textContent = String(list.length);
-  head.append(title, count);
-  // Просроченные — отдельной пилюлей, а не «1 · 2» рядом с числом: две цифры
-  // подряд человек читает как дробь или как версию, и угадывает, где что.
-  const overdue = list.filter(t => isOverdue(t, now)).length;
-  if (overdue) {
-    const flag = document.createElement('span');
-    flag.className = 'matrix-overdue';
-    flag.textContent = overdue + ' просрочено';
-    head.appendChild(flag);
-  }
-  const add = document.createElement('button');
-  add.type = 'button';
-  add.className = 'matrix-add';
-  add.setAttribute('aria-label', 'Добавить задачу в «' + quadrant.title + '»');
-  add.textContent = '+';
-  add.addEventListener('click', () => {
-    composerOpenIn = composerOpenIn === quadrant.id ? null : quadrant.id;
-    renderMatrixView();
-  });
-  head.appendChild(add);
+  const head = el('header', 'matrix-card-head');
+  head.appendChild(badge(quadrant));
+  head.appendChild(el('h3', 'matrix-card-title', quadrant.title));
   card.appendChild(head);
 
-  const hint = document.createElement('p');
-  hint.className = 'matrix-hint';
-  hint.textContent = quadrant.hint;
-  card.appendChild(hint);
-
-  const body = document.createElement('div');
-  body.className = 'matrix-card-body';
   if (!list.length) {
-    const empty = document.createElement('p');
-    empty.className = 'matrix-empty';
-    empty.textContent = 'Пусто';
-    body.appendChild(empty);
-  } else {
-    for (const task of list) body.appendChild(taskRow(task, now));
+    const empty = el('p', 'matrix-empty');
+    empty.innerHTML = FUNNEL_SVG + '<span>Нет задач</span>';
+    card.appendChild(empty);
+    return card;
   }
-  card.appendChild(body);
 
-  if (composerOpenIn === quadrant.id) card.appendChild(composer(quadrant.id));
+  const body = el('div', 'matrix-list');
+  for (const task of list) body.appendChild(taskRow(task, now));
+  card.appendChild(body);
   return card;
+}
+
+/* --- Листы ---------------------------------------------------------------- */
+
+function sheetShell(titleNode) {
+  const backdrop = el('div', 'matrix-sheet-backdrop');
+  backdrop.setAttribute('role', 'dialog');
+  backdrop.setAttribute('aria-modal', 'true');
+  const panel = el('div', 'matrix-sheet');
+  panel.appendChild(el('div', 'matrix-sheet-grabber'));
+  if (titleNode) panel.appendChild(titleNode);
+  backdrop.appendChild(panel);
+  backdrop.addEventListener('click', event => {
+    if (event.target === backdrop) closeSheet();
+  });
+  return { backdrop, panel };
+}
+
+function closeSheet() {
+  sheetFor = null;
+  composerQuadrant = null;
+  const old = document.querySelector('.matrix-sheet-backdrop');
+  if (old) old.remove();
+}
+
+function sheetCancel(panel, label) {
+  const cancel = el('button', 'matrix-sheet-cancel', label || 'Отмена');
+  cancel.type = 'button';
+  cancel.addEventListener('click', closeSheet);
+  panel.appendChild(cancel);
 }
 
 // Куда предложен перенос — вынесено из разметки отдельной функцией: весь
@@ -208,66 +195,12 @@ function quadrantCard(quadrant, list, now) {
 //   * текущий квадрант не предлагаем: перенос «в никуда» менял бы срок и
 //     приоритет попусту (сравниваем с quadrantOf, а не с id задачи — путаница
 //     этих двух идентификаторов как раз и прятала нужный пункт);
-//   * «Не стоит» в списке не участвует: перенос в q4 архивирует задачу, то
-//     есть это ровно та же кнопка «В архив» другими словами, а два пункта с
-//     одним действием — это выбор без выбора.
+//   * «не срочно и не важно» в списке не участвует: перенос в q4 архивирует
+//     задачу, то есть это ровно та же кнопка «В архив» другими словами, а два
+//     пункта с одним действием — это выбор без выбора.
 export function moveOptions(task, now) {
   const current = quadrantOf(task, now);
   return QUADRANTS.filter(q => q.id !== current && q.id !== 'q4');
-}
-
-// Лист переноса: куда отнести задачу. «В архив» отдельно — это не квадрант,
-// а способ убрать из матрицы, и смешивать их с осями нельзя.
-function moveSheet(task) {
-  const sheet = document.createElement('div');
-  sheet.className = 'matrix-sheet-backdrop';
-  sheet.setAttribute('role', 'dialog');
-  sheet.setAttribute('aria-modal', 'true');
-  sheet.setAttribute('aria-label', 'Перенести задачу');
-  const panel = document.createElement('div');
-  panel.className = 'matrix-sheet';
-  const title = document.createElement('p');
-  title.className = 'matrix-sheet-title';
-  title.textContent = task.title.length > 46 ? task.title.slice(0, 46) + '…' : task.title;
-  panel.appendChild(title);
-  for (const q of moveOptions(task, today())) {
-    const item = document.createElement('button');
-    item.type = 'button';
-    item.className = 'matrix-sheet-item q-' + q.id;
-    item.innerHTML = '<span class="matrix-sheet-name">' + escapeHtml(q.title)
-      + '</span><span class="matrix-sheet-hint">' + escapeHtml(q.hint) + '</span>';
-    item.addEventListener('click', () => {
-      moveToQuadrant(task.id, q.id);
-      closeSheet();
-    });
-    panel.appendChild(item);
-  }
-  const archive = document.createElement('button');
-  archive.type = 'button';
-  archive.className = 'matrix-sheet-item is-archive';
-  archive.textContent = 'В архив';
-  archive.addEventListener('click', () => {
-    archiveTask(task.id);
-    closeSheet();
-  });
-  panel.appendChild(archive);
-  const cancel = document.createElement('button');
-  cancel.type = 'button';
-  cancel.className = 'matrix-sheet-cancel';
-  cancel.textContent = 'Отмена';
-  cancel.addEventListener('click', closeSheet);
-  panel.appendChild(cancel);
-  sheet.appendChild(panel);
-  sheet.addEventListener('click', event => {
-    if (event.target === sheet) closeSheet();
-  });
-  return sheet;
-}
-
-function closeSheet() {
-  sheetFor = null;
-  const old = document.querySelector('.matrix-sheet-backdrop');
-  if (old) old.remove();
 }
 
 function openMoveSheet(taskId) {
@@ -277,8 +210,149 @@ function openMoveSheet(taskId) {
   sheetFor = taskId;
   const host = document.getElementById('matrix-view');
   if (!host) return;
-  host.appendChild(moveSheet(task));
+
+  const title = el('p', 'matrix-sheet-title', task.title.length > 44
+    ? task.title.slice(0, 44) + '…' : task.title);
+  const { backdrop, panel } = sheetShell(title);
+  panel.appendChild(el('p', 'matrix-sheet-task',
+    'Сейчас: ' + (quadrantById(quadrantOf(task, today())) || {}).title));
+
+  for (const q of moveOptions(task, today())) {
+    const item = el('button', 'matrix-sheet-item q-' + q.id);
+    item.type = 'button';
+    item.appendChild(badge(q));
+    item.appendChild(el('span', null, q.title));
+    item.appendChild(el('span', 'matrix-sheet-hint', q.hint));
+    item.addEventListener('click', () => {
+      moveToQuadrant(task.id, q.id);
+      closeSheet();
+    });
+    panel.appendChild(item);
+  }
+
+  const archive = el('button', 'matrix-sheet-item is-archive');
+  archive.type = 'button';
+  archive.textContent = 'В архив';
+  archive.addEventListener('click', () => {
+    archiveTask(task.id);
+    closeSheet();
+  });
+  panel.appendChild(archive);
+
+  sheetCancel(panel);
+  host.appendChild(backdrop);
 }
+
+/* --- Форма добавления ----------------------------------------------------- */
+
+// Квадрант выбирается прямо в форме четырьмя пилюлями: до нажатия «Добавить»
+// человек видит, куда попадёт задача, — и заодно то, что выбор меняет срок и
+// приоритет, а не только картинку.
+function composer(quadrantId) {
+  const form = el('form', 'matrix-composer');
+  let chosen = quadrantId || 'q1';
+
+  const { backdrop, panel } = sheetShell(el('p', 'matrix-sheet-title', 'Новая задача'));
+
+  const picks = el('div', 'matrix-quadrant-picks');
+  picks.setAttribute('role', 'radiogroup');
+  picks.setAttribute('aria-label', 'Квадрант');
+  const pickNodes = [];
+  for (const q of QUADRANTS) {
+    const pick = el('button', 'matrix-pick q-' + q.id);
+    pick.type = 'button';
+    pick.setAttribute('role', 'radio');
+    pick.dataset.quadrant = q.id;
+    pick.appendChild(badge(q));
+    pick.appendChild(el('span', null, q.title));
+    pick.addEventListener('click', () => {
+      chosen = q.id;
+      for (const node of pickNodes) {
+        node.setAttribute('aria-checked', node.dataset.quadrant === chosen ? 'true' : 'false');
+      }
+    });
+    pickNodes.push(pick);
+    picks.appendChild(pick);
+  }
+  form.appendChild(picks);
+
+  const field = el('label', 'matrix-composer-field');
+  field.appendChild(el('span', 'matrix-composer-field-label', 'Что бы вы хотели сделать?'));
+  const titleInput = el('input', 'matrix-composer-title');
+  titleInput.type = 'text';
+  titleInput.name = 'title';
+  titleInput.maxLength = 200;
+  titleInput.autocomplete = 'off';
+  titleInput.placeholder = 'Например: позвонить в сервис';
+  titleInput.required = true;
+  field.appendChild(titleInput);
+  form.appendChild(field);
+
+  const row = el('div', 'matrix-composer-row');
+  const dueField = el('label', 'matrix-composer-field');
+  dueField.appendChild(el('span', 'matrix-composer-field-label', 'Срок'));
+  const due = el('input', 'matrix-composer-due');
+  due.type = 'date';
+  due.name = 'due';
+  dueField.appendChild(due);
+
+  const prioField = el('label', 'matrix-composer-field');
+  prioField.appendChild(el('span', 'matrix-composer-field-label', 'Приоритет'));
+  const prio = el('select', 'matrix-composer-priority');
+  prio.name = 'priority';
+  for (const value of [0, 1, 2, 3]) {
+    const option = document.createElement('option');
+    option.value = String(value);
+    option.textContent = PRIORITY_LABEL[value];
+    if (value === PRIORITY_MEDIUM) option.selected = true;
+    prio.appendChild(option);
+  }
+  prioField.appendChild(prio);
+  row.append(dueField, prioField);
+  form.appendChild(row);
+
+  const actions = el('div', 'matrix-composer-actions');
+  const add = el('button', 'matrix-composer-add', 'Добавить');
+  add.type = 'submit';
+  const cancel = el('button', 'matrix-composer-cancel', 'Отмена');
+  cancel.type = 'button';
+  cancel.addEventListener('click', closeSheet);
+  actions.append(add, cancel);
+  form.appendChild(actions);
+
+  form.addEventListener('submit', event => {
+    event.preventDefault();
+    const name = titleInput.value.trim();
+    if (!name) {
+      titleInput.focus();
+      return;
+    }
+    addTask(chosen, {
+      title: name,
+      due: due.value || null,
+      priority: Number(prio.value) || 0,
+    });
+    showToast('Добавлено');
+  });
+
+  for (const node of pickNodes) {
+    node.setAttribute('aria-checked', node.dataset.quadrant === chosen ? 'true' : 'false');
+  }
+  panel.appendChild(form);
+  return { backdrop, input: titleInput };
+}
+
+function openComposer(quadrantId) {
+  closeSheet();
+  const host = document.getElementById('matrix-view');
+  if (!host) return;
+  const sheet = composer(quadrantId);
+  composerQuadrant = quadrantId || 'q1';
+  host.appendChild(sheet.backdrop);
+  sheet.input.focus();
+}
+
+/* --- Действия ------------------------------------------------------------- */
 
 function persist() {
   saveTasks(tasks);
@@ -287,24 +361,13 @@ function persist() {
 export function addTask(quadrantId, fields) {
   const task = createTask(fields);
   if (!task) return null;
-  // Квадрант, в котором человек печатал, — это намерение, а не метка:
+  // Квадрант, который человек выбрал в форме, — это намерение, а не метка:
   // превращаем его в причину (срок/приоритет) тем же move-правилом.
   const shaped = applyQuadrantMove(task, quadrantId, today()) || task;
   tasks = [shaped].concat(tasks);
   persist();
-  composerOpenIn = quadrantId;
   renderMatrixView();
-  // Форма остаётся открытой для быстрой серии, но перерисовка уносила фокус:
-  // на телефоне после каждой добавленной задачи клавиатура сворачивалась, и
-  // человек тыкал в поле заново.
-  const input = composerInput();
-  if (input) input.focus();
   return shaped;
-}
-
-function composerInput() {
-  const form = document.querySelector('#matrix-view .matrix-composer');
-  return form ? form.querySelector('.matrix-composer-title') : null;
 }
 
 export function toggleDone(taskId) {
@@ -340,11 +403,14 @@ export function archiveTask(taskId) {
     : t));
   persist();
   renderMatrixView();
+  showToast('Задача в архиве');
 }
 
 export function matrixTasks() {
   return activeTasks(tasks);
 }
+
+/* --- Экран ---------------------------------------------------------------- */
 
 // Вход на экран: читаем хранилище, а не живём на остатке прошлого захода —
 // задача могла появиться с другого экрана или после синхронизации.
@@ -354,40 +420,45 @@ export function renderMatrixView() {
   tasks = loadTasks();
   const now = today();
   const groups = groupByQuadrant(tasks, now);
-  const stats = quadrantStats(tasks, now);
   const active = activeTasks(tasks);
-  // Просрочки считаем по всем квадрантам: у непросроченной-важности у
-  // просроченной мелочи нет, и живёт она в «Делегировать», а не в
-  // «Сделать сразу» — сводка по одному квадранту врала бы человеку в заголовке.
-  const overdue = QUADRANTS.reduce((n, q) => n + stats[q.id].overdue, 0);
+  // Просрочки считаем по всем квадрантам: у просроченной мелочи важности нет,
+  // и живёт она в «срочно, но не важно», а не в «срочно и важно» — сводка по
+  // одному квадранту врала бы человеку в заголовке.
+  const overdue = active.filter(t => isOverdue(t, now)).length;
 
-  closeSheet();
+  // Листы живут внутри #matrix-view, поэтому перерисовка экрана снимает их
+  // сама: ни закрывать, ни восстанавливать их не нужно — открытым остаётся
+  // только то, что открыли заново.
   host.textContent = '';
+  composerQuadrant = null;
+  sheetFor = null;
 
-  const head = document.createElement('div');
-  head.className = 'matrix-header';
-  const title = document.createElement('h2');
-  title.className = 'matrix-title';
-  title.textContent = 'Матрица';
-  const sub = document.createElement('p');
-  sub.className = 'matrix-sub';
-  sub.textContent = active.length
-    ? 'Активных задач: ' + active.length + (overdue ? ', просрочено ' + overdue : '')
-    : 'Задач пока нет — добавьте в любом квадранте';
-  head.append(title, sub);
+  const head = el('div', 'matrix-head');
+  head.appendChild(el('h2', 'matrix-title', 'Матрица Эйзенхауэра'));
+  if (overdue) {
+    head.appendChild(el('p', 'matrix-alert', 'Просрочено задач: ' + overdue));
+  }
   host.appendChild(head);
 
-  const grid = document.createElement('div');
-  grid.className = 'matrix-grid';
+  const grid = el('div', 'matrix-grid');
   for (const q of QUADRANTS) grid.appendChild(quadrantCard(q, groups[q.id], now));
   host.appendChild(grid);
+
+  const fab = el('button', 'matrix-fab');
+  fab.type = 'button';
+  fab.setAttribute('aria-label', 'Добавить задачу в матрицу');
+  fab.innerHTML = '<svg viewBox="0 0 24 24" width="24" height="24" aria-hidden="true">'
+    + '<path d="M12 5.5v13M5.5 12h13" fill="none" stroke="currentColor" '
+    + 'stroke-width="2.2" stroke-linecap="round"/></svg>';
+  fab.addEventListener('click', () => openComposer('q1'));
+  host.appendChild(fab);
 }
 
 // Для тестов и для будущего экрана «Важные»: состояние модуля наружу копией.
 export function matrixDebugState() {
   return {
     tasks: tasks.slice(),
-    composerOpenIn,
+    composerQuadrant,
     sheetFor,
     priorityLabels: Object.assign({}, PRIORITY_LABEL),
   };
