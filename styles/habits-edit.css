@@ -140,13 +140,15 @@
   width: 100%;
 }
 
-/* В каза, молитвах, уразе и настройках шапка действий не нужна — и на ПК,
-   и на телефоне: из этих экранов выходят своей кнопкой «Назад» и таб-баром */
+/* В каза, молитвах, уразе, настройках, статистике и матрице шапка действий
+   не нужна — и на ПК, и на телефоне: из этих экранов выходят своей кнопкой
+   «Назад» и таб-баром */
 body.view-qaza #header-actions,
 body.view-prayer #header-actions,
 body.view-fast #header-actions,
 body.view-settings #header-actions,
-body.view-stats #header-actions {
+body.view-stats #header-actions,
+body.view-matrix #header-actions {
   display: none;
 }
 

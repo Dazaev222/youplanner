@@ -1023,7 +1023,7 @@ export function switchAppView(name) {
   // гамбургера, — и «Назад» должен вернуть в тот, откуда вошли
   if (name === 'sleep' && currentView !== 'sleep') sleepReturnView = currentView;
 
-  applyScreen(name);
+  applyScreen(name, currentView);
   const render = ROUTE_RENDER[name];
   if (render) render();
   // Экран показал текущие данные — гвард sync:applied сравнивает следующие
