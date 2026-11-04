@@ -285,7 +285,10 @@ body.view-matrix #header {
 
 .matrix-task {
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) 44px;
+  /* Третья колонка — auto: в строке ДВА действия (дата и перенос),
+     и фиксированные 44px резали бы вторую кнопку.
+     */
+  grid-template-columns: 44px minmax(0, 1fr) auto;
   align-items: start;
   gap: 8px;
 }
@@ -1104,6 +1107,528 @@ body.matrix-sheet-open { overflow: hidden; }
 
 .matrix-clear:hover { background: color-mix(in srgb, var(--danger) 8%, transparent); }
 
+/* --- Лист «Дата и длительность» (ТЗ Б4, Воркер 2) ------------------------- */
+
+/* Дочерние слои (напоминание, повтор, подтверждение переноса) — те же
+   .matrix-sheet-backdrop, добавленные позже: порядок в DOM уже даёт им
+   правильный z-index, поэтому новых чисел здесь нет. */
+
+.matrix-sheet.is-date {
+  gap: 10px;
+}
+
+/* Заголовок и «Готово» должны оставаться досягаемыми, когда список полей
+   переполняет лист: без sticky человек дотягивался бы до применения вслепую. */
+.matrix-sheet.is-date .matrix-sheet-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  padding: 2px 0 6px;
+  background: var(--surface-card);
+}
+
+.matrix-date-ready {
+  justify-self: end;
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+.matrix-date-ready:active { transform: scale(.96); }
+
+/* Блок полей — «серая» рабочая область внутри белой панели: контролы ввода
+   читаются полем, а не подписью, и не сливаются с карточкой листа. */
+.matrix-schedule-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border-radius: var(--radius-lg);
+  background: var(--surface-alt);
+}
+
+.matrix-schedule-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-height: 44px;
+  padding: 6px 10px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--surface-card);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+
+.matrix-schedule-row.is-active,
+.matrix-schedule-endpoint[aria-pressed="true"] {
+  border-color: var(--accent);
+}
+
+.matrix-schedule-endpoint {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.matrix-schedule-endpoint-label {
+  flex: none;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.matrix-schedule-endpoint-date {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.matrix-schedule-time {
+  flex: none;
+  min-height: 40px;
+  padding: 6px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
+  color: var(--text);
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.matrix-all-day { padding: 4px 10px; background: transparent; }
+
+.matrix-all-day-label {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 44px;
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.matrix-all-day-input {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.matrix-mode-segment {
+  display: flex;
+  gap: 4px;
+  padding: 3px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-card);
+}
+
+.matrix-mode-btn {
+  min-height: 32px;
+  padding: 0 12px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.matrix-mode-btn.is-current {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.matrix-duration-row { background: transparent; font-size: 12.5px; }
+
+.matrix-duration-label { color: var(--text-muted); }
+
+.matrix-duration {
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Ошибки и пояснения — отдельные живые регионы: текст появляется до
+   «Готово» (см. calErrorRow), поэтому его нельзя прятать за disabled-состоянием
+   самой кнопки применения. */
+.matrix-schedule-error {
+  margin: 0;
+  padding: 0 4px;
+  color: var(--danger);
+  font-size: 12.5px;
+}
+
+.matrix-schedule-error:empty { display: none; }
+
+.matrix-schedule-hint {
+  margin: 0;
+  padding: 0 4px;
+  color: var(--text-muted);
+  font-size: 12.5px;
+}
+
+.matrix-schedule-hint:empty { display: none; }
+
+.matrix-schedule-note {
+  margin: 0;
+  padding: 0 4px;
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.matrix-schedule-field {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.matrix-schedule-row-label { flex: none; font-size: 12px; font-weight: 600; color: var(--text-muted); }
+
+.matrix-schedule-row-value {
+  min-width: 0;
+  margin-left: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  text-align: right;
+}
+
+.matrix-reminder-row[aria-disabled="true"],
+.matrix-repeat-row[aria-disabled="true"] { opacity: .55; }
+
+.matrix-reminder-list { display: flex; flex-direction: column; gap: 6px; }
+
+.matrix-reminder-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px 6px 10px;
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
+  font-size: 12.5px;
+}
+
+.matrix-reminder-chip-text { min-width: 0; overflow-wrap: anywhere; }
+
+.matrix-reminder-chip-warn { color: var(--danger); font-size: 11.5px; margin-left: auto; }
+
+.matrix-reminder-drop {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--surface-alt);
+  color: var(--danger);
+  font: inherit;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.matrix-repeat-next { margin: 0; padding: 0 4px; font-size: 12px; color: var(--accent); }
+
+/* Дни внутри диапазона подсветкой мягче, чем границы: начало и конец
+   различаются формой (у начала срезан верхний левый угол, у конца — нижний
+   правый), а не только цветом — тот же приём, что у остальной матрицы. */
+.matrix-cal-day.is-in-range {
+  background: var(--accent-soft);
+  color: var(--accent);
+  border-radius: 0;
+}
+
+.matrix-cal-day.is-range-start {
+  border-radius: 10px 0 0 10px;
+  font-weight: 600;
+}
+
+.matrix-cal-day.is-range-end {
+  border-radius: 0 10px 10px 0;
+  font-weight: 600;
+}
+
+.matrix-cal-day.is-range-start.is-range-end { border-radius: var(--radius-pill); }
+
+.matrix-reminder-option,
+.matrix-repeat-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: none;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 13.5px;
+  text-align: left;
+}
+
+.matrix-reminder-option:hover,
+.matrix-repeat-option:hover { background: var(--surface-alt); }
+
+.matrix-reminder-option.is-current,
+.matrix-repeat-option.is-current {
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.matrix-reminder-option[aria-selected="true"]::after,
+.matrix-repeat-option.is-current::after {
+  content: '✓';
+  margin-left: auto;
+  color: var(--accent);
+}
+
+.matrix-repeat-custom {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 10px;
+  padding: 12px;
+  border-radius: var(--radius-lg);
+  background: var(--surface-alt);
+}
+
+.matrix-repeat-custom-title {
+  margin: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+
+.matrix-repeat-custom select,
+.matrix-repeat-interval,
+.matrix-repeat-until,
+.matrix-repeat-count {
+  min-height: 40px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+.matrix-repeat-weekdays { display: flex; gap: 4px; flex-wrap: wrap; }
+
+.matrix-repeat-weekday {
+  flex: 1 1 36px;
+  min-height: 36px;
+  padding: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 12px;
+  text-transform: uppercase;
+}
+
+.matrix-repeat-weekday.is-current {
+  border-color: var(--accent);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* Строка настройки повтора: подпись + контрол в один ряд, чтобы «Каждые 3
+   дней» читалось фразой, а не двумя несвязанными полями. */
+.matrix-repeat-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.matrix-repeat-line-label { flex: none; font-size: 12.5px; color: var(--text-muted); }
+
+.matrix-repeat-hint {
+  margin: 0;
+  font-size: 11.5px;
+  color: var(--text-muted);
+}
+
+.matrix-repeat-dates { display: flex; flex-wrap: wrap; gap: 6px; }
+
+.matrix-repeat-date {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 6px 4px 10px;
+  border-radius: var(--radius-pill);
+  background: var(--surface-card);
+  font-size: 12.5px;
+}
+
+.matrix-repeat-date-drop {
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--surface-alt);
+  color: var(--danger);
+  font: inherit;
+  font-size: 14px;
+  line-height: 1;
+}
+
+.matrix-repeat-apply,
+.matrix-absolute-add {
+  align-self: flex-start;
+  min-height: 40px;
+  padding: 0 14px;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: var(--on-accent);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.matrix-absolute-date,
+.matrix-absolute-time,
+.matrix-reminder-abs .matrix-absolute-date {
+  min-height: 40px;
+  padding: 6px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
+  color: var(--text);
+  font: inherit;
+  font-size: 13px;
+}
+
+/* Признаки расписания в строке задачи: иконка-марка без текста, чтобы не
+   ломать перенос заголовка; смысл читается по title и остаётся видимым при
+   monochrome. */
+.matrix-repeat-mark,
+.matrix-reminder-mark {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  color: var(--text-muted);
+}
+
+/* Два действия строки живут в одной обёртке: без flex они складывались
+   столбиком, и строка разъезжалась по высоте. */
+.matrix-task-actions {
+  display: flex;
+  align-items: flex-start;
+  gap: 2px;
+}
+
+.matrix-task-schedule {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: none;
+  border-radius: var(--radius-pill);
+  background: transparent;
+  color: var(--text-muted);
+}
+
+.matrix-task-schedule:hover { background: var(--surface-alt); color: var(--text); }
+
+.matrix-move-preview { gap: 8px; }
+
+.matrix-move-conflicts {
+  margin: 0;
+  padding-left: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+
+/* --- Стек локальных напоминаний (ТЗ Б5 «доставка») --------------------------
+   Живёт вне #matrix-view: уведомление должно доходить, даже когда открыт лист
+   или модалка, а тост приложения занял бы собой чужое сообщение. Порядок
+   z-index выше модалок (1200) — напоминание требует действия, и прятать его
+   под открытым окном нельзя. */
+
+.matrix-reminder-stack {
+  position: fixed;
+  top: calc(12px + env(safe-area-inset-top, 0px));
+  right: 12px;
+  z-index: 1250;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-width: min(320px, calc(100vw - 24px));
+}
+
+.matrix-reminder-notice {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 10px 12px;
+  border-radius: var(--radius-lg);
+  background: var(--surface-card);
+  box-shadow: var(--shadow);
+}
+
+.matrix-reminder-notice-title {
+  margin: 0;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.matrix-reminder-notice-time {
+  margin: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.matrix-reminder-notice-actions { display: flex; gap: 8px; margin-top: 4px; }
+
+.matrix-reminder-notice-open,
+.matrix-reminder-notice-close {
+  min-height: 36px;
+  padding: 0 12px;
+  border: none;
+  border-radius: var(--radius-pill);
+  font: inherit;
+  font-size: 12.5px;
+}
+
+.matrix-reminder-notice-open { background: var(--accent); color: var(--on-accent); font-weight: 600; }
+
+.matrix-reminder-notice-close { background: var(--surface-alt); color: var(--text-muted); }
+
 /* --- Состояния и фокус ---------------------------------------------------- */
 
 #matrix-view button { cursor: pointer; font-family: inherit; }
@@ -1153,8 +1678,10 @@ body.matrix-sheet-open { overflow: hidden; }
   .matrix-card-head .matrix-badge { width: 20px; height: 20px; font-size: 10px; }
   .matrix-empty-art { width: 56px; height: 48px; margin-bottom: 8px; }
   .matrix-card .matrix-task { grid-template-columns: 44px minmax(0, 1fr); gap: 0; }
-  .matrix-card .matrix-task-move { grid-column: 1; grid-row: 2; }
-  .matrix-card .matrix-task-body { grid-column: 2; grid-row: 1 / span 2; }
+  /* На телефоне пара кнопок уходит под текст строки и выравнивается по правому
+     краю: в левую колонку 44 px две кнопки уже не помещаются. */
+  .matrix-card .matrix-task-actions { grid-column: 2; grid-row: 2; justify-content: flex-end; }
+  .matrix-card .matrix-task-body { grid-column: 2; grid-row: 1; }
   .matrix-card .matrix-task-title { -webkit-line-clamp: 3; line-clamp: 3; }
   .matrix-list { gap: 8px; margin-top: 12px; }
   .matrix-composer-line {
@@ -1162,6 +1689,18 @@ body.matrix-sheet-open { overflow: hidden; }
     grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) 44px;
     gap: 8px;
   }
+  .matrix-schedule-time,
+  .matrix-repeat-custom select,
+  .matrix-repeat-interval,
+  .matrix-repeat-until,
+  .matrix-repeat-count,
+  .matrix-absolute-date,
+  .matrix-absolute-time,
+  .matrix-repeat-date-input { font-size: 16px; }
+  .matrix-sheet.is-date { max-height: 88dvh; }
+  .matrix-schedule-fields { padding: 8px; }
+  .matrix-all-day { flex-wrap: wrap; }
+  .matrix-mode-segment { margin-left: auto; }
   .matrix-quad-pill { grid-column: 1 / 3; max-width: 100%; font-size: 12px; }
   .matrix-composer-line .matrix-send { grid-column: 3; grid-row: 1; margin-left: 0; }
   .matrix-composer-line .matrix-attr { grid-row: 2; min-width: 0; padding: 0 8px; }

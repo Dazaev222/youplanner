@@ -33,6 +33,7 @@
    шейся записи было бы ложью интерфейса о сохранности данных. */
 
 import { addDays, parseISODate, toISODate } from '../core/dates.js';
+import { bus } from '../core/bus.js';
 import { showErrorToast, showToast } from '../core/dom.js';
 import {
   PRIORITY_HIGH,
@@ -43,19 +44,39 @@ import {
   activeTasks,
   applyQuadrantMove,
   archiveTasks,
+  completeOccurrence,
   createTask,
   doneTasks,
+  editSchedule,
   groupByQuadrant,
+  isAppointedSchedule,
   isOverdue,
   listForQuadrant,
   loadTasks,
   markDone,
+  prepareQuadrantMove,
   purgeTask,
   quadrantOf,
   quadrantShape,
+  reopenOccurrence,
   restoreTask,
   saveTasks,
+  scheduleFromDue,
+  startSeries,
 } from '../data/matrix.js';
+import {
+  ALL_DAY_DEFAULT_TIME,
+  MINUTES_PER_DAY,
+  SCHEDULE_LIMITS,
+  cloneSchedule,
+  emptySchedule,
+  nextOccurrence,
+  normalizeSchedule,
+  reminderMoment,
+  scheduleDuration,
+  scheduleToDue,
+  validateSchedule,
+} from '../data/matrix-schedule.js';
 
 const PRIORITY_LABEL = {
   0: 'без приоритета',
@@ -97,6 +118,12 @@ const ICON = {
     + '<path d="M5.5 9.5v8a2 2 0 0 0 2 2h9a2 2 0 0 0 2-2v-8M10 13h4"/>',
   move: '<path d="M10 6H5.5A1.5 1.5 0 0 0 4 7.5v11A1.5 1.5 0 0 0 5.5 20H9"/>'
     + '<path d="M14 4l5 5-5 5"/><path d="M19 9h-9"/>',
+  // Признаки расписания в строке: будильник — напоминание, круговая стрелка —
+  // повтор. Оба различимы без цвета: у строки есть title с текстом правила.
+  bell: '<path d="M18 15.5V11a6 6 0 1 0-12 0v4.5L4 18.5h16z"/>'
+    + '<path d="M9.5 21a2.6 2.6 0 0 0 5 0"/>',
+  repeat: '<path d="M4.5 10a7 7 0 0 1 12-3.5"/><path d="M19.5 14a7 7 0 0 1-12 3.5"/>'
+    + '<path d="M16.5 3.5v3h-3M7.5 20.5v-3h3"/>',
 };
 
 function svgIcon(name, size) {
@@ -129,6 +156,7 @@ let archiveOpen = false;       // тот же экран, но список ар
 // квадрант на пустом архиве, и человек возвращался не туда.
 let returnView = null;
 let draft = null;              // черновик листа создания; null — лист закрыт
+let draftSnapshot = null;      // снимок расписания при открытии: отличает правку от onboarding
 let opener = null;             // узел «+», с которого открыли лист
 let openerQuadrant = null;     // его квадрант — нужен для возврата фокуса
 let pendingQuadrant = null;    // квадрант для «+», открытой после «Отбросить»
@@ -138,7 +166,6 @@ let detailAdd = null;          // «Добавить» полноэкранно�
 // фокус не вернула бы — браузер отдал бы его body. Поэтому при закрытии ищем
 // актуальный узел того же места.
 let gridAdd = {};
-let calCursor = null;          // первое число месяца в листе срока
 let submitting = false;        // одна точка submit: второй Enter не дублирует
 
 // Стек листов поверх экрана. Порядок — нижний первым, верхний последним; Escape
@@ -172,13 +199,35 @@ function dueLabel(task, now) {
   const due = new Date(task.due + 'T00:00:00');
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
   const days = Math.round((due - startOfToday) / 86400000);
-  if (days < 0) return 'просрочено';
-  if (days === 0) return 'сегодня';
-  if (days === 1) return 'завтра';
+  let text;
+  if (days < 0) text = 'просрочено';
+  else if (days === 0) text = 'сегодня';
+  else if (days === 1) text = 'завтра';
   // До двух недель срок ближе как относительная дата: «через 4 дня» человек
   // считывает быстрее, чем сверяет «7 ноя» с календарём в голове.
-  if (days <= 14) return 'через ' + days + ' ' + pluralDays(days);
-  return due.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+  else if (days <= 14) text = 'через ' + days + ' ' + pluralDays(days);
+  else text = due.toLocaleDateString('ru-RU', { day: 'numeric', month: 'short' });
+  return withScheduleTime(task, text);
+}
+
+// У назначенного интервала к ярлыку добавляется время начала: «сегодня» в 9:00
+// и «сегодня» на весь день — разные намерения, различать их одним словом было
+// бы враньём интерфейса. Ведущий ноль убран — так пишут время в списках.
+function withScheduleTime(task, text) {
+  const schedule = task && task.schedule;
+  if (!schedule || schedule.allDay !== false || !schedule.startTime) return text;
+  return text + ' · ' + String(schedule.startTime).replace(/^0(\d):/, '$1:');
+}
+
+// Краткие признаки расписания для плашки срока: повтор и напоминание должны
+// быть видны в листе создания, иначе «Готово» календаря становится единствен-
+// ным местом, где человек узнаёт о настроенном правиле.
+function scheduleMarks(schedule) {
+  if (!schedule) return '';
+  let text = '';
+  if (schedule.repeat) text += ' · ' + calRepeatText(schedule.repeat);
+  if (schedule.reminders && schedule.reminders.length) text += ' · напоминание';
+  return text;
 }
 
 function el(tag, className, text) {
@@ -338,6 +387,20 @@ function taskRow(task, now, options) {
     meta.appendChild(el('span', 'matrix-due' + (overdue ? ' is-overdue' : ''),
       dueLabel(task, now)));
   }
+  // Признаки расписания читаются прямо в строке: напоминание и повтор видно до
+  // того, как человек откроет лист, — и их нельзя потерять при перерисовке.
+  if (task.schedule && task.schedule.repeat) {
+    const mark = el('span', 'matrix-repeat-mark');
+    mark.innerHTML = svgIcon('repeat', 14);
+    mark.title = 'Повтор: ' + calRepeatText(task.schedule.repeat);
+    meta.appendChild(mark);
+  }
+  if (task.schedule && task.schedule.reminders && task.schedule.reminders.length) {
+    const mark = el('span', 'matrix-reminder-mark');
+    mark.innerHTML = svgIcon('bell', 14);
+    mark.title = 'Напоминание: ' + calReminderText(task.schedule.reminders[0]);
+    meta.appendChild(mark);
+  }
   if (task.notes) meta.appendChild(el('span', 'matrix-note-hint', task.notes));
   if (meta.childNodes.length) body.appendChild(meta);
 
@@ -358,6 +421,17 @@ function taskRow(task, now, options) {
 
   row.appendChild(check);
   row.appendChild(body);
+  // Явное действие «Изменить дату и время» (ТЗ Б4.10): галочка точкой
+  // редактирования расписания не становится — у неё уже есть своё намерение.
+  // Обе кнопки живут в одной обёртке, чтобы строка осталась трёхколоночной и
+  // на телефоне, где места ровно на один ряд кнопок.
+  const actions = el('div', 'matrix-task-actions');
+  const schedule = el('button', 'matrix-task-schedule');
+  schedule.type = 'button';
+  schedule.innerHTML = svgIcon('calendar', 18);
+  schedule.setAttribute('aria-label', 'Изменить дату и время: ' + task.title);
+  schedule.addEventListener('click', () => openDateSheet({ taskId: task.id }));
+  actions.appendChild(schedule);
   // Многоточие было единственной точкой переноса и ничего не обещало в имени.
   // Теперь это явная кнопка перемещения с тем же листом за ней.
   const move = el('button', 'matrix-task-move');
@@ -365,7 +439,8 @@ function taskRow(task, now, options) {
   move.innerHTML = svgIcon('move', 18);
   move.setAttribute('aria-label', 'Перенести задачу: ' + task.title);
   move.addEventListener('click', () => openMoveSheet(task.id));
-  row.appendChild(move);
+  actions.appendChild(move);
+  row.appendChild(actions);
   return row;
 }
 
@@ -588,6 +663,13 @@ function closeArchiveView() {
 // Черновик обязан брать ПРИЧИНУ из quadrantShape: прежний `newDraft` ставил
 // средний приоритет всем четверым, и «срочно, но не важно» с плашкой q3
 // считалось важным и уезжало в q1 ещё до сохранения.
+//
+// `schedule` — рабочая копия расписания (ТЗ Б6.1): намерение квадранта
+// применяется сначала по-старому (quadrantShape → due), и только потом из него
+// нормализуется интервал. Так сохранение без захода в календарь попадает ровно
+// туда, куда нажали «+», а календарь получает полноценный объект, а не пять
+// разрозненных полей. `scheduleSnapshot` нужен одному вопросу: не трогал ли
+// человек расписание (закрыть лист с несброшенным расписанием = потерять ввод).
 function newDraft(quadrantId) {
   const now = today();
   const id = quadrantById(quadrantId) ? quadrantId : 'q1';
@@ -598,12 +680,25 @@ function newDraft(quadrantId) {
     notes: '',
     due: shape.due,
     priority: shape.priority,
+    schedule: scheduleFromDue(shape.due),
+    // Б6.2: пока расписание не правили руками, плашка показывает намерение;
+    // после правки — реальный quadrantOf.
+    quadrantResolved: false,
   };
 }
 
 function draftIsDirty() {
   return !!draft
-    && (!!String(draft.title || '').trim() || !!String(draft.notes || '').trim());
+    && (!!String(draft.title || '').trim()
+      || !!String(draft.notes || '').trim()
+      || scheduleEdited());
+}
+
+// Расписание считается изменённым, если оно разошлось со снимком, сделанным
+// при открытии листа: «плюс» в q1 сам ставит сегодня, и это не правка.
+function scheduleEdited() {
+  if (!draft || !draftSnapshot) return false;
+  return JSON.stringify(draft.schedule) !== draftSnapshot;
 }
 
 /* Узкий API листа (ТЗ А5). Открытие не трогает навигацию; закрытие отвечает на
@@ -632,6 +727,7 @@ export function openTaskComposer(options) {
   openerQuadrant = quadrant.id;
   pendingQuadrant = null;
   draft = newDraft(quadrant.id);
+  draftSnapshot = JSON.stringify(draft.schedule);
   pushOverlay(buildComposerOverlay());
   return true;
 }
@@ -655,6 +751,7 @@ function closeTaskComposer() {
   const target = resolveOpener();
   removeOverlay('composer');
   draft = null;
+  draftSnapshot = null;
   opener = null;
   openerQuadrant = null;
   pendingQuadrant = null;
@@ -880,8 +977,11 @@ function refreshComposerLine(layer) {
   const due = el('button', 'matrix-attr' + (draft.due ? ' is-set' : ''));
   due.type = 'button';
   due.innerHTML = svgIcon('calendar', 18);
+  // Плашка срока называет не только дату: назначенный интервал отличается от
+  // «весь день» временем, а повтор и напоминание видно до открытия листа (Б4.8).
   due.appendChild(el('span', 'matrix-attr-label',
-    draft.due ? dueLabel({ due: draft.due }, today()) : 'Срок'));
+    (draft.due ? dueLabel({ due: draft.due, schedule: draft.schedule }, today()) : 'Срок')
+      + scheduleMarks(draft.schedule)));
   due.setAttribute('aria-label', 'Срок исполнения');
   due.addEventListener('click', () => openDateSheet());
   layer.line.appendChild(due);
@@ -929,12 +1029,17 @@ export function submitDraft() {
     notes: draft.notes,
     due: draft.due,
     priority: draft.priority,
+    // Б6.2: расписание из календаря — согласованный черновик, а не «намерение
+    // квадранта, которое надо ещё раз прогнать через shape». addTask различает
+    // эти два случая по наличию schedule в полях.
+    schedule: scheduleEdited() ? cloneSchedule(draft.schedule) : null,
   };
   // Черновик сбрасывается ДО записи — единственная перерисовка (внутри
   // commitTasks) показывает уже пустой список. Не состоялась запись — черновик
-  // возвращается ЦЕЛИКОМ, вместе со сроком и приоритетом, а лист остаётся
-  // открытым: отказ хранилища не повод выбрасывать ввод.
+  // возвращается ЦЕЛИКОМ, вместе со сроком, расписанием и приоритетом, а лист
+  // остаётся открытым: отказ хранилища не повод выбрасывать ввод.
   const typed = draft;
+  const typedSnapshot = draftSnapshot;
   draft = newDraft(quadrant);
   submitting = true;
   let added = null;
@@ -949,6 +1054,7 @@ export function submitDraft() {
     return true;
   }
   draft = typed;
+  draftSnapshot = typedSnapshot;
   renderMatrixView();
   return false;
 }
@@ -958,6 +1064,12 @@ export function submitDraft() {
 // перенос означали бы разное. Экран за выбором НЕ идёт: лист лежит поверх
 // любого экрана, и переключение плашки не имеет права уводить человека из сетки
 // в полноэкранный вид и обратно.
+//
+// Б6.1/Б6.3: пока интервал не назначен, работает прежняя причина (в q2 срок
+// снимается). Назначенный интервал при смене намерения СДВИГАЕТСЯ по правилам
+// Б6.4, а не обнуляется молча — для этого черновик на минуту становится
+// обычным объектом задачи и проходит то же applyQuadrantMove: правило одно,
+// и второго экземпляра логики переноса в экране нет.
 export function pickDraftQuadrant(quadrantId) {
   if (!quadrantById(quadrantId)) return false;
   if (!isTaskComposerOpen()) return false;
@@ -968,22 +1080,54 @@ export function pickDraftQuadrant(quadrantId) {
     draft.due = shape.due;
     draft.priority = shape.priority;
   }
+  if (isAppointedSchedule(draft.schedule)) {
+    const moved = applyQuadrantMove({
+      id: DRAFT_TASK_ID,
+      title: draft.title || ' ',
+      notes: draft.notes,
+      priority: draft.priority,
+      due: draft.due,
+      schedule: draft.schedule,
+    }, quadrantId, today());
+    draft.schedule = moved ? moved.schedule : draft.schedule;
+    draft.due = moved ? moved.due : draft.due;
+  } else {
+    draft.schedule = scheduleFromDue(draft.due);
+  }
+  draft.quadrantResolved = false;
   refreshComposer();
   return true;
 }
 
+const DRAFT_TASK_ID = 'draft';
+
 /* Контракт с Воркером 2 (ТЗ А5): лист обмена расписанием отдаёт и принимает
-   КОПИИ, а apply вызывает только «Готово» календаря. До интеграции интервала
-   адаптер живёт над `due` — в DOM будущая схема не зашита. */
+   КОПИИ, а apply вызывает только «Готово» календаря. Интеграция интервала
+   выполнена — адаптер больше не живёт над одной `due`: наружу уходит
+   нормализованный schedule версии 1, а `due` выводится из endDate (Б3.1). */
 
 export function getDraftSchedule() {
   if (!draft) return null;
-  return { due: draft.due };
+  return cloneSchedule(draft.schedule);
 }
 
+// Единственная точка, куда календарь складывает результат. Валидация уже
+// пройдена листом, но здесь она повторяется сознательно: applyDraftSchedule —
+// публичный API, и вызвать его может не только этот лист. `null` наружу не
+// принимается: сброс — это пустой schedule, а не «значения не было».
 export function applyDraftSchedule(value) {
-  if (!draft || !value || typeof value !== 'object') return false;
-  draft.due = typeof value.due === 'string' ? value.due : null;
+  if (!draft) return false;
+  if (!value || typeof value !== 'object') return false;
+  if (validateSchedule(value).ok === false) return false;
+  const normalized = normalizeSchedule(value, {
+    legacyDue: typeof value.due === 'string' ? value.due : null,
+  }).schedule;
+  draft.schedule = normalized;
+  draft.due = scheduleToDue(normalized);
+  // Б6.2: после ручной правки расписания плашка показывает РЕАЛЬНЫЙ quadrantOf,
+  // а не намерение, выбранное до неё.
+  draft.quadrant = quadrantOf({ due: draft.due, priority: draft.priority }, today());
+  draft.quadrantResolved = true;
   refreshComposer();
   return true;
 }
@@ -1056,133 +1200,1275 @@ function openPriorityMenu(anchor) {
   })));
 }
 
-// Лист срока — календарь на месяц, как в эталоне, плюс три быстрых дня и
-// красное «Очистить». Неделя начинается с понедельника — так же, как во всей
-// таблице приложения (getWeekStart в js/core/dates.js), иначе два календаря
-// спорили бы друг с другом. Поле «Срок» и его содержимое — зона Воркера 2;
-// здесь лист подключён к общему стеку слоёв (parent — лист создания), чтобы
-// закрытие черновика снимало и его.
+/* --- Лист «Дата и длительность» (ТЗ Б4) ----------------------------------- */
+
+/* Лист владеет КОПИЕЙ расписания. Черновик создания (а для уже записанной
+   задачи — хранилище) не узнаёт о правках до «Готово»: отмена стоит дешевле
+   отката, и крестик, подложка и Escape просто выбрасывают копию (Б4.1, Б4.7,
+   Б4.9). Всё, что лист обязан помнить между перерисовками, живёт в календарных
+   переменных ниже и не протекает в черновик. */
+
+let calendarDraft = null;    // рабочая копия расписания внутри листа
+let calTarget = null;        // {mode:'draft'} | {mode:'task', id}
+let calEndpoint = 'start';   // к какой границе относится следующий клик по дню
+let calNotice = '';          // пояснения листа («Сначала выберите дату»…)
+let calIssues = [];          // ошибки последней проверки: aria-invalid и фокус
+let calFields = {};          // код поля → узел, чтобы фокусить первый неверный
+let calHours = null;         // введённые часы: «весь день» → «часы» вернёт их
+let calMonthCursor = null;   // первое число месяца в сетке дней
+
 const WEEKDAYS = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
 
-function openDateSheet() {
-  removeOverlay('date');
-  const base = draft.due ? parseISODate(draft.due) : today();
-  calCursor = new Date(base.getFullYear(), base.getMonth(), 1);
+const CAL_HEADING_ID = 'matrix-date-heading';
+const CAL_ERROR_ID = 'matrix-date-error';
+const CAL_NOTICE_ID = 'matrix-date-notice';
+const CAL_ALLDAY_ID = 'matrix-cal-allday';
+const CAL_LOCAL_NOTE = 'Напоминания работают, пока приложение открыто. В фоне могут '
+  + 'задерживаться; при закрытом приложении не доставляются.';
+const CAL_DEVICE_NOTE = 'Часы берутся у устройства: при смене зоны встреча остаётся '
+  + 'в тех же локальных часах.';
 
-  const backdrop = el('div', 'matrix-sheet-backdrop is-date');
-  backdrop.setAttribute('role', 'dialog');
-  backdrop.setAttribute('aria-modal', 'true');
-  backdrop.setAttribute('aria-label', 'Срок исполнения');
+// Быстрые даты (Б4.4): пустой интервал делают одним днём «весь день»,
+// существующий — переносят ЦЕЛИКОМ, сохраняя календарную длину и часы.
+const CAL_QUICK = [
+  { label: 'Сегодня', offset: 0 },
+  { label: 'Завтра', offset: 1 },
+  { label: 'Через неделю', offset: 7 },
+];
+
+/* Меню напоминания (ТЗ Б5). `whole` — вариант годен и в режиме «весь день»:
+   там смещение обязано быть кратным суткам, поэтому минутные опережения в
+   all-day НЕ показываются, а не молча отбрасываются нормализацией. */
+const CAL_REMINDERS = [
+  { offset: null, anchor: null, label: 'Без напоминания', whole: true },
+  { offset: 0, anchor: 'start', label: 'В момент начала', whole: true },
+  { offset: 5, anchor: 'start', label: 'За 5 минут' },
+  { offset: 10, anchor: 'start', label: 'За 10 минут' },
+  { offset: 15, anchor: 'start', label: 'За 15 минут' },
+  { offset: 30, anchor: 'start', label: 'За 30 минут' },
+  { offset: 60, anchor: 'start', label: 'За 1 час' },
+  { offset: 720, anchor: 'start', label: 'За 12 часов' },
+  { offset: 1440, anchor: 'start', label: 'За 1 день', whole: true },
+  { offset: 2880, anchor: 'start', label: 'За 2 дня', whole: true },
+  { offset: 10080, anchor: 'start', label: 'За 1 неделю', whole: true },
+  { offset: 0, anchor: 'end', label: 'В момент окончания', whole: true },
+  { absolute: true, anchor: 'absolute', offset: 0, label: 'Другое время…', whole: true },
+];
+
+// Готовые правила повтора. `build` получает копию расписания, чтобы «каждую
+// неделю» брала день недели из выбранной даты, а не из сегодняшнего числа.
+const CAL_REPEATS = [
+  { label: 'Не повторять', unit: 'none', build: null },
+  { label: 'Каждый день', unit: 'day', build: () => ({ unit: 'day', interval: 1 }) },
+  { label: 'Каждые 3 дня', unit: 'day', build: () => ({ unit: 'day', interval: 3 }) },
+  {
+    label: 'По будням',
+    unit: 'week',
+    build: () => ({ unit: 'week', interval: 1, weekdays: [1, 2, 3, 4, 5] }),
+  },
+  {
+    label: 'Каждую неделю',
+    unit: 'week',
+    build: schedule => ({ unit: 'week', interval: 1, weekdays: [calIsoWeekday(schedule.startDate)] }),
+  },
+  {
+    label: 'Каждые 2 недели',
+    unit: 'week',
+    build: schedule => ({ unit: 'week', interval: 2, weekdays: [calIsoWeekday(schedule.startDate)] }),
+  },
+  {
+    label: 'Каждый месяц',
+    unit: 'month',
+    build: () => ({ unit: 'month', interval: 1, monthMode: 'dayOfMonth' }),
+  },
+  {
+    label: 'Каждый год',
+    unit: 'year',
+    build: () => ({ unit: 'year', interval: 1 }),
+  },
+];
+
+function calIsoWeekday(isoDate) {
+  const parsed = isoDate ? parseISODate(isoDate) : null;
+  if (!parsed || Number.isNaN(parsed.getTime())) return 1;
+  return ((parsed.getDay() + 6) % 7) + 1;
+}
+
+function calMonthStart(isoDate) {
+  const parsed = isoDate ? parseISODate(isoDate) : null;
+  const base = parsed && !Number.isNaN(parsed.getTime()) ? parsed : today();
+  return new Date(base.getFullYear(), base.getMonth(), 1);
+}
+
+function calIso(dayOffset) {
+  return toISODate(addDays(today(), dayOffset));
+}
+
+// Разница двух дат в календарных днях (включительно даёт +1).
+function calDayGap(fromIso, toIso) {
+  const a = parseISODate(fromIso);
+  const b = parseISODate(toIso);
+  if (!a || !b || Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return 0;
+  return Math.round((Date.UTC(b.getFullYear(), b.getMonth(), b.getDate())
+    - Date.UTC(a.getFullYear(), a.getMonth(), a.getDate())) / 86400000);
+}
+
+function newReminderId() {
+  calReminderSeq += 1;
+  return 'r' + Date.now().toString(36) + '-' + calReminderSeq;
+}
+
+let calReminderSeq = 0;
+
+function calIssueOf(code) {
+  for (const issue of calIssues) if (issue.field === code) return issue;
+  return null;
+}
+
+// Ошибку у поля показывает ОДИН живой регион (см. calErrorRow), а контрол
+// получает aria-invalid и ссылку на него: так скринридер дочитает причину
+// именно к тому полю, на которое поставит фокус calFinish.
+function calMarkField(node, code) {
+  if (!node) return node;
+  calFields[code] = node;
+  const issue = calIssueOf(code);
+  if (issue) {
+    node.setAttribute('aria-invalid', 'true');
+    node.setAttribute('aria-describedby', CAL_ERROR_ID);
+  } else {
+    node.removeAttribute('aria-invalid');
+    node.removeAttribute('aria-describedby');
+  }
+  return node;
+}
+
+function calDateText(isoDate) {
+  if (!isoDate) return 'не выбрано';
+  const parsed = parseISODate(isoDate);
+  if (!parsed || Number.isNaN(parsed.getTime())) return isoDate;
+  return parsed.toLocaleDateString('ru-RU', { weekday: 'short', day: 'numeric', month: 'short' });
+}
+
+function calEndpointText(which) {
+  const iso = which === 'start' ? calendarDraft.startDate : calendarDraft.endDate;
+  const time = which === 'start' ? calendarDraft.startTime : calendarDraft.endTime;
+  if (!iso) return '—';
+  return calDateText(iso) + (calendarDraft.allDay || !time ? '' : ', ' + time);
+}
+
+function calReminderText(reminder) {
+  if (!reminder) return 'Нет';
+  if (reminder.anchor === 'absolute') {
+    return 'В ' + reminder.time + ' ' + calDateText(reminder.date);
+  }
+  const edge = reminder.anchor === 'end' ? 'окончания' : 'начала';
+  if (!reminder.offsetMinutes) return 'В момент ' + edge;
+  const minutes = reminder.offsetMinutes;
+  const days = minutes / MINUTES_PER_DAY;
+  const whole = minutes % MINUTES_PER_DAY === 0;
+  const hours = minutes / 60;
+  const unit = whole ? days + ' ' + pluralDays(days)
+    : (hours >= 1 && hours % 1 === 0 ? hours + ' ч' : minutes + ' мин');
+  return 'За ' + unit + ' до ' + edge;
+}
+
+// Одна строка на правило: дубликаты по факту (anchor + смещение, либо date +
+// time) не создают второго напоминания (Б5).
+function calReminderSame(a, b) {
+  if (!a || !b) return false;
+  if (a.anchor !== b.anchor) return false;
+  if (a.anchor === 'absolute') return a.date === b.date && a.time === b.time;
+  return a.offsetMinutes === b.offsetMinutes;
+}
+
+function calRepeatText(repeat) {
+  if (!repeat) return 'Не повторять';
+  const every = repeat.interval > 1 ? repeat.interval + ' × ' : '';
+  if (repeat.unit === 'day') return every + 'каждый день';
+  if (repeat.unit === 'week') return every + 'каждую неделю';
+  if (repeat.unit === 'month') return every + 'каждый месяц';
+  if (repeat.unit === 'year') return every + 'каждый год';
+  if (repeat.unit === 'dates') return 'по выбранным датам';
+  return 'повтор';
+}
+
+/* Открытие листа. `taskId` задаёт режим правки существующей задачи (Б4.10):
+   тот же лист, но применяется он не к черновику, а к копии задачи, и запись
+   происходит только после успешного commitTasks. */
+
+function openDateSheet(options) {
+  const opts = options || {};
+  let task = null;
+  if (opts.taskId) {
+    task = tasks.filter(t => t.id === opts.taskId)[0] || null;
+    if (!task) return false;
+  } else if (!draft) {
+    return false;
+  }
+
+  const source = task ? task.schedule : draft.schedule;
+  calendarDraft = normalizeSchedule(cloneSchedule(source || {}), {
+    legacyDue: task ? task.due : draft.due,
+  }).schedule;
+  calTarget = task ? { mode: 'task', id: task.id } : { mode: 'draft' };
+  calEndpoint = 'start';
+  calNotice = '';
+  calIssues = [];
+  calFields = {};
+  calHours = calendarDraft.allDay
+    ? null
+    : { startTime: calendarDraft.startTime, endTime: calendarDraft.endTime };
+  calMonthCursor = calMonthStart(calendarDraft.startDate);
+
+  const backdrop = el('div', 'matrix-sheet-backdrop is-schedule');
   const panel = el('div', 'matrix-sheet is-date');
+  panel.setAttribute('role', 'dialog');
+  panel.setAttribute('aria-modal', 'true');
+  panel.setAttribute('aria-labelledby', CAL_HEADING_ID);
   backdrop.appendChild(panel);
-
-  const closeDate = () => {
-    removeOverlay('date');
-    refreshComposer();
-  };
   backdrop.addEventListener('click', event => {
-    if (event.target === backdrop) closeDate();
+    if (event.target === backdrop) closeDateSheet();
   });
 
-  const redraw = () => {
-    panel.textContent = '';
-    panel.appendChild(el('div', 'matrix-sheet-grabber'));
-
-    const head = el('div', 'matrix-sheet-head');
-    const cancel = iconButton('close', 'matrix-sheet-x', 'Закрыть');
-    cancel.addEventListener('click', closeDate);
-    head.appendChild(cancel);
-    head.appendChild(el('p', 'matrix-date-title', 'Срок исполнения'));
-    const ok = el('button', 'matrix-sheet-ok');
-    ok.type = 'button';
-    ok.setAttribute('aria-label', 'Готово');
-    ok.innerHTML = svgIcon('check', 22);
-    ok.addEventListener('click', closeDate);
-    head.appendChild(ok);
-    panel.appendChild(head);
-
-    const month = el('div', 'matrix-cal-month');
-    const prev = iconButton('back', 'matrix-cal-nav', 'Предыдущий месяц', 18);
-    prev.addEventListener('click', () => {
-      calCursor = new Date(calCursor.getFullYear(), calCursor.getMonth() - 1, 1);
-      redraw();
-    });
-    // Месяц строчными и без «г.»: так пишет русская типографика, а
-    // toLocaleDateString с year:'numeric' выдаёт «ноябрь 2026 г.».
-    const label = el('span', 'matrix-cal-label',
-      calCursor.toLocaleDateString('ru-RU', { month: 'long' }) + ' ' + calCursor.getFullYear());
-    const next = iconButton('back', 'matrix-cal-nav is-next', 'Следующий месяц', 18);
-    next.addEventListener('click', () => {
-      calCursor = new Date(calCursor.getFullYear(), calCursor.getMonth() + 1, 1);
-      redraw();
-    });
-    month.append(prev, label, next);
-    panel.appendChild(month);
-
-    const grid = el('div', 'matrix-cal-grid');
-    grid.setAttribute('role', 'grid');
-    for (const wd of WEEKDAYS) grid.appendChild(el('span', 'matrix-cal-wd', wd));
-    const first = new Date(calCursor.getFullYear(), calCursor.getMonth(), 1);
-    const offset = (first.getDay() + 6) % 7;
-    for (let i = 0; i < offset; i++) grid.appendChild(el('span', 'matrix-cal-pad'));
-    const daysInMonth = new Date(calCursor.getFullYear(), calCursor.getMonth() + 1, 0).getDate();
-    const todayIso = toISODate(today());
-    for (let day = 1; day <= daysInMonth; day++) {
-      const iso = toISODate(new Date(calCursor.getFullYear(), calCursor.getMonth(), day));
-      const cell = el('button', 'matrix-cal-day'
-        + (iso === todayIso ? ' is-today' : '')
-        + (iso === draft.due ? ' is-selected' : ''));
-      cell.type = 'button';
-      cell.textContent = String(day);
-      cell.setAttribute('aria-label', iso);
-      if (iso === draft.due) cell.setAttribute('aria-pressed', 'true');
-      cell.addEventListener('click', () => {
-        draft.due = iso;
-        refreshComposer();
-        redraw();
-      });
-      grid.appendChild(cell);
-    }
-    panel.appendChild(grid);
-
-    const now = today();
-    const chips = [
-      { label: 'Сегодня', due: toISODate(now) },
-      { label: 'Завтра', due: toISODate(addDays(now, 1)) },
-      { label: 'Через неделю', due: toISODate(addDays(now, 7)) },
-    ];
-    const row = el('div', 'matrix-chips');
-    for (const chip of chips) {
-      const btn = el('button', 'matrix-chip' + (chip.due === draft.due ? ' is-current' : ''));
-      btn.type = 'button';
-      btn.textContent = chip.label;
-      btn.addEventListener('click', () => {
-        const picked = parseISODate(chip.due);
-        calCursor = new Date(picked.getFullYear(), picked.getMonth(), 1);
-        draft.due = chip.due;
-        refreshComposer();
-        redraw();
-      });
-      row.appendChild(btn);
-    }
-    panel.appendChild(row);
-
-    const clear = el('button', 'matrix-clear', 'Очистить');
-    clear.type = 'button';
-    clear.addEventListener('click', () => {
-      draft.due = null;
-      refreshComposer();
-      redraw();
-    });
-    panel.appendChild(clear);
-  };
-
+  // Дочерний слой родителя имеет только в режиме черновика: закрытие листа
+  // создания обязано снять и календарь, но у режима «правлю задачу» листа
+  // создания над календарём нет.
   pushOverlay({
-    id: 'date', kind: 'sheet', parent: 'composer', node: backdrop, panel,
-    onEscape: closeDate,
+    id: 'date',
+    kind: 'sheet',
+    parent: task ? null : 'composer',
+    node: backdrop,
+    panel,
+    onEscape: () => closeDateSheet(),
   });
   trapTab(panel);
-  redraw();
+  redrawDateSheet();
+  focusNode(calFields.startDate || calFields.endDate || panel);
+  return true;
+}
+
+// Закрыть = выбросить копию. Ни черновик, ни хранилище не меняются: «Готово»
+// — единственная точка применения (Б4.1/Б4.9).
+function closeDateSheet() {
+  removeOverlay('date');
+  calendarDraft = null;
+  calTarget = null;
+  calNotice = '';
+  calIssues = [];
+  calFields = {};
+  refreshComposer();
+}
+
+function redrawDateSheet() {
+  const layer = overlayById('date');
+  if (!layer || !calendarDraft) return;
+  calIssues = validateSchedule(calendarDraft).issues;
+  calFields = {};
+  const panel = layer.panel;
+  panel.textContent = '';
+
+  panel.appendChild(el('div', 'matrix-sheet-grabber'));
+
+  const head = el('div', 'matrix-sheet-head');
+  const close = iconButton('close', 'matrix-sheet-x', 'Закрыть');
+  close.addEventListener('click', () => closeDateSheet());
+  head.appendChild(close);
+  const heading = el('p', 'matrix-date-title', 'Дата и длительность');
+  heading.id = CAL_HEADING_ID;
+  head.appendChild(heading);
+  const ready = el('button', 'matrix-date-ready');
+  ready.type = 'button';
+  ready.innerHTML = svgIcon('check', 22);
+  ready.setAttribute('aria-label', 'Готово');
+  ready.addEventListener('click', () => calFinish());
+  head.appendChild(ready);
+  panel.appendChild(head);
+
+  panel.appendChild(calChipsRow());
+  panel.appendChild(calMonthRow());
+  panel.appendChild(calDayGrid());
+
+  const fields = el('div', 'matrix-schedule-fields');
+  fields.appendChild(calEndpointRow('start'));
+  fields.appendChild(calEndpointRow('end'));
+  fields.appendChild(calModeRow());
+  fields.appendChild(calDurationRow());
+  fields.appendChild(calErrorRow());
+  fields.appendChild(calNoticeRow());
+  fields.appendChild(calReminderBlock());
+  fields.appendChild(calRepeatBlock());
+  panel.appendChild(fields);
+
+  const clear = el('button', 'matrix-clear', 'Очистить');
+  clear.type = 'button';
+  clear.addEventListener('click', () => calClear());
+  panel.appendChild(clear);
+
+  panel.appendChild(el('p', 'matrix-schedule-note', CAL_DEVICE_NOTE));
+}
+
+function calChipsRow() {
+  const row = el('div', 'matrix-chips');
+  for (const item of CAL_QUICK) {
+    const iso = calIso(item.offset);
+    const chip = el('button', 'matrix-chip'
+      + (calendarDraft.startDate === iso && !calendarDraft.repeat ? ' is-current' : ''));
+    chip.type = 'button';
+    chip.textContent = item.label;
+    chip.addEventListener('click', () => calPickQuick(iso));
+    row.appendChild(chip);
+  }
+  return row;
+}
+
+function calMonthRow() {
+  const row = el('div', 'matrix-cal-month');
+  const prev = iconButton('back', 'matrix-cal-nav', 'Предыдущий месяц', 18);
+  prev.addEventListener('click', () => {
+    calMonthCursor = new Date(calMonthCursor.getFullYear(), calMonthCursor.getMonth() - 1, 1);
+    redrawDateSheet();
+  });
+  // Месяц строчными и без «г.»: так пишет русская типографика, а
+  // toLocaleDateString с year:'numeric' выдаёт «ноябрь 2026 г.».
+  const label = el('span', 'matrix-cal-label',
+    calMonthCursor.toLocaleDateString('ru-RU', { month: 'long' }) + ' ' + calMonthCursor.getFullYear());
+  const next = iconButton('back', 'matrix-cal-nav is-next', 'Следующий месяц', 18);
+  next.addEventListener('click', () => {
+    calMonthCursor = new Date(calMonthCursor.getFullYear(), calMonthCursor.getMonth() + 1, 1);
+    redrawDateSheet();
+  });
+  row.append(prev, label, next);
+  return row;
+}
+
+// Сетка дней принадлежит листу, поэтому выбор помечается по активной границе:
+// день начала и день окончания различаются не только цветом (Б4.3), а текстом
+// aria-label и классом.
+function calDayGrid() {
+  const grid = el('div', 'matrix-cal-grid');
+  grid.setAttribute('role', 'grid');
+  for (const wd of WEEKDAYS) grid.appendChild(el('span', 'matrix-cal-wd', wd));
+  const offset = (calMonthCursor.getDay() + 6) % 7;
+  for (let i = 0; i < offset; i++) grid.appendChild(el('span', 'matrix-cal-pad'));
+  const daysInMonth = new Date(calMonthCursor.getFullYear(), calMonthCursor.getMonth() + 1, 0)
+    .getDate();
+  const todayIso = toISODate(today());
+  const startIso = calendarDraft.startDate;
+  const endIso = calendarDraft.endDate;
+  for (let day = 1; day <= daysInMonth; day++) {
+    const iso = toISODate(new Date(calMonthCursor.getFullYear(), calMonthCursor.getMonth(), day));
+    const isStart = !!startIso && iso === startIso;
+    const isEnd = !!endIso && iso === endIso;
+    const picked = (isStart && (calEndpoint === 'start' || isEnd))
+      || (isEnd && calEndpoint === 'end');
+    const cell = el('button', 'matrix-cal-day'
+      + (iso === todayIso ? ' is-today' : '')
+      + (picked ? ' is-selected' : '')
+      + (isStart ? ' is-range-start' : '')
+      + (isEnd ? ' is-range-end' : '')
+      + (!!startIso && !!endIso && iso > startIso && iso < endIso ? ' is-in-range' : ''));
+    cell.type = 'button';
+    cell.textContent = String(day);
+    // aria-label остаётся чистой датой: по ней лист ищут тесты и скринридер
+    // читает cell как «4 ноября». Принадлежность границе — title и класс, а
+    // не дописанное в подпись слово, которое ломало бы сопоставление дня.
+    cell.setAttribute('aria-label', iso);
+    if (isStart || isEnd) {
+      cell.title = iso + (isStart && isEnd ? ' — начало и конец'
+        : isStart ? ' — начало' : ' — конец');
+      cell.dataset.range = isStart && isEnd ? 'both' : isStart ? 'start' : 'end';
+    }
+    cell.setAttribute('aria-pressed', picked ? 'true' : 'false');
+    cell.addEventListener('click', () => calPickDay(iso));
+    grid.appendChild(cell);
+  }
+  return grid;
+}
+
+function calEndpointRow(which) {
+  const row = el('div', 'matrix-schedule-row matrix-schedule-endpoint-row');
+  const pill = el('button', 'matrix-schedule-endpoint'
+    + (calEndpoint === which ? ' is-active' : ''));
+  pill.type = 'button';
+  pill.dataset.endpoint = which;
+  // Дата границы читается из разметки, а не только из подписи: тест и
+  // будущий экран видят, ЧТО именно выбрано, когда форма невалидна.
+  pill.dataset.date = (which === 'start' ? calendarDraft.startDate : calendarDraft.endDate) || '';
+  pill.setAttribute('aria-pressed', calEndpoint === which ? 'true' : 'false');
+  pill.setAttribute('aria-label', (which === 'start' ? 'Начать: ' : 'Закончить: ')
+    + calEndpointText(which));
+  pill.appendChild(el('span', 'matrix-schedule-endpoint-label',
+    which === 'start' ? 'Начать' : 'Закончить'));
+  pill.appendChild(el('span', 'matrix-schedule-endpoint-date', calEndpointText(which)));
+  pill.addEventListener('click', () => {
+    calEndpoint = which;
+    redrawDateSheet();
+    // Календарь принадлежит листу: после выбора границы фокус возвращается к
+    // сетке, и следующий шаг — стрелками по дням, а не по всему листу.
+    focusNode(calFields.startDate || calFields.endDate);
+  });
+  calMarkField(pill, which === 'start' ? 'startDate' : 'endDate');
+  row.appendChild(pill);
+  if (!calendarDraft.allDay) row.appendChild(calTimeInput(which));
+  return row;
+}
+
+function calTimeInput(which) {
+  const input = el('input', 'matrix-schedule-time');
+  input.type = 'time';
+  // Шаг 1 минута и ручной ввод (Б4.6): «закончить» — самостоятельное поле, а
+  // не производная от начала.
+  input.setAttribute('step', '60');
+  input.dataset.endpoint = which;
+  input.value = (which === 'start' ? calendarDraft.startTime : calendarDraft.endTime) || '';
+  input.setAttribute('aria-label', which === 'start' ? 'Время начала' : 'Время окончания');
+  const code = which === 'start' ? 'startTime' : 'endTime';
+  input.addEventListener('input', () => {
+    const wasFocused = document.activeElement === input;
+    calendarDraft[which === 'start' ? 'startTime' : 'endTime']
+      = /^[0-2]\d:[0-5]\d$/.test(String(input.value)) ? input.value : null;
+    redrawDateSheet();
+    if (wasFocused) focusNode(calFields[code]);
+  });
+  calMarkField(input, code);
+  return input;
+}
+
+function calModeRow() {
+  const row = el('div', 'matrix-schedule-row matrix-all-day');
+  const label = el('label', 'matrix-all-day-label');
+  label.setAttribute('for', CAL_ALLDAY_ID);
+  const box = el('input', 'matrix-all-day-input');
+  box.type = 'checkbox';
+  box.id = CAL_ALLDAY_ID;
+  box.checked = calendarDraft.allDay;
+  box.addEventListener('change', () => calSetMode(box.checked));
+  label.append(box, el('span', 'matrix-all-day-text', 'Весь день'));
+  row.appendChild(label);
+
+  const seg = el('div', 'matrix-mode-segment');
+  seg.setAttribute('role', 'group');
+  seg.setAttribute('aria-label', 'Режим интервала');
+  for (const mode of [{ id: 'all-day', text: 'Весь день' }, { id: 'timed', text: 'Часы' }]) {
+    const btn = el('button', 'matrix-mode-btn'
+      + ((mode.id === 'all-day') === calendarDraft.allDay ? ' is-current' : ''));
+    btn.type = 'button';
+    btn.dataset.mode = mode.id;
+    btn.setAttribute('aria-pressed', (mode.id === 'all-day') === calendarDraft.allDay ? 'true' : 'false');
+    btn.textContent = mode.text;
+    btn.addEventListener('click', () => calSetMode(mode.id === 'all-day'));
+    seg.appendChild(btn);
+  }
+  row.appendChild(seg);
+  return row;
+}
+
+function calDurationRow() {
+  const row = el('div', 'matrix-schedule-row matrix-duration-row');
+  row.appendChild(el('span', 'matrix-duration-label', 'Длительность'));
+  const value = el('span', 'matrix-duration');
+  const duration = scheduleDuration(calendarDraft);
+  const extra = duration.kind === 'timed' && duration.days > 1
+    ? ' (' + duration.days + ' ' + pluralDays(duration.days) + ')'
+    : '';
+  value.textContent = duration.label ? duration.label + extra : '—';
+  row.appendChild(value);
+  return row;
+}
+
+function calErrorRow() {
+  const box = el('div', 'matrix-schedule-error');
+  box.id = CAL_ERROR_ID;
+  box.setAttribute('role', 'alert');
+  box.setAttribute('aria-live', 'assertive');
+  // Причина называется до «Готово»: человек видит, что уже не сойдётся, и
+  // правит именно это поле, а не получает отказ постфактум.
+  box.textContent = calIssues.map(issue => issue.message).join('; ');
+  if (!calIssues.length) box.hidden = true;
+  return box;
+}
+
+function calNoticeRow() {
+  const box = el('div', 'matrix-schedule-hint');
+  box.id = CAL_NOTICE_ID;
+  box.setAttribute('aria-live', 'polite');
+  box.textContent = calNotice;
+  if (!calNotice) box.hidden = true;
+  return box;
+}
+
+function calReminderBlock() {
+  const block = el('div', 'matrix-schedule-field is-reminder');
+  const row = el('button', 'matrix-schedule-row matrix-reminder-row');
+  row.type = 'button';
+  row.setAttribute('aria-label', 'Время для напоминания');
+  row.appendChild(el('span', 'matrix-schedule-row-label', 'Напоминание'));
+  row.appendChild(el('span', 'matrix-schedule-row-value', calReminderSummary()));
+  const blocked = !calendarDraft.startDate;
+  if (blocked) row.setAttribute('aria-disabled', 'true');
+  row.addEventListener('click', () => calOpenReminders());
+  calMarkField(row, 'reminders');
+  block.appendChild(row);
+
+  if (calendarDraft.reminders.length) {
+    const list = el('div', 'matrix-reminder-list');
+    for (const reminder of calendarDraft.reminders) {
+      const chip = el('div', 'matrix-reminder-chip');
+      chip.appendChild(el('span', 'matrix-reminder-chip-text', calReminderText(reminder)));
+      const moment = reminderMoment(calendarDraft, reminder);
+      if (moment.ok && moment.at.getTime() < today().getTime()) {
+        chip.appendChild(el('span', 'matrix-reminder-chip-warn',
+          'Время уже прошло, уведомление сейчас отправлено не будет'));
+      } else if (!moment.ok && reminder.anchor !== 'absolute') {
+        chip.appendChild(el('span', 'matrix-reminder-chip-warn',
+          'Правило не образует момента: смещение или дата неверны'));
+      }
+      const drop = el('button', 'matrix-reminder-drop', '×');
+      drop.type = 'button';
+      drop.dataset.reminderId = reminder.id;
+      drop.setAttribute('aria-label', 'Снять напоминание: ' + calReminderText(reminder));
+      drop.addEventListener('click', () => {
+        calendarDraft.reminders = calendarDraft.reminders.filter(r => r.id !== reminder.id);
+        calNotice = '';
+        redrawDateSheet();
+      });
+      chip.appendChild(drop);
+      block.appendChild(chip);
+    }
+    block.appendChild(list);
+  }
+  return block;
+}
+
+function calReminderSummary() {
+  if (!calendarDraft.reminders.length) return 'Нет';
+  const first = calReminderText(calendarDraft.reminders[0]);
+  if (calendarDraft.reminders.length === 1) return first;
+  return first + ' и ещё ' + (calendarDraft.reminders.length - 1);
+}
+
+function calRepeatBlock() {
+  const block = el('div', 'matrix-schedule-field is-repeat');
+  const row = el('button', 'matrix-schedule-row matrix-repeat-row');
+  row.type = 'button';
+  row.setAttribute('aria-label', 'Повтор');
+  row.appendChild(el('span', 'matrix-schedule-row-label', 'Повтор'));
+  row.appendChild(el('span', 'matrix-schedule-row-value', calRepeatText(calendarDraft.repeat)));
+  if (!calendarDraft.startDate) row.setAttribute('aria-disabled', 'true');
+  row.addEventListener('click', () => calOpenRepeat());
+  calMarkField(row, 'repeat');
+  block.appendChild(row);
+
+  if (calendarDraft.repeat) {
+    const series = calendarDraft.series
+      ? Object.assign({}, calendarDraft.series, { index: 1 })
+      : { id: 'draft', index: 1, anchorDate: calendarDraft.startDate, anchorDay: null, anchorMonth: null };
+    const probe = nextOccurrence(Object.assign({}, calendarDraft, { series: series }),
+      { completionDate: today() });
+    if (probe.status === 'ok' && probe.occurrence) {
+      block.appendChild(el('p', 'matrix-repeat-next',
+        'Далее: ' + calDateText(probe.occurrence.startDate)));
+    }
+  }
+  return block;
+}
+
+/* --- Правка копии --------------------------------------------------------- */
+
+function calPickDay(isoDate) {
+  if (!calendarDraft.startDate && !calendarDraft.endDate) {
+    calendarDraft.startDate = isoDate;
+    calendarDraft.endDate = isoDate;
+    calEndpoint = 'end';
+  } else if (calEndpoint === 'end') {
+    calendarDraft.endDate = isoDate;
+    if (!calendarDraft.startDate) calendarDraft.startDate = isoDate;
+  } else {
+    calendarDraft.startDate = isoDate;
+    if (!calendarDraft.endDate) calendarDraft.endDate = isoDate;
+  }
+  // Порядок границ не «чинится» молча: если окончание уехало раньше начала,
+  // это увидит валидация (Б4.3), а не вторая граница, сдвинутая за спиной.
+  calNotice = '';
+  redrawDateSheet();
+  focusNode(calFields.startDate || calFields.endDate);
+}
+
+function calPickQuick(isoDate) {
+  if (calendarDraft.startDate && calendarDraft.endDate) {
+    const gap = calDayGap(calendarDraft.startDate, calendarDraft.endDate);
+    calendarDraft.startDate = isoDate;
+    calendarDraft.endDate = toISODate(addDays(parseISODate(isoDate), gap));
+  } else {
+    calendarDraft.startDate = isoDate;
+    calendarDraft.endDate = isoDate;
+    calendarDraft.allDay = true;
+    calendarDraft.startTime = null;
+    calendarDraft.endTime = null;
+    calHours = null;
+  }
+  calEndpoint = 'start';
+  calMonthCursor = calMonthStart(isoDate);
+  calNotice = '';
+  redrawDateSheet();
+}
+
+function calSetMode(allDay) {
+  if (!calendarDraft || calendarDraft.allDay === allDay) return;
+  if (allDay) {
+    if (calendarDraft.startTime && calendarDraft.endTime) {
+      calHours = { startTime: calendarDraft.startTime, endTime: calendarDraft.endTime };
+    }
+    calendarDraft.allDay = true;
+    calendarDraft.startTime = null;
+    calendarDraft.endTime = null;
+    const stranded = calendarDraft.reminders
+      .filter(r => r.anchor !== 'absolute' && r.offsetMinutes % MINUTES_PER_DAY !== 0).length;
+    calNotice = stranded
+      ? 'В режиме «весь день» смещение должно быть целыми сутками: напоминаний на '
+        + stranded + ' надо переставить или снять.'
+      : '';
+  } else {
+    const remembered = calHours || {};
+    calendarDraft.allDay = false;
+    calendarDraft.startTime = remembered.startTime || ALL_DAY_DEFAULT_TIME;
+    calendarDraft.endTime = remembered.endTime || '10:00';
+    calHours = { startTime: calendarDraft.startTime, endTime: calendarDraft.endTime };
+    calNotice = '';
+  }
+  redrawDateSheet();
+}
+
+function calClear() {
+  const had = calendarDraft.reminders.length || calendarDraft.repeat ? 1 : 0;
+  calendarDraft = emptySchedule();
+  calHours = null;
+  calEndpoint = 'start';
+  // Сброс зависимых настроек показывается внутри листа: «Очистить» до «Готово»
+  // отменяемо, и человек обязан видеть, ЧТО именно будет удалено (Б4.7).
+  calNotice = had ? 'Вместе со сроком будут сняты напоминание и повтор.' : '';
+  redrawDateSheet();
+}
+
+// Единственная точка, где копия становится чьим-то значением.
+function calApply(value) {
+  return calTarget.mode === 'task'
+    ? commitTaskSchedule(calTarget.id, value)
+    : applyDraftSchedule(value);
+}
+
+function calFinish() {
+  const check = validateSchedule(calendarDraft);
+  calIssues = check.issues;
+  if (!check.ok) {
+    redrawDateSheet();
+    const first = check.issues[0];
+    focusNode((first && calFields[first.field]) || calFields.startDate
+      || (overlayById('date') || {}).panel);
+    return false;
+  }
+  if (!calApply(cloneSchedule(calendarDraft))) {
+    // Отказ хранилища редактор не закрывает: правка ещё не состоялась, а
+    // молча выброшенная копия означала бы потерю ввода.
+    redrawDateSheet();
+    return false;
+  }
+  closeDateSheet();
+  return true;
+}
+
+/* --- Вложенные слои: напоминание и повтор --------------------------------- */
+
+function calBlockWithoutDate(what) {
+  calNotice = 'Сначала выберите дату — ' + what + ' привязан к интервалу.';
+  redrawDateSheet();
+}
+
+function calSheetLayer(id, title, role) {
+  const backdrop = el('div', 'matrix-sheet-backdrop is-' + id);
+  const panel = el('div', 'matrix-sheet is-' + id);
+  panel.setAttribute('role', role || 'dialog');
+  panel.setAttribute('aria-modal', 'true');
+  panel.setAttribute('aria-label', title);
+  panel.appendChild(el('div', 'matrix-sheet-grabber'));
+  panel.appendChild(el('p', 'matrix-sheet-title', title));
+  backdrop.appendChild(panel);
+  backdrop.addEventListener('click', event => {
+    if (event.target === backdrop) removeOverlay(id);
+  });
+  return { backdrop, panel };
+}
+
+function calOpenReminders() {
+  if (!calendarDraft.startDate) {
+    calBlockWithoutDate('напоминание');
+    return;
+  }
+  removeOverlay('reminder');
+  const layer = calSheetLayer('reminder', 'Время для напоминания', 'listbox');
+  const panel = layer.panel;
+  const choices = CAL_REMINDERS.filter(c => !calendarDraft.allDay || c.whole === true);
+  if (calendarDraft.reminders.length >= SCHEDULE_LIMITS.reminders) {
+    panel.appendChild(el('p', 'matrix-sheet-sub',
+      'Не больше ' + SCHEDULE_LIMITS.reminders + ' напоминаний: одно надо сначала снять.'));
+  }
+  for (const choice of choices) {
+    const btn = el('button', 'matrix-reminder-option'
+      + (calChoiceCurrent(choice) ? ' is-current' : ''));
+    btn.type = 'button';
+    btn.setAttribute('role', 'option');
+    btn.dataset.offset = choice.absolute ? 'absolute'
+      : (choice.offset === null ? 'none' : String(choice.offset));
+    btn.dataset.anchor = choice.anchor || 'none';
+    btn.setAttribute('aria-selected', calChoiceCurrent(choice) ? 'true' : 'false');
+    btn.appendChild(el('span', 'matrix-reminder-option-label', choice.label));
+    btn.addEventListener('click', () => calPickReminder(choice));
+    panel.appendChild(btn);
+  }
+  panel.appendChild(el('p', 'matrix-schedule-note', CAL_LOCAL_NOTE));
+  pushOverlay({
+    id: 'reminder',
+    kind: 'sheet',
+    parent: 'date',
+    node: layer.backdrop,
+    panel,
+    onEscape: () => removeOverlay('reminder'),
+  });
+}
+
+function calChoiceCurrent(choice) {
+  // Подсветка текущего пункта сравнивает ПРАВИЛА, а не пункт меню с его
+  // полем `offset`: иначе «выбрано» не показывалось бы никогда.
+  if (choice.absolute) {
+    return calendarDraft.reminders.some(r => r.anchor === 'absolute');
+  }
+  if (choice.offset === null) return calendarDraft.reminders.length === 0;
+  const probe = {
+    anchor: choice.anchor, offsetMinutes: choice.offset, date: null, time: null,
+  };
+  return calendarDraft.reminders.some(r => calReminderSame(r, probe));
+}
+
+function calPickReminder(choice) {
+  removeOverlay('reminder');
+  if (choice.absolute) {
+    calOpenAbsolute();
+    return;
+  }
+  if (choice.offset === null) {
+    calendarDraft.reminders = [];
+    calNotice = '';
+  } else if (calendarDraft.reminders.length >= SCHEDULE_LIMITS.reminders
+    && !calendarDraft.reminders.some(r => calReminderSame(r, choice))) {
+    calNotice = 'Не больше ' + SCHEDULE_LIMITS.reminders + ' напоминаний.';
+  } else {
+    const rule = {
+      id: newReminderId(),
+      anchor: choice.anchor,
+      offsetMinutes: choice.offset,
+      date: null,
+      time: calendarDraft.allDay ? ALL_DAY_DEFAULT_TIME : null,
+    };
+    // Дубликат по правилу заменяется, а не добавляется вторым (Б5): сравнение
+    // идёт по ГОТОВОМУ правилу, а не по пункту меню — у пункта смещение живёт
+    // в `offset`, и проверка против него никогда бы не совпала.
+    calendarDraft.reminders = calendarDraft.reminders
+      .filter(r => !calReminderSame(r, rule))
+      .concat([rule]);
+    calNotice = '';
+  }
+  redrawDateSheet();
+}
+
+// Абсолютное напоминание живёт своими датой и временем: интервал за ним не
+// тянет, поэтому при включении повтора оно снимается явно (Б5).
+function calOpenAbsolute() {
+  removeOverlay('reminder-abs');
+  const layer = calSheetLayer('reminder-abs', 'Другое время');
+  const panel = layer.panel;
+  const date = el('input', 'matrix-absolute-date');
+  date.type = 'date';
+  date.value = calendarDraft.startDate || toISODate(today());
+  date.setAttribute('aria-label', 'Дата напоминания');
+  const time = el('input', 'matrix-absolute-time');
+  time.type = 'time';
+  time.setAttribute('step', '60');
+  time.value = '09:00';
+  time.setAttribute('aria-label', 'Время напоминания');
+  panel.append(date, time);
+  const add = el('button', 'matrix-absolute-add', 'Добавить');
+  add.type = 'button';
+  add.addEventListener('click', () => {
+    const rule = {
+      id: newReminderId(),
+      anchor: 'absolute',
+      offsetMinutes: 0,
+      date: String(date.value || ''),
+      time: String(time.value || ''),
+    };
+    const probe = reminderMoment(calendarDraft, rule);
+    if (!probe.ok) {
+      calNotice = 'Дата и время не образуют существующий момент: ' + probe.code;
+      removeOverlay('reminder-abs');
+      redrawDateSheet();
+      return;
+    }
+    calendarDraft.reminders = calendarDraft.reminders
+      .filter(r => !calReminderSame(r, rule));
+    if (calendarDraft.reminders.length >= SCHEDULE_LIMITS.reminders) {
+      calNotice = 'Не больше ' + SCHEDULE_LIMITS.reminders + ' напоминаний.';
+    } else {
+      calendarDraft.reminders = calendarDraft.reminders.concat([rule]);
+      calNotice = '';
+    }
+    removeOverlay('reminder-abs');
+    redrawDateSheet();
+  });
+  panel.appendChild(add);
+  pushOverlay({
+    id: 'reminder-abs',
+    kind: 'sheet',
+    parent: 'reminder',
+    node: layer.backdrop,
+    panel,
+    onEscape: () => removeOverlay('reminder-abs'),
+  });
+}
+
+/* Слой «Повтор». Пресеты применяются сразу, блок «Настроить» собирает
+   правило целиком: единица, интервал, дни недели, режим месяца, база и
+   завершение (ТЗ Б7). Промежуточный выбор живёт в calRepeatEdit и не касается
+   черновика до «Применить правило»: половина выбранного правила не должна
+   превращаться в половину серии. */
+
+let calRepeatEdit = null;
+let calRepeatFocus = null;
+let calRepeatNotice = '';
+
+function calEmptyRepeat() {
+  return {
+    basis: 'scheduled', unit: 'day', interval: 1, weekdays: [], monthMode: 'dayOfMonth',
+    nth: null, weekday: null, dates: [], picked: '', ends: { type: 'never', until: null, count: null },
+  };
+}
+
+// Копия правила поверх явных defaults: поля, которых в сохранённом правиле
+// нет, получают ровно те же значения, что требует Б3.8.
+function calCloneRepeat(repeat) {
+  const out = calEmptyRepeat();
+  if (!repeat || typeof repeat !== 'object') return out;
+  for (const key of ['basis', 'unit', 'interval', 'monthMode', 'nth', 'weekday']) {
+    if (repeat[key] !== undefined && repeat[key] !== null) out[key] = repeat[key];
+  }
+  if (Array.isArray(repeat.weekdays)) out.weekdays = repeat.weekdays.slice();
+  if (Array.isArray(repeat.dates)) out.dates = repeat.dates.slice();
+  if (repeat.ends && typeof repeat.ends === 'object') {
+    out.ends = {
+      type: repeat.ends.type || 'never',
+      until: repeat.ends.until || null,
+      count: repeat.ends.count === undefined ? null : repeat.ends.count,
+    };
+  }
+  return out;
+}
+
+function calRepeatSelect(className, label, options, current) {
+  const select = el('select', className);
+  select.setAttribute('aria-label', label);
+  for (const item of options) {
+    const node = el('option', null, item[1]);
+    node.value = String(item[0]);
+    if (String(item[0]) === String(current)) node.selected = true;
+    select.appendChild(node);
+  }
+  select.value = String(current);
+  return select;
+}
+
+// Правила, для которых «от выполнения» не имеет однозначного смысла: список
+// дней, N-й день недели и произвольный набор дат. ТЗ требует не молча
+// переписывать, а явно отключить с пояснением.
+function calRepeatCompletionAmbiguous(edit) {
+  if (edit.unit === 'dates') return true;
+  if (edit.unit === 'week' && edit.weekdays.length > 1) return true;
+  return edit.unit === 'month' && edit.monthMode === 'nthWeekday';
+}
+
+function calNormalizeRepeatRule(edit) {
+  const monthly = edit.unit === 'month';
+  const nthWeekday = monthly && edit.monthMode === 'nthWeekday';
+  const probe = normalizeSchedule(Object.assign({}, calendarDraft, {
+    repeat: {
+      basis: edit.basis,
+      unit: edit.unit,
+      interval: edit.interval,
+      weekdays: edit.unit === 'week' ? edit.weekdays.slice().sort((a, b) => a - b) : [],
+      monthMode: monthly ? edit.monthMode : 'dayOfMonth',
+      nth: nthWeekday ? edit.nth : null,
+      weekday: nthWeekday ? edit.weekday : null,
+      dates: edit.unit === 'dates' ? edit.dates.slice() : [],
+      ends: edit.ends,
+    },
+    series: null,
+  }), {}).schedule;
+  return probe.repeat;
+}
+
+function calOpenRepeat() {
+  if (!calendarDraft.startDate) {
+    calBlockWithoutDate('повтор');
+    return;
+  }
+  removeOverlay('repeat');
+  if (!calRepeatEdit) calRepeatEdit = calCloneRepeat(calendarDraft.repeat);
+  const edit = calRepeatEdit;
+  const controls = {};
+  const notice = calRepeatNotice;
+  calRepeatNotice = '';
+
+  const rerender = (key) => {
+    calRepeatFocus = key || null;
+    calOpenRepeat();
+  };
+
+  const layer = calSheetLayer('repeat', 'Повтор');
+  const panel = layer.panel;
+
+  for (const preset of CAL_REPEATS) {
+    const btn = el('button', 'matrix-repeat-option' + (calRepeatCurrent(preset) ? ' is-current' : ''));
+    btn.type = 'button';
+    btn.dataset.unit = preset.unit;
+    btn.textContent = preset.label;
+    btn.addEventListener('click', () => {
+      calSetRepeat(preset.build ? preset.build(calendarDraft) : null);
+      calRepeatEdit = null;
+      removeOverlay('repeat');
+      redrawDateSheet();
+    });
+    panel.appendChild(btn);
+  }
+
+  const custom = el('div', 'matrix-repeat-custom');
+  custom.appendChild(el('p', 'matrix-repeat-custom-title', 'Настроить'));
+
+  // — каждые N единиц
+  const unitLine = el('div', 'matrix-repeat-line');
+  const interval = el('input', 'matrix-repeat-interval');
+  interval.type = 'number';
+  interval.min = '1';
+  interval.max = String(SCHEDULE_LIMITS.intervalMax);
+  interval.value = String(edit.interval);
+  interval.setAttribute('aria-label', 'Каждые N');
+  interval.addEventListener('change', () => {
+    edit.interval = Number(interval.value) || 1;
+    rerender('interval');
+  });
+  const unit = calRepeatSelect('matrix-repeat-unit', 'Единица повтора', [
+    ['day', 'дней'], ['week', 'недель'], ['month', 'месяцев'], ['year', 'лет'],
+    ['dates', 'по выбранным датам'],
+  ], edit.unit);
+  unit.addEventListener('change', () => {
+    edit.unit = unit.value;
+    if (edit.unit === 'dates') {
+      // Интервал и база у набора дат не бывает: правила Б3.8 фиксируют
+      // interval=1 и basis='scheduled'. Даты молча не подставляются —
+      // список обязан быть выбранным человеком.
+      edit.interval = 1;
+      edit.basis = 'scheduled';
+    }
+    rerender('unit');
+  });
+  unitLine.append(el('span', 'matrix-repeat-line-label', 'Каждые'), interval, unit);
+  custom.appendChild(unitLine);
+  controls.interval = interval;
+  controls.unit = unit;
+
+  // — какие дни недели (только для недели)
+  if (edit.unit === 'week') {
+    const days = el('div', 'matrix-repeat-weekdays');
+    for (let index = 0; index < WEEKDAYS.length; index++) {
+      const number = index + 1;
+      const on = edit.weekdays.indexOf(number) >= 0;
+      const toggle = el('button', 'matrix-repeat-weekday' + (on ? ' is-current' : ''));
+      toggle.type = 'button';
+      toggle.dataset.weekday = String(number);
+      toggle.setAttribute('aria-pressed', on ? 'true' : 'false');
+      toggle.textContent = WEEKDAYS[index];
+      toggle.addEventListener('click', () => {
+        const at = edit.weekdays.indexOf(number);
+        if (at >= 0) edit.weekdays.splice(at, 1);
+        else edit.weekdays.push(number);
+        edit.weekdays.sort((a, b) => a - b);
+        rerender('weekday' + number);
+      });
+      days.appendChild(toggle);
+    }
+    custom.appendChild(days);
+  }
+
+  // — режим месяца: по числу либо N-й/последний день недели
+  if (edit.unit === 'month') {
+    const modeLine = el('div', 'matrix-repeat-line');
+    const mode = calRepeatSelect('matrix-repeat-month-mode', 'Режим месяца', [
+      ['dayOfMonth', 'по числу'], ['nthWeekday', 'N-й день недели'],
+    ], edit.monthMode);
+    mode.addEventListener('change', () => {
+      edit.monthMode = mode.value;
+      if (edit.monthMode === 'nthWeekday') {
+        if (!edit.nth) edit.nth = 1;
+        if (!edit.weekday) edit.weekday = calIsoWeekday(calendarDraft.startDate);
+      }
+      rerender('month-mode');
+    });
+    modeLine.append(el('span', 'matrix-repeat-line-label', 'Раз в месяц'), mode);
+    custom.appendChild(modeLine);
+    controls['month-mode'] = mode;
+
+    if (edit.monthMode === 'nthWeekday') {
+      const nthLine = el('div', 'matrix-repeat-line');
+      const nth = calRepeatSelect('matrix-repeat-nth', 'Номер вхождения', [
+        ['1', 'первый'], ['2', 'второй'], ['3', 'третий'], ['4', 'четвёртый'], ['-1', 'последний'],
+      ], edit.nth === null ? 1 : edit.nth);
+      nth.addEventListener('change', () => {
+        edit.nth = Number(nth.value);
+        rerender('nth');
+      });
+      const pick = calRepeatSelect('matrix-repeat-weekday-pick', 'День недели',
+        WEEKDAYS.map((name, index) => [String(index + 1), name]),
+        edit.weekday === null ? 1 : edit.weekday);
+      pick.addEventListener('change', () => {
+        edit.weekday = Number(pick.value);
+        rerender('weekday-pick');
+      });
+      nthLine.append(nth, pick);
+      custom.appendChild(nthLine);
+      controls.nth = nth;
+      controls['weekday-pick'] = pick;
+    }
+  }
+
+  // — собственный набор дат
+  if (edit.unit === 'dates') {
+    const dateLine = el('div', 'matrix-repeat-line');
+    const input = el('input', 'matrix-repeat-date-input');
+    input.type = 'date';
+    // Введанная дата живёт в промежуточном правиле: перерисовка слоя не имеет
+    // права её выбрасывать, иначе второе «Добавить дату» добавляет другую дату.
+    if (!edit.picked) edit.picked = calendarDraft.startDate;
+    input.value = edit.picked;
+    input.setAttribute('aria-label', 'Добавить дату повтора');
+    input.addEventListener('change', () => {
+      edit.picked = String(input.value || '');
+    });
+    const add = el('button', 'matrix-repeat-date-add', 'Добавить дату');
+    add.type = 'button';
+    const commit = () => {
+      edit.picked = String(input.value || '');
+      const iso = /^\d{4}-\d{2}-\d{2}$/.test(edit.picked) ? edit.picked : null;
+      if (!iso) {
+        calRepeatNotice = 'Дата не выбрана — из неё правило не собирается.';
+        rerender('date-input');
+        return;
+      }
+      if (edit.dates.indexOf(iso) >= 0) {
+        calRepeatNotice = 'Эта дата уже в списке.';
+      } else if (edit.dates.length >= SCHEDULE_LIMITS.datesMax) {
+        calRepeatNotice = 'Не больше ' + SCHEDULE_LIMITS.datesMax + ' дат.';
+      } else {
+        edit.dates = edit.dates.concat([iso]).sort();
+      }
+      rerender('date-input');
+    };
+    add.addEventListener('click', commit);
+    dateLine.append(input, add);
+    custom.appendChild(dateLine);
+    controls['date-input'] = input;
+
+    const list = el('div', 'matrix-repeat-dates');
+    for (const iso of edit.dates) {
+      const chip = el('div', 'matrix-repeat-date');
+      chip.dataset.date = iso;
+      chip.appendChild(el('span', 'matrix-repeat-date-text', calDateText(iso)));
+      const drop = el('button', 'matrix-repeat-date-drop', '×');
+      drop.type = 'button';
+      drop.setAttribute('aria-label', 'Убрать дату ' + iso);
+      drop.addEventListener('click', () => {
+        edit.dates = edit.dates.filter(item => item !== iso);
+        rerender('dates');
+      });
+      chip.appendChild(drop);
+      list.appendChild(chip);
+    }
+    custom.appendChild(list);
+    if (!edit.dates.length) {
+      custom.appendChild(el('p', 'matrix-repeat-hint', 'Список пуст: добавьте хотя бы одну дату.'));
+    }
+  }
+
+  // — от чего считать
+  const ambiguous = calRepeatCompletionAmbiguous(edit);
+  if (ambiguous) edit.basis = 'scheduled';
+  const basisLine = el('div', 'matrix-repeat-line');
+  const basis = calRepeatSelect('matrix-repeat-basis', 'От чего считать повтор', [
+    ['scheduled', 'от даты задачи'], ['completion', 'от выполнения'],
+  ], edit.basis);
+  basis.disabled = ambiguous;
+  basis.addEventListener('change', () => {
+    edit.basis = basis.value;
+    rerender('basis');
+  });
+  basisLine.append(el('span', 'matrix-repeat-line-label', 'Считать'), basis);
+  custom.appendChild(basisLine);
+  controls.basis = basis;
+  if (ambiguous) {
+    custom.appendChild(el('p', 'matrix-repeat-hint',
+      '«От выполнения» доступно только простому правилу: каждые N дней, недель, '
+      + 'месяцев или лет — без списка дней, режима месяца и набора дат.'));
+  }
+
+  // — когда закончить
+  const endsLine = el('div', 'matrix-repeat-line');
+  const ends = calRepeatSelect('matrix-repeat-ends', 'Когда закончить повтор', [
+    ['never', 'никогда'], ['until', 'включительно до'], ['count', 'после N'],
+  ], edit.ends.type);
+  ends.addEventListener('change', () => {
+    edit.ends = {
+      type: ends.value,
+      until: ends.value === 'until' ? (edit.ends.until || calendarDraft.endDate || calendarDraft.startDate) : null,
+      count: ends.value === 'count' ? (edit.ends.count || 3) : null,
+    };
+    rerender('ends');
+  });
+  endsLine.append(el('span', 'matrix-repeat-line-label', 'Завершить'), ends);
+  custom.appendChild(endsLine);
+  controls.ends = ends;
+
+  if (edit.ends.type === 'until') {
+    const until = el('input', 'matrix-repeat-until');
+    until.type = 'date';
+    until.value = edit.ends.until || calendarDraft.startDate;
+    until.setAttribute('aria-label', 'Повторять включительно до');
+    until.addEventListener('change', () => {
+      edit.ends = { type: 'until', until: until.value, count: null };
+      rerender('until');
+    });
+    custom.appendChild(until);
+    controls.until = until;
+  }
+  if (edit.ends.type === 'count') {
+    const count = el('input', 'matrix-repeat-count');
+    count.type = 'number';
+    count.min = '1';
+    count.max = String(SCHEDULE_LIMITS.countMax);
+    count.value = String(edit.ends.count || 3);
+    count.setAttribute('aria-label', 'Повторить N раз');
+    count.addEventListener('change', () => {
+      edit.ends = { type: 'count', until: null, count: Number(count.value) || 1 };
+      rerender('count');
+    });
+    custom.appendChild(count);
+    controls.count = count;
+  }
+
+  const apply = el('button', 'matrix-repeat-apply', 'Применить правило');
+  apply.type = 'button';
+  apply.addEventListener('click', () => {
+    if (edit.unit === 'dates' && !edit.dates.length) {
+      calRepeatNotice = 'Список дат пуст: правило из него не собирается.';
+      rerender('date-input');
+      return;
+    }
+    const built = calNormalizeRepeatRule(edit);
+    if (!built) {
+      calRepeatNotice = 'Правило неполное: проверьте единицу, режим месяца и завершение.';
+      rerender('apply');
+      return;
+    }
+    calSetRepeat(built);
+    // У правила «по выбранным датам» список и есть расписание: срок задачи
+    // обязан стоять на одной из них (Б7.4). Первая дата становится сроком, и
+    // лист говорит об этом вслух — молча сдвинуть выбранную человеком дату
+    // нельзя, но и оставить правило невалидным нельзя.
+    if (built.unit === 'dates') {
+      const first = built.dates[0];
+      if (calendarDraft.startDate !== first) {
+        calendarDraft.startDate = first;
+        calendarDraft.endDate = first;
+        calendarDraft.due = first;
+        calMonthCursor = calMonthStart(first);
+        calNotice = 'Срок встал на первую дату списка: ' + calDateText(first) + '.';
+      }
+    }
+    calRepeatEdit = null;
+    removeOverlay('repeat');
+    redrawDateSheet();
+  });
+  custom.appendChild(apply);
+  controls.apply = apply;
+  panel.appendChild(custom);
+
+  if (notice) panel.appendChild(el('p', 'matrix-repeat-hint', notice));
+
+  pushOverlay({
+    id: 'repeat',
+    kind: 'sheet',
+    parent: 'date',
+    node: layer.backdrop,
+    panel,
+    onEscape: () => {
+      // Закрытие без «Применить правило» — черновик повтора выбрасывается:
+      // лист даты не обязан помнить недобранный вариант.
+      calRepeatEdit = null;
+      removeOverlay('repeat');
+      redrawDateSheet();
+    },
+  });
+  if (calRepeatFocus && controls[calRepeatFocus]) focusNode(controls[calRepeatFocus]);
+  calRepeatFocus = null;
+}
+
+function calRepeatCurrent(preset) {
+  const current = calendarDraft.repeat;
+  if (!preset.build) return !current;
+  const built = preset.build(calendarDraft);
+  if (!current || current.unit !== built.unit) return false;
+  if (Number(current.interval) !== Number(built.interval)) return false;
+  return JSON.stringify((current.weekdays || []).slice().sort())
+    === JSON.stringify((built.weekdays || []).slice().sort());
+}
+
+function calSetRepeat(repeat) {
+  calendarDraft.repeat = repeat || null;
+  if (!repeat) {
+    calendarDraft.series = null;
+    calNotice = '';
+    return;
+  }
+  // Absolute-напоминание не переезжает на следующий экземпляр серии (Б5):
+  // оно снимается, и лист говорит об этом вслух.
+  const absolute = calendarDraft.reminders.filter(r => r.anchor === 'absolute').length;
+  if (absolute) {
+    calendarDraft.reminders = calendarDraft.reminders.filter(r => r.anchor !== 'absolute');
+    calNotice = 'Абсолютное напоминание снято: повтор его не переносит. '
+      + 'Поставьте относительное — от начала или окончания.';
+  } else {
+    calNotice = '';
+  }
+}
+
+/* --- Правка существующей задачи ------------------------------------------- */
+
+// Значение применяется к КОПИИ задачи и уходит в хранилище одним commitTasks:
+// при отказе квоты задача остаётся прежней, а лист — открытым (Б4.10).
+function commitTaskSchedule(taskId, value) {
+  let updated = null;
+  const next = tasks.map(task => {
+    if (task.id !== taskId) return task;
+    updated = editSchedule(task, value, today());
+    return updated || task;
+  });
+  if (!updated) return false;
+  return commitTasks(next);
 }
 
 function openMoveSheet(taskId) {
@@ -1214,7 +2500,8 @@ function openMoveSheet(taskId) {
     item.addEventListener('click', () => {
       // Запись сначала, лист потом: при отказе хранилища commitTasks сам
       // покажет причину, а лист не должен исчезать с «несделанной» правкой.
-      if (moveToQuadrant(task.id, q.id)) closeMove();
+      // Назначенный интервал сначала спрашивает разрешение (Б6.4).
+      if (requestMove(task.id, q.id, closeMove)) closeMove();
     });
     panel.appendChild(item);
   }
@@ -1272,6 +2559,10 @@ function commitTasks(next) {
   tasks = next;
   if (persist()) {
     renderMatrixView();
+    // Отдельное событие матрицы (ТЗ Б5.2): оно нужно планировщику напоминаний,
+    // а не облачной синхронизации — раздел живёт на устройстве. Эмится ПОСЛЕ
+    // успешной записи: отменённая правка не имеет права двигать pending-моменты.
+    bus.emit('matrix:changed', { count: tasks.length });
     return true;
   }
   tasks = previous;
@@ -1281,31 +2572,104 @@ function commitTasks(next) {
 
 export function addTask(quadrantId, fields) {
   const source = fields && typeof fields === 'object' ? fields : {};
+  // Два разных входа (ТЗ Б6.2): намерение квадранта («+» без захода в
+  // календарь) и согласованный черновик из листа. Второй НЕ прогоняется через
+  // quadrantShape повторно — иначе даты, которые человек выбрал в календаре,
+  // были бы переписаны правилом переноса.
+  const planned = source.schedule && typeof source.schedule === 'object'
+    && !Array.isArray(source.schedule) ? source.schedule : null;
   const task = createTask({
     title: source.title,
     notes: source.notes,
     due: source.due,
     priority: source.priority,
+    schedule: planned ? cloneSchedule(planned) : null,
   });
   if (!task) return null;
-  // Квадрант — намерение, а не метка: превращаем его в причину тем же
-  // move-правилом, что и перенос карточки.
-  const shaped = applyQuadrantMove(task, quadrantId, today()) || task;
+  let shaped;
+  if (planned) {
+    // Повтор, включённый в листе, обязан иметь серию с самого начала (Б7.7).
+    shaped = startSeries(task, today()) || task;
+  } else {
+    shaped = applyQuadrantMove(task, quadrantId, today()) || task;
+  }
   // null = «задачи нет ни в хранилище, ни на экране»: по этому ответу
   // вызывающий код не имеет права рапортовать добавление.
   return commitTasks([shaped].concat(tasks)) ? shaped : null;
 }
 
+// Отметка «выполнено» над повторяющейся задачей — это завершение ЭКЗЕМПЛЯРА:
+// одним списком закрываем текущий и открываем следующий (Б7.6). Клика по
+// уже выполненному экземпляру достаточно, чтобы предложить возврат в работу
+// (Б7.8) — прежний снятие галочки молча ломал бы связь серии.
 export function toggleDone(taskId) {
-  let doneNow = false;
-  const next = tasks.map(t => {
-    if (t.id !== taskId) return t;
-    doneNow = !t.done;
-    return markDone(t, !t.done);
-  });
+  const result = completeOccurrence(tasks, taskId, today());
+  if (result.status === 'noop') return reopenDone(taskId);
+  if (!result.ok) return false;
+  if (!commitTasks(result.tasks)) return false;
+  if (result.status === 'recurring') {
+    showToast('Выполнено — следующий уже в списке');
+  } else if (!showDone) {
+    showToast('Выполнено');
+  } else {
+    showToast('Выполнено — осталось в списке');
+  }
+  return true;
+}
+
+function reopenDone(taskId) {
+  const back = reopenOccurrence(tasks, taskId, today());
+  if (back.ok) {
+    if (!commitTasks(back.tasks)) return false;
+    showToast('Вернули в работу');
+    return true;
+  }
+  if (back.status === 'no-series' || back.status === 'reopened-no-generation') {
+    const next = tasks.map(t => (t.id === taskId ? markDone(t, false) : t));
+    if (!commitTasks(next)) return false;
+    showToast('Вернули в работу');
+    return true;
+  }
+  // Следующий экземпляр правился или уже выполнен — удалять его нельзя,
+  // поэтому возврат предлагается как отдельная задача без повтора (Б7.8).
+  openRestorePrompt(taskId);
+  return false;
+}
+
+function openRestorePrompt(taskId) {
+  if (overlayById('confirm')) return;
+  pushOverlay(confirmLayer({
+    heading: 'Возврат ломает серию',
+    text: 'Следующий экземпляр уже существует и правился. Вернуть эту задачу '
+      + 'отдельной — без правила повтора?',
+    actions: [
+      {
+        label: 'Отмена',
+        className: 'matrix-confirm-cancel',
+        safe: true,
+        onClick: () => {},
+      },
+      {
+        label: 'Вернуть отдельной',
+        className: 'matrix-confirm-accept',
+        onClick: () => restoreAsSingle(taskId),
+      },
+    ],
+  }));
+}
+
+function restoreAsSingle(taskId) {
+  const source = tasks.filter(t => t.id === taskId)[0];
+  if (!source) return false;
+  const schedule = cloneSchedule(source.schedule);
+  schedule.repeat = null;
+  schedule.series = null;
+  const edited = editSchedule(source, schedule, today());
+  if (!edited) return false;
+  const single = markDone(edited, false);
+  const next = tasks.map(t => (t.id === taskId ? single : t));
   if (!commitTasks(next)) return false;
-  if (doneNow && !showDone) showToast('Выполнено');
-  else if (doneNow) showToast('Выполнено — осталось в списке');
+  showToast('Задача вернулась без повтора');
   return true;
 }
 
@@ -1318,6 +2682,76 @@ export function moveToQuadrant(taskId, quadrantId) {
   });
   if (!moved) return null;
   return commitTasks(next) ? moved : null;
+}
+
+// Перенос назначенного интервала (ТЗ Б6.4/Б6.6): данные готовят кандидата и
+// список конфликтов, а решение подтверждает экран. Без конфликтов перенос
+// происходит сразу — прежний путь legacy не обрастает лишним вопросом.
+function requestMove(taskId, quadrantId, closeMove) {
+  const task = tasks.filter(t => t.id === taskId)[0];
+  if (!task) return false;
+  const plan = prepareQuadrantMove(task, quadrantId, today());
+  if (!plan) return false;
+  if (!plan.conflicts.length) return !!moveToQuadrant(taskId, quadrantId);
+  openMovePreview(task, quadrantId, plan, closeMove);
+  return false;
+}
+
+function openMovePreview(task, quadrantId, plan, closeMove) {
+  removeOverlay('move-preview');
+  const backdrop = el('div', 'matrix-sheet-backdrop is-move-preview');
+  const panel = el('div', 'matrix-sheet matrix-move-preview');
+  const headingId = 'matrix-move-preview-heading';
+  panel.setAttribute('role', 'alertdialog');
+  panel.setAttribute('aria-modal', 'true');
+  panel.setAttribute('aria-labelledby', headingId);
+  panel.appendChild(el('div', 'matrix-sheet-grabber'));
+  const heading = el('p', 'matrix-confirm-heading', 'Перенос изменит расписание');
+  heading.id = headingId;
+  panel.appendChild(heading);
+  panel.appendChild(el('p', 'matrix-confirm-text', 'Задача «' + task.title + '»'));
+
+  const list = el('ul', 'matrix-move-conflicts');
+  for (const conflict of plan.conflicts) {
+    list.appendChild(el('li', 'matrix-move-conflict', conflict.message));
+  }
+  panel.appendChild(list);
+
+  const actions = el('div', 'matrix-confirm-actions');
+  const cancel = el('button', 'matrix-confirm-action matrix-move-cancel');
+  cancel.type = 'button';
+  cancel.textContent = 'Отмена';
+  const accept = el('button', 'matrix-confirm-action matrix-move-confirm');
+  accept.type = 'button';
+  accept.textContent = 'Изменить срок и перенести';
+  const drop = () => {
+    removeOverlay('move-preview');
+    // Лист переноса остаётся открытым: человек не ответил «нет» на весь перенос,
+    // он отказался только менять даты.
+  };
+  cancel.addEventListener('click', drop);
+  accept.addEventListener('click', () => {
+    removeOverlay('move-preview');
+    if (moveToQuadrant(task.id, quadrantId) && closeMove) closeMove();
+  });
+  actions.append(accept, cancel);
+  panel.appendChild(actions);
+  backdrop.appendChild(panel);
+  backdrop.addEventListener('click', event => {
+    if (event.target === backdrop) drop();
+  });
+  trapTab(panel);
+  pushOverlay({
+    id: 'move-preview',
+    kind: 'confirm',
+    // Перенос снимается вместе с листом переноса: вопрос не должен остаться
+    // висеть над уже закрытым списком.
+    parent: 'move:' + task.id,
+    node: backdrop,
+    panel,
+    focusTarget: cancel,
+    onEscape: drop,
+  });
 }
 
 export function archiveTask(taskId) {
@@ -1397,16 +2831,21 @@ export function renderMatrixView() {
   syncOverlayChrome();
 }
 
-// Для тестов и для будущего экрана «Важные»: состояние модуля наружу копией.
+// Для тестов и для будущего экрана «Важные»: состояние модуля наружу КОПИЕЙ.
+// `schedule` — вложенный объект, и поверхностная копия отдавала бы живой
+// черновик: правка returned.schedule.startDate протыкала бы форму (ТЗ Б3.7).
 export function matrixDebugState() {
   return {
-    tasks: tasks.slice(),
+    tasks: tasks.map(task => Object.assign({}, task, task.schedule
+      ? { schedule: cloneSchedule(task.schedule) } : null)),
     showDone,
     openQuadrant,
     archiveOpen,
     returnView,
     composerOpen: isTaskComposerOpen(),
-    draft: draft ? Object.assign({}, draft) : null,
+    draft: draft ? Object.assign({}, draft, {
+      schedule: cloneSchedule(draft.schedule),
+    }) : null,
     priorityLabels: Object.assign({}, PRIORITY_LABEL),
   };
 }

@@ -35,6 +35,9 @@ import { applyScreen, SCREENS } from './ui/router.js';
 import { onScheduleAddSubmit, onScheduleEditListClick, renderScheduleEditView, renderScheduleView } from './ui/schedule-view.js';
 import { flushPendingSleepSave, onSleepFieldChange, renderSleepView } from './ui/sleep-view.js';
 import { handleMatrixEscape, handleMatrixNavigation, renderMatrixView } from './ui/matrix-view.js';
+import { createNoticeCenter } from './ui/matrix-notices.js';
+import { createReminderController } from './core/matrix-reminders.js';
+import { loadTasks } from './data/matrix.js';
 import { appState, isMainDayView, isMobileView, ui } from './ui/state.js';
 import { closeStatsMenu, isStatsMenuOpen, isStatsView, openStatsMenu, renderStatsCategory, renderStatsFastView, renderStatsHabitView, renderStatsHabitsView, renderStatsQazaView, renderStatsSleepView, renderStatsView, setStatsHabitId } from './ui/stats-view.js';
 /* YouPlanner — точка сборки интерфейса (app.js).
@@ -186,6 +189,10 @@ export function init() {
   updateFormFields();
 
   bindEvents();
+
+  // Напоминания Матрицы стартуют вместе с приложением и работают на любом
+  // разделе; без этого пункта план не исполняется никогда (Б5.2).
+  initMatrixReminders();
 
   // Стартовый раздел ставим тем же переключателем, что и кнопки:
   // так главная вкладка сразу подсвечена, а таб-бар скрыт на ПК
@@ -1288,6 +1295,57 @@ export function updateQazaCells() {
   refreshMainSnapshot();
 }
 
+/* --- Напоминания Матрицы (ТЗ Б5) ------------------------------------------
+   Раздел живёт на устройстве и не синхронизируется, поэтому напоминания
+   локальные: ни push, ни Notification API, ни сети. Контроллер решает «когда»,
+   центр уведомлений — «как он выглядит и чем закрывается».
+
+   Создаётся ОДИН раз при старте и работает на любом разделе: человек может
+   смотреть намаз, а напоминание назовёт себя вслух (Б5.2). Повторная
+   перерисовка экрана его не перезапускает (Б5.7). */
+
+let matrixNotices = null;
+let matrixReminders = null;
+
+function initMatrixReminders() {
+  if (matrixReminders) return matrixReminders;
+  matrixNotices = createNoticeCenter({
+    // «Открыть» ведёт в Матрицу — тот же переключатель, что и у таб-бара:
+    // уведомление не имеет права само строить навигацию.
+    onOpen: function () { switchAppView('matrix'); },
+  });
+  matrixReminders = createReminderController({
+    load: loadTasks,
+    isHidden: function () { return document.visibilityState === 'hidden'; },
+    display: function (entry) {
+      matrixNotices.show({
+        // Ключ карточки = задача + правило + момент: то же напоминание дважды
+        // над экраном не появляется, разные правила остаются разными строками.
+        id: entry.taskId + '|' + entry.reminderId + '|' + entry.time,
+        title: entry.title,
+        at: entry.at,
+      });
+    },
+    warn: function (message) { showToast(message); },
+    storage: localStorage,
+    lock: (typeof navigator !== 'undefined' && navigator.locks) ? navigator.locks : null,
+    // Обёртки, а не голые ссылки: setInterval, вызванный как метод чужого
+    // объекта, в браузере падает с «Illegal invocation» — receiver должен
+    // остаться глобой.
+    timers: {
+      setInterval: function (fn, ms) { return setInterval(fn, ms); },
+      clearInterval: function (id) { clearInterval(id); },
+    },
+    addListener: function (target, type, handler) {
+      const host = target === 'document' ? document : window;
+      host.addEventListener(type, handler);
+      return function () { host.removeEventListener(type, handler); };
+    },
+  });
+  matrixReminders.start();
+  return matrixReminders;
+}
+
 /* --- Проводка слоёв через шину событий -------------------------------------
    Единственное место, где слои слышат друг друга: данные эмитят правку,
    синхронизация — применённый снимок, хранилище — ошибку записи. Прямых
@@ -1295,6 +1353,13 @@ export function updateQazaCells() {
    граф импортов останется однонаправленным. */
 
 bus.on('data:changed', scheduleSync);
+// Правка матрицы пересобирает очередь напоминаний: снятое «выполнено»,
+// архивация или новое время обязаны отменить прежний pending-момент (Б5.7).
+// Своё событие вместо data:changed — раздел не синхронизируется, и поднимать
+// облачный обмен из-за него нельзя.
+bus.on('matrix:changed', function () {
+  if (matrixReminders) matrixReminders.refresh();
+});
 // Изменение очереди каза (было телом afterQazaChange): вкладку перерисовывает
 // сам модуль, а ячейки таблицы и круг строки h6 — этот подписчик
 bus.on('qaza:changed', function () {
@@ -1444,6 +1509,11 @@ bus.on('data:replaced', function () {
   setQazaState(loadQaza(true));
   // Файл копии мог привезти полные истории: срезаем старше года
   archiveHistories();
+  // Импорт и очистка меняют набор задач под ногами: висящие над экраном
+  // напоминания про уже не существующие права человек прочитал бы как
+  // актуальные, поэтому очередь снимается, а контроллер пересобирается.
+  if (matrixNotices) matrixNotices.clear();
+  if (matrixReminders) matrixReminders.refresh();
   renderAfterRemoteDataGuarded();
 });
 bus.on('sync:applied', function () {
