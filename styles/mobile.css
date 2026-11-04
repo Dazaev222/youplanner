@@ -77,14 +77,18 @@
     gap: 8px;
   }
 
-  /* В карточке контролы крупнее табличных: палец вместо курсора */
-  .day-card .cell-check { width: 30px; height: 30px; }
-  .day-card .cell-x { width: 30px; height: 30px; font-size: 14px; }
-  .day-card .cell-number { width: 72px; min-height: 40px; padding: 8px 10px; font-size: 15px; }
-  .day-card .cell-select { width: 120px; min-height: 40px; padding: 8px 10px; font-size: 15px; }
+  /* В карточке контролы крупнее табличных: палец вместо курсора.
+     44px — нижняя граница тап-цели (гайдлайн Apple), а карточка — главный
+     экран телефона: именно по галочке и «✗» попадают пальцем на бегу.
+     Поле и кнопка уровня стоят в том же ряду и держат общую высоту,
+     поэтому подняты следом за галочкой. */
+  .day-card .cell-check { width: 44px; height: 44px; }
+  .day-card .cell-x { width: 44px; height: 44px; font-size: 14px; }
+  .day-card .cell-number { width: 72px; min-height: 44px; padding: 8px 10px; font-size: 15px; }
+  .day-card .cell-select { width: 120px; min-height: 44px; padding: 8px 10px; font-size: 15px; }
   /* Кнопка уровня в карточке — по росту соседнего поля; отступ даёт
      gap самого .day-card-controls, внешний ему не нужен */
-  .day-card .cell-level-btn { width: 40px; min-height: 40px; margin-left: 0; }
+  .day-card .cell-level-btn { width: 44px; min-height: 44px; margin-left: 0; }
   .day-card .cell-qaza { font-size: 17px; font-weight: 600; }
 
   /* Шапка в столбик: логотип, подпись недели, действия.
@@ -108,6 +112,13 @@
     flex-wrap: wrap;
     justify-content: center;
     gap: 6px;
+  }
+
+  /* «‹» и «›» — единственный способ листать недели на телефоне, и по
+     ширине они 34 px: палец промахивается чаще, чем попадает. Строка
+     переносится правилом выше, поэтому запас по ширине есть. */
+  #week-nav .btn {
+    min-width: 44px;
   }
 
   /* Подпись недели встаёт первой строкой на всю ширину */
@@ -528,7 +539,10 @@
      вместе с заголовком оставляют запас 12px */
   #prayer-btn,
   #fast-btn {
-    min-height: 38px;
+    /* Компактны по ШИРИНЕ (иначе не влезают в строку с заголовком на 320 px),
+       но не по высоте: это главный переход между тремя вкладками раздела,
+       и 38 px ниже тап-цели в 44 px */
+    min-height: 44px;
     padding: 8px 10px;
     font-size: 14px;
   }
@@ -862,9 +876,11 @@
     min-height: 40px;
   }
 
+  /* Отправка — главное действие чата: её задевают пальцем в каждом сообщении,
+     в отличие от соседних иконок прикрепления и настроек */
   #assistant-send {
-    width: 40px;
-    height: 40px;
+    width: 44px;
+    height: 44px;
   }
 
   .assistant-pdf-btn {
