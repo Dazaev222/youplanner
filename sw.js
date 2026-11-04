@@ -1,9 +1,10 @@
-// v43: в main влита синхронизация Матрицы (ТЗ раздел 1) — изменены
-// js/sync/sync.js, js/sync/merge.js, js/data/{matrix,backup,migrations,
-// storage}.js, и все они стоят в ASSETS. Без смены имени кэша телефон брал бы
-// прежние модули синхронизации из youplanner-v42, то есть новый plannerV1
-// уживался бы со старым транспортом. (v42 — пересобранная вёрстка Матрицы.)
-const CACHE = 'youplanner-v43';
+// v44: в main влиты восемь фиксов аудита — js/app.js (делегат клика жидкой
+// капсулы), js/ui/schedule-view.js (порядок пунктов на экране расписания),
+// js/data/{fast,records}.js, js/ui/{fast-view,level-sheet,main-table,
+// stats-view}.js. Все восемь стоят в ASSETS: без смены имени кэша телефон
+// остался бы на youplanner-v43 и продолжал бы смотреть старые модули.
+// (v43 — транспорт plannerV1 из слияния sync, v42 — пересобранная Матрица.)
+const CACHE = 'youplanner-v44';
 // Иконки — все из manifest.json: отсутствующая в кэше иконка ломала бы
 // офлайн-установку PWA (аудит 2026-10-31: icon-512.png не кэшировался)
 const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon-512.png', './icon.svg',
