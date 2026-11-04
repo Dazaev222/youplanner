@@ -544,3 +544,281 @@ test('envelope: много tombstones — ни GC, ни вытеснения п�
   assert.equal(Object.keys(env.snapshot.tombstones).length, 600,
     'надгробия planner прорежаны — контракт «нет автоматического GC» нарушен');
 });
+
+// ── Unit 3: транспорт — ETag/If-Match CAS, outbox, ack, владелец (ТЗ §1.4.2–4) ─
+// Модель сервера: GET отдаёт ETag, PUT с чужим If-Match → 412. Второй GET без
+// CAS не считается защитой от гонки: запись условная, иначе last-write-wins.
+
+function makeCasServer(initialSnapshot) {
+  const state = {
+    snapshot: initialSnapshot || {},
+    etag: 'etag-1',
+    etagSeq: 1,
+    calls: [],
+    putsWithoutMatch: 0,
+    conflictEveryPut: false,
+    raceSnapshot: null,
+    raceApplied: false,
+  };
+
+  state.externalWrite = function (snapshot) {
+    state.raceSnapshot = snapshot;
+    state.raceApplied = false;
+  };
+
+  state.respond = function (url, opts) {
+    const options = opts || {};
+    const method = options.method || 'GET';
+    const headers = options.headers || {};
+    state.calls.push({
+      url: String(url), method: method, headers: headers, body: options.body,
+    });
+    const isBackups = String(url).includes('backups');
+    if (method === 'GET') {
+      if (isBackups) return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve([]); } });
+      return Promise.resolve({
+        ok: true, status: 200,
+        headers: { get: function (name) { return String(name).toLowerCase() === 'etag' ? state.etag : null; } },
+        json: function () { return Promise.resolve(state.snapshot); },
+      });
+    }
+    if (isBackups) return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve({}); } });
+    // PUT основного узла: сначала отрабатывает внешний писатель (гонка),
+    // затем условная запись по If-Match — как настоящий RTDB-REST
+    const match = headers['If-Match'];
+    if (!match) state.putsWithoutMatch += 1;
+    if (state.raceSnapshot && !state.raceApplied) {
+      state.raceApplied = true;
+      state.snapshot = state.raceSnapshot;
+      state.etagSeq += 1;
+      state.etag = 'etag-' + state.etagSeq;
+    }
+    if (state.conflictEveryPut || (match && match !== state.etag)) {
+      return Promise.resolve({ ok: false, status: 412, json: function () { return Promise.resolve({ error: 'conflict' }); } });
+    }
+    state.snapshot = JSON.parse(options.body);
+    state.etagSeq += 1;
+    state.etag = 'etag-' + state.etagSeq;
+    return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve(state.snapshot); } });
+  };
+  state.mainPuts = function () {
+    return state.calls.filter(function (c) {
+      return c.method === 'PUT' && c.url.includes('firebaseio.com') && !c.url.includes('backups');
+    });
+  };
+  state.mainGets = function () {
+    return state.calls.filter(function (c) {
+      return c.method === 'GET' && c.url.includes('firebaseio.com') && !c.url.includes('backups');
+    });
+  };
+  return state;
+}
+
+function plannerCloudNode(entries, tombstones) {
+  return snap(entries, {}, tombstones);
+}
+
+test('GET снимка идёт с X-Firebase-ETag, PUT — с If-Match; после успеха outbox пустеет', async () => {
+  const server = makeCasServer({});
+  const app = loadApp({ fetchImpl: server.respond });
+  // владелец подтверждён: envelope публикуется только с uid
+  app.sandbox.localStorage.setItem('youplanner.fb.owner', JSON.stringify({ email: 'o@e', uid: 'uid-A' }));
+  app.sandbox.localStorage.setItem('youplanner.sync.ts', '1');
+
+  assert.equal(app.context.saveTasks([mkTask('t1')]), true);
+  await app.context.syncToCloudNow();
+
+  const gets = server.mainGets();
+  assert.ok(gets.length >= 1);
+  assert.equal(gets[0].headers['X-Firebase-ETag'], 'true', 'GET без X-Firebase-ETag — сервер не отдаст ETag');
+  const puts = server.mainPuts();
+  assert.equal(puts.length, 1, 'CAS: один успешный обмен — один PUT');
+  assert.ok(puts[0].headers['If-Match'], 'PUT пошёл без If-Match при известном ETag');
+
+  const body = JSON.parse(puts[0].body);
+  assert.ok(body.plannerV1 && body.plannerV1.entries.t1, 'plannerV1 не уехал в снимок');
+  assert.ok(body.sectionTs && body.sectionTs.plannerV1, 'нет метки свежести plannerV1');
+
+  const env = readEnvelope(app);
+  assert.equal(env.outbox.length, 0, 'ack после успешного CAS не снял outbox');
+  assert.equal(env.ownerUid, 'uid-A', 'envelope не привязан к подтверждённому владельцу');
+});
+
+test('гонка на одном ETag: чужой PUT раньше → свой 412, повторный merge, обе независимые правки живы', async () => {
+  const server = makeCasServer({});
+  const app = loadApp({ fetchImpl: server.respond });
+  app.sandbox.localStorage.setItem('youplanner.fb.owner', JSON.stringify({ email: 'o@e', uid: 'uid-A' }));
+  app.sandbox.localStorage.setItem('youplanner.sync.ts', '1');
+  assert.equal(app.context.saveTasks([mkTask('tA', { title: 'Задача A' })]), true);
+
+  // Устройство B легально записалось между нашим GET и PUT: снимок и ETag
+  // изменились, наш условный PUT обязан получить 412, перечитать, слить и
+  // написать объединение
+  server.externalWrite(plannerCloudNode({
+    tB: entry('tB', { title: fld('Задача B', 4, 'devB') }),
+  }));
+  await app.context.syncToCloudNow();
+
+  const final = server.snapshot;
+  assert.ok(final.plannerV1, 'PUT не принёс plannerV1');
+  assert.ok(final.plannerV1.entries.tA, 'правка A потеряна после гонки');
+  assert.ok(final.plannerV1.entries.tB, 'чужая правка B затёрта');
+  assert.equal(final.plannerV1.tombstones.tB, undefined);
+  assert.ok(server.mainPuts().length >= 2, 'повторная попытка после 412 не состоялась');
+});
+
+test('412 после лимита повторов: ровно 5 PUT, outbox сохранён, метка сверки не двинута', async () => {
+  const server = makeCasServer({});
+  server.conflictEveryPut = true;
+  const app = loadApp({ fetchImpl: server.respond });
+  app.sandbox.localStorage.setItem('youplanner.fb.owner', JSON.stringify({ email: 'o@e', uid: 'uid-A' }));
+  app.sandbox.localStorage.setItem('youplanner.sync.ts', '1');
+  assert.equal(app.context.saveTasks([mkTask('t1')]), true);
+  const envBefore = readEnvelope(app);
+
+  await app.context.syncToCloudNow();
+
+  assert.equal(server.mainPuts().length, 5,
+    'максимум 5 попыток за цикл не соблюдён: ' + server.mainPuts().length);
+  assert.equal(app.sandbox.localStorage.getItem('youplanner.sync.ts'), '1',
+    'SYNC_TS двинут на неудачном обмене');
+  const envAfter = readEnvelope(app);
+  assert.equal(envAfter.outbox.length, envBefore.outbox.length, 'outbox стёрт без успешного CAS');
+  assert.ok(envAfter.outbox.length >= 1);
+});
+
+test('net-ошибка после лимита → reconnect: тот же opId доезжает один раз, версии не удваиваются', async () => {
+  const app0 = loadApp();
+  app0.sandbox.localStorage.setItem('youplanner.fb.owner', JSON.stringify({ email: 'o@e', uid: 'uid-A' }));
+  app0.sandbox.localStorage.setItem('youplanner.sync.ts', '1');
+  assert.equal(app0.context.saveTasks([mkTask('t1')]), true);
+  const envOffline = readEnvelope(app0);
+  assert.ok(envOffline.outbox.length >= 1);
+  const titleCounter = envOffline.snapshot.entries.t1.fields.title.version.counter;
+
+  // reconnect + restart: тот же localStorage-снимок storage не переживает
+  // loadApp, поэтому проверяем цикл на живом экземпляре: сеть сначала падает,
+  // потом работает
+  const server = makeCasServer({});
+  let networkDown = true;
+  const flaky = function (url, opts) {
+    if (networkDown) return Promise.reject(new Error('нет сети'));
+    return server.respond(url, opts);
+  };
+  const app = loadApp({ fetchImpl: flaky });
+  app.sandbox.localStorage.setItem('youplanner.fb.owner', JSON.stringify({ email: 'o@e', uid: 'uid-A' }));
+  app.sandbox.localStorage.setItem('youplanner.sync.ts', '1');
+  assert.equal(app.context.saveTasks([mkTask('t1')]), true);
+
+  await app.context.syncToCloudNow();
+  assert.equal(server.mainPuts().length, 0, 'при отказе сети PUT всё равно ушёл');
+  assert.ok(readEnvelope(app).outbox.length >= 1, 'отказ сети стёр outbox');
+
+  networkDown = false;
+  await app.context.syncToCloudNow();
+  assert.ok(readEnvelope(app).outbox.length === 0, 'после reconnect правка не доехала');
+  const delivered = server.snapshot.plannerV1.entries.t1;
+  assert.equal(delivered.fields.title.version.counter, titleCounter,
+    'повтор использует ту же opId/версию, а не создаёт новый id');
+});
+
+test('applyCloudData: снимок с plannerV1 сливается в envelope и материализует список; снимок без узла — envelope побайтно прежний', async () => {
+  const cloud = snap({
+    tR: entry('tR', {
+      title: fld('С сервера', 3, 'devR'),
+      schedule: fld({ version: 1, allDay: true, startDate: '2026-11-07', endDate: '2026-11-07',
+        startTime: null, endTime: null, timeZoneMode: 'device', reminders: [], repeat: null, series: null }, 3, 'devR'),
+      notes: fld('', 3, 'devR'), priority: fld(2, 3, 'devR'), doDate: fld(null, 3, 'devR'),
+      order: fld(1, 3, 'devR'), archived: fld(false, 3, 'devR'),
+      completion: fld({ done: false, doneAt: null }, 3, 'devR'),
+      provenance: fld({ createdAt: '2026-11-04T00:00:00.000Z', updatedAt: '2026-11-04T00:00:00.000Z', generatedAt: null, previousOccurrenceId: null }, 3, 'devR'),
+    }),
+  });
+  const snapshot = { updatedAt: 9000, habits: [mkTask('x')], plannerV1: cloud };
+  const fetchImpl = function () {
+    return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve(snapshot); } });
+  };
+  const app = loadApp({ fetchImpl: fetchImpl });
+  app.sandbox.localStorage.setItem('youplanner.sync.ts', '100');
+
+  const applied = app.context.applyCloudData(snapshot, 9000);
+  assert.notEqual(applied, false);
+  const env = readEnvelope(app);
+  assert.ok(env && env.snapshot.entries.tR, 'plannerV1 с сервера не слит в envelope');
+  const tasks = Array.from(app.context.loadTasks().map(function (t) { return t.id; }));
+  assert.ok(tasks.indexOf('tR') !== -1, 'запись не материализовалась в список Матрицы');
+  const envBytes = app.sandbox.localStorage.getItem(ENVELOPE_KEY);
+
+  // Снимок БЕЗ plannerV1: прежние разделы применяются как раньше, envelope
+  // не трогается (аддитивность: отсутствие узла ≠ удаление)
+  const plain = { updatedAt: 20000, habits: [mkTask('x')] };
+  app.context.applyCloudData(plain, 20000);
+  assert.equal(app.sandbox.localStorage.getItem(ENVELOPE_KEY), envBytes,
+    'снимок без plannerV1 тронул envelope');
+});
+
+test('applyCloudData: plannerV1 будущей версии отвергается без частичного применения', () => {
+  const snapshot = {
+    updatedAt: 9000,
+    habits: [mkTask('h-new')],
+    plannerV1: { schemaVersion: 99, entries: { z: entry('z', {}) } },
+  };
+  const app = loadApp();
+  app.sandbox.localStorage.setItem('youplanner.sync.ts', '100');
+  app.sandbox.localStorage.setItem(ENVELOPE_KEY, JSON.stringify({
+    version: 1, actorId: 'inst', ownerUid: null, lamport: {}, snapshot: snap(), outbox: [], opSeq: 0, mapping: {},
+  }));
+  const envBefore = app.sandbox.localStorage.getItem(ENVELOPE_KEY);
+
+  app.context.applyCloudData(snapshot, 9000);
+
+  // envelope цел; НЕ провержаем, что привычки применились — это прежний
+  // контракт, здесь важен только отказ менять planner
+  assert.equal(app.sandbox.localStorage.getItem(ENVELOPE_KEY), envBefore,
+    'plannerV1 неизвестной версии изменил локальный снимок');
+});
+
+test('владелец: чужой uid не получает чужой outbox и plannerV1; анонимный режим planner не публикует', async () => {
+  const server = makeCasServer({});
+  const app = loadApp({ fetchImpl: server.respond });
+  app.sandbox.localStorage.setItem('youplanner.fb.owner', JSON.stringify({ email: 'o@e', uid: 'uid-A' }));
+  app.sandbox.localStorage.setItem('youplanner.sync.ts', '1');
+  assert.equal(app.context.saveTasks([mkTask('t1')]), true);
+  await app.context.syncToCloudNow();
+  assert.ok(server.snapshot.plannerV1, 'первая публикация не состоялась');
+
+  // смена аккаунта: старый outbox новому не отправляется
+  app.sandbox.localStorage.setItem('youplanner.fb.owner', JSON.stringify({ email: 'b@e', uid: 'uid-B' }));
+  app.run('resetAuthForTests()');
+  assert.equal(app.context.saveTasks([mkTask('t2')]), true);
+  const envMid = readEnvelope(app);
+  assert.ok(envMid.outbox.length >= 1, 'правка под uid-B не встала в outbox');
+
+  await app.context.syncToCloudNow();
+  const puts = server.mainPuts();
+  const lastBody = JSON.parse(puts[puts.length - 1].body);
+  assert.equal(lastBody.plannerV1, undefined, 'plannerV1 уехал под другим владельцем');
+  const envAfter = readEnvelope(app);
+  assert.ok(envAfter.outbox.length >= 1, 'при блокировке по владельцу outbox стёрся');
+});
+
+test('syncToCloudNow без ETag на ответе сервера: PUT идёт безусловный, как раньше (обратная совместимость)', async () => {
+  const calls = [];
+  const fetchImpl = function (url, opts) {
+    const options = opts || {};
+    calls.push({ method: options.method || 'GET', url: String(url), headers: options.headers || {} });
+    if ((options.method || 'GET') === 'GET' && String(url).includes('backups')) {
+      return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve([]); } });
+    }
+    if ((options.method || 'GET') === 'GET') {
+      return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve({}); } });
+    }
+    return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve({}); } });
+  };
+  const app = loadApp({ fetchImpl: fetchImpl });
+  app.sandbox.localStorage.setItem('youplanner.fb.owner', JSON.stringify({ email: 'o@e', uid: 'uid-A' }));
+  await app.context.syncToCloudNow();
+  const put = calls.find(function (c) { return c.method === 'PUT' && c.url.includes('firebaseio.com'); });
+  assert.ok(put);
+  assert.equal(put.headers['If-Match'], undefined, 'If-Match без известного ETag');
+});
