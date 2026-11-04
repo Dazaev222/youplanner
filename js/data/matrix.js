@@ -6,11 +6,33 @@
    рассинхрон с календарём: завтрашняя задача сегодня стала бы «срочной» сама,
    без участия человека.
 
-   Раздел ПОКА не в STORAGE_KEYS и не в снимке синхронизации: слияние задач
-   требует правил по `updatedAt` в `js/sync/merge.js` и надгробий (механизм
-   привычек), а без них второе устройство вернёт удалённое. До этого данные
-   живут на устройстве — ключ ниже это честно говорит. */
+   С ТЗ Воркера 1 («Фабрика») раздел синхронизируется аддитивным узлом
+   plannerV1 (ТЗ §1.3): локальный список живёт по-прежнему под
+   MATRIX_STORAGE_KEY, а поверх него — атомарный envelope
+   STORAGE_KEYS.plannerEnvelope (js/data/storage.js): снимок entries/settings/
+   tombstones с per-field Lamport-версиями, outbox операций и наблюдаемые
+   счётчики. saveTasks остаётся ЕДИНСТВЕННОЙ точкой записи экрана
+   (commitTasks вызывает её без изменений сигнатуры): адаптер снимает diff
+   старого и нового списков в операции applyPlannerOperation, сначала честно
+   сохраняет envelope, потом список; отказ хранилища на любом шаге — прежнее
+   состояние целиком. Предметные поля plannerV1 — только существующие поля
+   задачи (title, notes, priority, doDate, order, archived, schedule —
+   атомарно: дата+время+зона+повтор+напоминания, completion {done, doneAt},
+   provenance {createdAt, updatedAt, generatedAt, previousOccurrenceId});
+   `due` и квадрант остаются производными от расписания/приоритета и вторым
+   источником истины не заводятся. */
 
+import { bus } from '../core/bus.js';
+import { getOwnerAccount } from './firebase-auth.js';
+import {
+  normalizePlannerV1, applyPlannerOperation, migratePlannerV1,
+  plannerCanonicalJson,
+} from '../sync/merge.js';
+import {
+  STORAGE_KEYS, loadPlannerEnvelope, savePlannerEnvelope, createPlannerEnvelope,
+  plannerNewActorId, plannerNextVersion, plannerNextOpId,
+  plannerObserveVersions,
+} from './storage.js';
 import { safeSetItem } from '../core/storage.js';
 import { addDays, isDateLike, parseISODate, toISODate } from '../core/dates.js';
 import {
@@ -216,9 +238,222 @@ export function loadTasks() {
   return out;
 }
 
+/* --- plannerV1: адаптер операций Матрицы к метаданным (ТЗ §1.3) ─────────── */
+
+// uid подтверждённого владельца (постоянный аккаунт, js/data/firebase-auth.js)
+// или null — анонимный режим. Операции в outbox помечаются этим ownerKey:
+// при смене аккаунта чужой outbox не отправляется (ТЗ §1.4.4).
+export function plannerOwnerUid() {
+  const account = getOwnerAccount();
+  return account && typeof account.uid === 'string' && account.uid !== '' ? account.uid : null;
+}
+
+// Предметные поля записи plannerV1 — РОВНО существующие поля задачи
+// (шлюз 1.1: sanitizeTask). due/quadrant не проектируются: они производные.
+function plannerProjectTaskFields(task) {
+  return {
+    title: task.title,
+    notes: task.notes,
+    priority: task.priority,
+    doDate: task.doDate,
+    order: task.order,
+    archived: task.archived,
+    // schedule — атомарное поле: все найденные связанные дата, время, часовой
+    // пояс, повтор и локальное напоминание живут в одном value и правятся
+    // только целиком (несовместимые независимые правки компонентов не
+    // смешиваются в невозможное расписание)
+    schedule: task.schedule === undefined ? null : task.schedule,
+    completion: {
+      done: task.done === true,
+      doneAt: task.done === true ? task.doneAt : null,
+    },
+    provenance: {
+      createdAt: task.createdAt,
+      updatedAt: task.updatedAt,
+      generatedAt: task.generatedAt,
+      previousOccurrenceId: task.previousOccurrenceId,
+    },
+  };
+}
+
+function plannerField(fields, name, fallback) {
+  const holder = fields && fields[name];
+  if (!holder || !('value' in holder)) return fallback;
+  return holder.value;
+}
+
+// Снимок plannerV1 → список задач прежней формы. Tombstoned id никогда не
+// материализуются (delete-wins); запись без title отбрасывается — sanitizeTask
+// всё равно её не пропустил бы, а молчать о причине здесь негде.
+export function materializePlannerTasks(snapshot) {
+  const normalized = normalizePlannerV1(snapshot);
+  if (!normalized.ok) return [];
+  const snap = normalized.snapshot;
+  const out = [];
+  const ids = Object.keys(snap.entries);
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i];
+    if (Object.prototype.hasOwnProperty.call(snap.tombstones, id)) continue;
+    const fields = snap.entries[id].fields;
+    if (!fields.title) continue;
+    const completion = plannerField(fields, 'completion', {});
+    const provenance = plannerField(fields, 'provenance', {});
+    const task = sanitizeTask({
+      id: id,
+      title: fields.title.value,
+      notes: plannerField(fields, 'notes', ''),
+      priority: plannerField(fields, 'priority', PRIORITY_NONE),
+      doDate: plannerField(fields, 'doDate', null),
+      order: plannerField(fields, 'order', 0),
+      archived: plannerField(fields, 'archived', false),
+      schedule: plannerField(fields, 'schedule', null),
+      done: completion.done === true,
+      doneAt: completion.doneAt,
+      createdAt: provenance.createdAt,
+      updatedAt: provenance.updatedAt,
+      generatedAt: provenance.generatedAt,
+      previousOccurrenceId: provenance.previousOccurrenceId,
+    });
+    if (task) out.push(task);
+  }
+  return out;
+}
+
+// Envelope из legacy-списка, лежащего в хранилище (ТЗ §1.4.5): старые id
+// сохраняются, версии стартуют с 1, таблица соответствия для записей без id
+// переживает повтор (детерминированный id без часов).
+function plannerBuildEnvelopeFromLegacy() {
+  const legacyTasks = loadTasks();
+  const entries = [];
+  for (let i = 0; i < legacyTasks.length; i++) {
+    entries.push({ id: legacyTasks[i].id, fields: plannerProjectTaskFields(legacyTasks[i]) });
+  }
+  const actorId = plannerNewActorId();
+  const migrated = migratePlannerV1(
+    { entries: entries, settings: {} },
+    { actorId: actorId, mapping: {} },
+  );
+  const env = createPlannerEnvelope(actorId, migrated.snapshot, migrated.mapping);
+  env.lamport[actorId] = 1;
+  return env;
+}
+
+// Повторяемая миграция «есть ли envelope» — публичный вход для
+// js/data/migrations.js и для saveTasks. Существующий envelope НЕ трогается:
+// отсутствие новой области у старого клиента/бэкапа — не удаление (ТЗ §1.4.1).
+// Возвращает {env, created, saved}.
+export function ensurePlannerEnvelope() {
+  const existing = loadPlannerEnvelope();
+  if (existing) return { env: existing, created: false, saved: true };
+  const built = plannerBuildEnvelopeFromLegacy();
+  const saved = savePlannerEnvelope(built);
+  return { env: built, created: true, saved: saved };
+}
+
+// Только чтение: envelope или baseline из legacy-списка, БЕЗ записи. Нужен
+// sync-слою, который собирает stage и пишет всё или ничего (три фазы
+// applyCloudData), и saveTasks, которая откатывает envelope при отказе
+// записи списка.
+export function plannerLoadOrBuildEnvelope() {
+  return loadPlannerEnvelope() || plannerBuildEnvelopeFromLegacy();
+}
+
+function plannerDiffOps(env, list) {
+  const byId = Object.create(null);
+  for (let i = 0; i < list.length; i++) {
+    const task = sanitizeTask(list[i]);
+    if (!task || byId[task.id]) continue;
+    byId[task.id] = task;
+  }
+  const entries = env.snapshot.entries;
+  const tombstones = env.snapshot.tombstones;
+  const ops = [];
+  const ids = Object.keys(byId);
+  for (let i = 0; i < ids.length; i++) {
+    const id = ids[i];
+    // tombstoned id не воскрешается молча: экран при желании возвращает
+    // копию с НОВЫМ id (newTaskId), скрытого снятия надгробия нет
+    if (Object.prototype.hasOwnProperty.call(tombstones, id)) continue;
+    const fields = plannerProjectTaskFields(byId[id]);
+    const existing = entries[id];
+    const putFields = {};
+    const names = Object.keys(fields);
+    for (let j = 0; j < names.length; j++) {
+      const name = names[j];
+      const current = existing && existing.fields[name];
+      if (current && plannerCanonicalJson(current.value) === plannerCanonicalJson(fields[name])) continue;
+      putFields[name] = { value: fields[name], version: plannerNextVersion(env) };
+    }
+    if (Object.keys(putFields).length > 0) {
+      ops.push({ opId: plannerNextOpId(env), type: 'put', entryId: id, fields: putFields });
+    }
+  }
+  const entryIds = Object.keys(entries);
+  for (let i = 0; i < entryIds.length; i++) {
+    const id = entryIds[i];
+    if (byId[id] || Object.prototype.hasOwnProperty.call(tombstones, id)) continue;
+    ops.push({
+      opId: plannerNextOpId(env),
+      type: 'delete',
+      entryId: id,
+      version: plannerNextVersion(env),
+      // настенные часы — только отображение; арбитр конфликта их не читает
+      deletedAt: new Date().toISOString(),
+    });
+  }
+  return ops;
+}
+
 export function saveTasks(tasks) {
   const list = Array.isArray(tasks) ? tasks.filter(Boolean) : [];
-  return safeSetItem(MATRIX_STORAGE_KEY, JSON.stringify(list));
+  let rawBefore = null;
+  try {
+    rawBefore = localStorage.getItem(STORAGE_KEYS.plannerEnvelope);
+  } catch (e) {
+    rawBefore = null;
+  }
+  const env = plannerLoadOrBuildEnvelope();
+  const ops = plannerDiffOps(env, list);
+
+  // Операции применяются к снимку в памяти и только потом уезжают в
+  // envelope: отказ хранилища не оставляет ни частичного снимка, ни
+  // «успешной» правки списка
+  const queued = [];
+  let snapshot = env.snapshot;
+  const report = { conflicts: [] };
+  for (let i = 0; i < ops.length; i++) {
+    const result = applyPlannerOperation(snapshot, ops[i], report);
+    if (result.ok && result.applied) {
+      snapshot = result.snapshot;
+      queued.push({ opId: ops[i].opId, ownerKey: plannerOwnerUid(), operation: ops[i] });
+    }
+  }
+  env.snapshot = snapshot;
+  plannerObserveVersions(env, snapshot);
+  for (let i = 0; i < queued.length; i++) env.outbox.push(queued[i]);
+
+  const needEnvelopeWrite = queued.length > 0 || rawBefore === null;
+  const listValue = JSON.stringify(list);
+
+  // Сначала envelope (снимок+outbox+счётчики), потом публикация и список:
+  // ошибка квоты на envelope не даёт ложного успеха (ТЗ §1.4.3)
+  if (needEnvelopeWrite && !savePlannerEnvelope(env)) return false;
+
+  if (!safeSetItem(MATRIX_STORAGE_KEY, listValue)) {
+    // список не лег — envelope откатываем к прежним байтам: у экрана ровно
+    // прежнее состояние, операций наверх не уехало
+    if (needEnvelopeWrite) {
+      if (rawBefore === null) {
+        try { localStorage.removeItem(STORAGE_KEYS.plannerEnvelope); } catch (e) { /* уже пусто */ }
+      } else {
+        safeSetItem(STORAGE_KEYS.plannerEnvelope, rawBefore);
+      }
+    }
+    return false;
+  }
+
+  if (queued.length > 0) bus.emit('data:changed');
+  return true;
 }
 
 // Срочность — функция от даты, а не от настроения: просрочено, сегодня или
@@ -706,3 +941,4 @@ export function quadrantStats(tasks, today) {
   }
   return out;
 }
+

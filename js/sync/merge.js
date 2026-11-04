@@ -33,6 +33,488 @@ import {
 import { validQazaLogEntries } from '../data/qaza.js';
 import { validSleepHistory } from '../data/sleep.js';
 
+// ── plannerV1: ядро слияния области планирования (ТЗ §1.3) ─────────────────
+// Узел plannerV1 = {schemaVersion, entries, settings, tombstones}: Матрица и
+// настройки календаря поверх per-field Lamport-версий {counter, actorId}.
+// Правила контракта:
+//   * сравнение версий — ЛЕКСИКОГРАФИЧЕСКОЕ (counter, actorId); настенные
+//     часы в нём не участвуют (deletedAt — только отображение);
+//   * одинаковая версия с разным значением — детерминированный выбор по
+//     канонической JSON-строке (меньше — побеждает) плюс диагностика в
+//     report.conflicts БЕЗ содержимого;
+//   * удаление — delete-wins навсегда для id: любой tombstone скрывает
+//     запись и не снимается обычным put/merge; возврат из удаления —
+//     копия с НОВЫМ id на уровне адаптера, здесь скрытого снятия нет;
+//   * merge коммутативен, ассоциативен, идемпотентен: merge(x,x)=x
+//     побайтово по канонической форме;
+//   * автоматического GC, TTL и вытеснения tombstones нет;
+//   * неизвестная schemaVersion НЕ удаляется молча: normalize возвращает
+//     unsupported, вызывающий обязан отказаться применять снимок как есть.
+// Чистые функции: ни bus, ни хранилища — только данные (как merge.js выше).
+
+export const PLANNER_SCHEMA_VERSION = 1;
+
+const PLANNER_ID_MAX = 256;
+const PLANNER_ACTOR_MAX = 128;
+
+function plannerPlainObject(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
+}
+
+function plannerValidId(value) {
+  return typeof value === 'string' && value !== '' && value.length <= PLANNER_ID_MAX;
+}
+
+// Глубокая JSON-безопасная копия: функции, циклы и undefined не попадают в
+// снимок (глубина 12 — как jsonClone в matrix-schedule.js, но имя своё,
+// песочница склеивает все модули в одну область видимости).
+function plannerJsonSafe(value, depth) {
+  const level = depth || 0;
+  if (level > 12) return null;
+  const type = typeof value;
+  if (value === null || type === 'boolean') return value;
+  if (type === 'number') return Number.isFinite(value) ? value : null;
+  if (type === 'string') return value;
+  if (Array.isArray(value)) {
+    const out = [];
+    for (let i = 0; i < value.length; i++) out.push(plannerJsonSafe(value[i], level + 1));
+    return out;
+  }
+  if (type === 'object') {
+    const out = {};
+    const keys = Object.keys(value).sort();
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      if (key === '__proto__' || key === 'constructor' || key === 'prototype') continue;
+      if (value[key] === undefined) continue;
+      out[key] = plannerJsonSafe(value[key], level + 1);
+    }
+    return out;
+  }
+  return null;
+}
+
+// Каноническая JSON-строка со SORTED ключами: байтовое сравнение снимков
+// (snapshotDiffers в sync.js, повторные доставки, round-trip backup) не
+// должно зависеть от порядка вставки.
+export function plannerCanonicalJson(value) {
+  const safe = plannerJsonSafe(value, 0);
+  return JSON.stringify(safe === undefined ? null : safe);
+}
+
+function plannerValidVersion(version) {
+  return plannerPlainObject(version) &&
+    typeof version.counter === 'number' && Number.isInteger(version.counter) &&
+    version.counter >= 0 &&
+    typeof version.actorId === 'string' && version.actorId !== '' &&
+    version.actorId.length <= PLANNER_ACTOR_MAX;
+}
+
+export function cmpPlannerVersion(a, b) {
+  if (a.counter !== b.counter) return a.counter < b.counter ? -1 : 1;
+  if (a.actorId !== b.actorId) return a.actorId < b.actorId ? -1 : 1;
+  return 0;
+}
+
+function plannerFieldVersion(version) {
+  return { counter: version.counter, actorId: version.actorId };
+}
+
+// {value, version} → годный поле-объект или null (причина — в issues вызывающего)
+function plannerNormalizeValueVersion(raw, issues, where) {
+  if (!plannerPlainObject(raw) || !plannerValidVersion(raw.version)) {
+    issues.push({ where: where, code: 'broken-field' });
+    return null;
+  }
+  return { value: plannerJsonSafe(raw.value, 0), version: plannerFieldVersion(raw.version) };
+}
+
+function plannerSortedMap(source) {
+  const out = {};
+  const keys = Object.keys(source).sort();
+  for (let i = 0; i < keys.length; i++) out[keys[i]] = source[keys[i]];
+  return out;
+}
+
+export function normalizePlannerV1(raw) {
+  const issues = [];
+  if (!plannerPlainObject(raw)) {
+    return { ok: false, unsupported: false, snapshot: null, issues: [{ where: 'root', code: 'not-object' }] };
+  }
+  if (raw.schemaVersion !== PLANNER_SCHEMA_VERSION) {
+    const known = typeof raw.schemaVersion === 'number' &&
+      Number.isInteger(raw.schemaVersion) && raw.schemaVersion > PLANNER_SCHEMA_VERSION;
+    issues.push({ where: 'schemaVersion', code: known ? 'unsupported-version' : 'broken-version' });
+    // неизвестная версия НЕ «чишится» до знакомой: snapshot остаётся null,
+    // вызывающий обязан отказаться менять локальное состояние
+    return { ok: false, unsupported: known, snapshot: null, issues: issues };
+  }
+
+  const snapshot = { schemaVersion: PLANNER_SCHEMA_VERSION, entries: {}, settings: {}, tombstones: {} };
+
+  if (raw.entries !== undefined) {
+    if (!plannerPlainObject(raw.entries)) {
+      issues.push({ where: 'entries', code: 'broken-map' });
+    } else {
+      const ids = Object.keys(raw.entries).sort();
+      for (let i = 0; i < ids.length; i++) {
+        const id = ids[i];
+        const source = raw.entries[id];
+        if (!plannerValidId(id) || !plannerPlainObject(source) || source.id !== id ||
+            !plannerPlainObject(source.fields)) {
+          issues.push({ where: 'entries.' + id, code: 'broken-entry' });
+          continue;
+        }
+        const names = Object.keys(source.fields).sort();
+        const fields = {};
+        let broke = false;
+        for (let j = 0; j < names.length; j++) {
+          const name = names[j];
+          if (name === '' || name.length > PLANNER_ID_MAX) {
+            issues.push({ where: 'entries.' + id + '.' + name, code: 'broken-field-name' });
+            broke = true;
+            continue;
+          }
+          const cleaned = plannerNormalizeValueVersion(source.fields[name], issues, 'entries.' + id + '.' + name);
+          if (!cleaned) { broke = true; continue; }
+          fields[name] = cleaned;
+        }
+        if (!plannerPlainObject(source.fields)) broke = true;
+        if (broke && Object.keys(fields).length === 0) continue;
+        snapshot.entries[id] = { id: id, fields: plannerSortedMap(fields) };
+      }
+    }
+  }
+
+  if (raw.settings !== undefined) {
+    if (!plannerPlainObject(raw.settings)) {
+      issues.push({ where: 'settings', code: 'broken-map' });
+    } else {
+      const keys = Object.keys(raw.settings).sort();
+      for (let i = 0; i < keys.length; i++) {
+        const key = keys[i];
+        if (key === '' || key.length > PLANNER_ID_MAX) {
+          issues.push({ where: 'settings.' + key, code: 'broken-key' });
+          continue;
+        }
+        const cleaned = plannerNormalizeValueVersion(raw.settings[key], issues, 'settings.' + key);
+        if (!cleaned) continue;
+        snapshot.settings[key] = cleaned;
+      }
+    }
+  }
+
+  if (raw.tombstones !== undefined) {
+    if (!plannerPlainObject(raw.tombstones)) {
+      issues.push({ where: 'tombstones', code: 'broken-map' });
+    } else {
+      const ids = Object.keys(raw.tombstones).sort();
+      for (let i = 0; i < ids.length; i++) {
+        const id = ids[i];
+        const source = raw.tombstones[id];
+        if (!plannerValidId(id) || !plannerPlainObject(source) ||
+            !plannerValidVersion(source.version) ||
+            typeof source.deletedAt !== 'string' || source.deletedAt === '') {
+          issues.push({ where: 'tombstones.' + id, code: 'broken-tombstone' });
+          continue;
+        }
+        snapshot.tombstones[id] = { version: plannerFieldVersion(source.version), deletedAt: source.deletedAt };
+      }
+    }
+  }
+
+  snapshot.entries = plannerSortedMap(snapshot.entries);
+  snapshot.settings = plannerSortedMap(snapshot.settings);
+  snapshot.tombstones = plannerSortedMap(snapshot.tombstones);
+  return { ok: true, unsupported: false, snapshot: snapshot, issues: issues };
+}
+
+function plannerMergeSide(value, report, where) {
+  const result = normalizePlannerV1(value);
+  if (result.ok) return result.snapshot;
+  if (report) {
+    report.conflicts = report.conflicts || [];
+    report.conflicts.push({ kind: 'planner-' + (result.unsupported ? 'unsupported' : 'invalid') + '-side', where: where });
+  }
+  return null;
+}
+
+// Победитель пары {value, version}: большая версия; равная версия с разным
+// значением — меньшая каноническая строка (порядок аргументов не важен).
+function plannerPickWinner(nameA, a, nameB, b) {
+  const cmp = cmpPlannerVersion(a.version, b.version);
+  if (cmp > 0) return { chosen: a, other: b, from: nameA };
+  if (cmp < 0) return { chosen: b, other: a, from: nameB };
+  const canonA = plannerCanonicalJson(a.value);
+  const canonB = plannerCanonicalJson(b.value);
+  if (canonA === canonB) return { chosen: a, other: a, from: nameA, equal: true };
+  const left = canonA <= canonB ? a : b;
+  const right = canonA <= canonB ? b : a;
+  return { chosen: left, other: right, from: canonA <= canonB ? nameA : nameB, tieBreak: true };
+}
+
+export function mergePlannerV1(left, right, report) {
+  const leftSnapshot = plannerMergeSide(left, report, 'left');
+  const rightSnapshot = plannerMergeSide(right, report, 'right');
+  if (!leftSnapshot && !rightSnapshot) {
+    return { schemaVersion: PLANNER_SCHEMA_VERSION, entries: {}, settings: {}, tombstones: {} };
+  }
+  if (!leftSnapshot) return rightSnapshot;
+  if (!rightSnapshot) return leftSnapshot;
+
+  const merged = { schemaVersion: PLANNER_SCHEMA_VERSION, entries: {}, settings: {}, tombstones: {} };
+
+  // tombstones: объединение с максимальной версией; delete-wins навсегда —
+  // ни одна правка обеих сторон не снимает надгробие
+  const tombIds = {};
+  const collectTomb = [leftSnapshot.tombstones, rightSnapshot.tombstones];
+  for (let s = 0; s < collectTomb.length; s++) {
+    const ids = Object.keys(collectTomb[s]);
+    for (let i = 0; i < ids.length; i++) tombIds[ids[i]] = true;
+  }
+  Object.keys(tombIds).sort().forEach(function (id) {
+    const a = leftSnapshot.tombstones[id];
+    const b = rightSnapshot.tombstones[id];
+    let winner = a || b;
+    if (a && b) {
+      const cmp = cmpPlannerVersion(a.version, b.version);
+      if (cmp < 0) winner = b;
+      else if (cmp === 0 && plannerCanonicalJson(b) < plannerCanonicalJson(a)) winner = b;
+    }
+    merged.tombstones[id] = { version: plannerFieldVersion(winner.version), deletedAt: winner.deletedAt };
+  });
+
+  function live(id) {
+    return !Object.prototype.hasOwnProperty.call(merged.tombstones, id);
+  }
+
+  const entryIds = {};
+  const sides = [leftSnapshot.entries, rightSnapshot.entries];
+  for (let s = 0; s < sides.length; s++) {
+    const ids = Object.keys(sides[s]);
+    for (let i = 0; i < ids.length; i++) entryIds[ids[i]] = true;
+  }
+  Object.keys(entryIds).sort().forEach(function (id) {
+    if (!live(id)) return;
+    const a = leftSnapshot.entries[id];
+    const b = rightSnapshot.entries[id];
+    if (!a || !b) {
+      const only = (a || b);
+      merged.entries[id] = { id: id, fields: plannerSortedMap(only.fields) };
+      return;
+    }
+    const fields = {};
+    const names = {};
+    Object.keys(a.fields).forEach(function (n) { names[n] = true; });
+    Object.keys(b.fields).forEach(function (n) { names[n] = true; });
+    Object.keys(names).sort().forEach(function (name) {
+      const fa = a.fields[name];
+      const fb = b.fields[name];
+      if (!fa || !fb) { fields[name] = fa || fb; return; }
+      const pick = plannerPickWinner('left', fa, 'right', fb);
+      fields[name] = { value: pick.chosen.value, version: plannerFieldVersion(pick.chosen.version) };
+      if (pick.tieBreak && report) {
+        report.conflicts = report.conflicts || [];
+        // без содержимого: названы только координаты конфликта
+        report.conflicts.push({ kind: 'same-version-different-value', entryId: id, field: name });
+      }
+    });
+    merged.entries[id] = { id: id, fields: plannerSortedMap(fields) };
+  });
+
+  const settingKeys = {};
+  Object.keys(leftSnapshot.settings).forEach(function (k) { settingKeys[k] = true; });
+  Object.keys(rightSnapshot.settings).forEach(function (k) { settingKeys[k] = true; });
+  Object.keys(settingKeys).sort().forEach(function (key) {
+    const a = leftSnapshot.settings[key];
+    const b = rightSnapshot.settings[key];
+    if (!a || !b) { merged.settings[key] = a || b; return; }
+    const pick = plannerPickWinner('left', a, 'right', b);
+    merged.settings[key] = { value: pick.chosen.value, version: plannerFieldVersion(pick.chosen.version) };
+    if (pick.tieBreak && report) {
+      report.conflicts = report.conflicts || [];
+      report.conflicts.push({ kind: 'same-version-different-value', setting: key });
+    }
+  });
+
+  merged.entries = plannerSortedMap(merged.entries);
+  merged.settings = plannerSortedMap(merged.settings);
+  merged.tombstones = plannerSortedMap(merged.tombstones);
+  return merged;
+}
+
+function plannerValidateOperation(operation) {
+  if (!plannerPlainObject(operation)) return 'invalid-operation';
+  if (!plannerValidId(operation.opId)) return 'invalid-operation';
+  if (!plannerValidId(operation.entryId)) return 'invalid-operation';
+  if (operation.type !== 'put' && operation.type !== 'delete') return 'invalid-operation';
+  return null;
+}
+
+// Локальная операция поверх снимка. Повтор той же opId/версии/значения —
+// no-op без роста версии: доставка и retry безопасны. Надгробие не снимается
+// никогда: put по tombstoned id отвергается (возврат — копия с НОВЫМ id на
+// уровне адаптера).
+export function applyPlannerOperation(snapshot, operation, report) {
+  const fail = function (reason, source) {
+    return { ok: false, applied: false, reason: reason, snapshot: source };
+  };
+  const normalized = normalizePlannerV1(snapshot);
+  if (!normalized.ok) return fail('invalid-snapshot', snapshot);
+  const out = mergePlannerV1(normalized.snapshot, { schemaVersion: PLANNER_SCHEMA_VERSION }, null);
+
+  const bad = plannerValidateOperation(operation);
+  if (bad) return fail(bad, out);
+
+  if (operation.type === 'delete') {
+    if (!plannerValidVersion(operation.version)) return fail('invalid-operation', out);
+    if (typeof operation.deletedAt !== 'string' || operation.deletedAt === '') return fail('invalid-operation', out);
+    const id = operation.entryId;
+    const existing = out.tombstones[id];
+    const wanted = { version: plannerFieldVersion(operation.version), deletedAt: operation.deletedAt };
+    let changed = false;
+    if (!existing) {
+      out.tombstones[id] = wanted;
+      changed = true;
+    } else {
+      const cmp = cmpPlannerVersion(wanted.version, existing.version);
+      if (cmp > 0 || (cmp === 0 && plannerCanonicalJson(wanted) < plannerCanonicalJson(existing))) {
+        out.tombstones[id] = wanted;
+        changed = true;
+      }
+    }
+    if (Object.prototype.hasOwnProperty.call(out.entries, id)) {
+      delete out.entries[id];
+      changed = true;
+    }
+    out.tombstones = plannerSortedMap(out.tombstones);
+    out.entries = plannerSortedMap(out.entries);
+    return { ok: true, applied: changed, reason: changed ? null : 'noop', snapshot: out };
+  }
+
+  // put
+  if (!plannerPlainObject(operation.fields) || Object.keys(operation.fields).length === 0) {
+    return fail('invalid-operation', out);
+  }
+  const id = operation.entryId;
+  if (Object.prototype.hasOwnProperty.call(out.tombstones, id)) {
+    return { ok: true, applied: false, reason: 'tombstoned', snapshot: out };
+  }
+  const base = out.entries[id] || { id: id, fields: {} };
+  const fields = {};
+  Object.keys(base.fields).forEach(function (n) { fields[n] = base.fields[n]; });
+  let changed = false;
+  const names = Object.keys(operation.fields).sort();
+  for (let i = 0; i < names.length; i++) {
+    const name = names[i];
+    if (name === '' || name.length > PLANNER_ID_MAX) return fail('invalid-operation', out);
+    const cleaned = plannerNormalizeValueVersion(operation.fields[name], [], 'operation.' + name);
+    if (!cleaned) return fail('invalid-operation', out);
+    const current = fields[name];
+    if (!current) { fields[name] = cleaned; changed = true; continue; }
+    const cmp = cmpPlannerVersion(cleaned.version, current.version);
+    if (cmp > 0) { fields[name] = cleaned; changed = true; continue; }
+    if (cmp === 0 && plannerCanonicalJson(cleaned.value) !== plannerCanonicalJson(current.value)) {
+      // равная версия с разным значением — тот же детерминированный
+      // победитель, что у merge: меньше канонической строки
+      if (plannerCanonicalJson(cleaned.value) < plannerCanonicalJson(current.value)) {
+        fields[name] = cleaned;
+        changed = true;
+      }
+      if (report) {
+        report.conflicts = report.conflicts || [];
+        report.conflicts.push({ kind: 'same-version-different-value', entryId: id, field: name });
+      }
+    }
+  }
+  if (!changed) {
+    return { ok: true, applied: false, reason: 'noop', snapshot: out };
+  }
+  out.entries[id] = { id: id, fields: plannerSortedMap(fields) };
+  out.entries = plannerSortedMap(out.entries);
+  return { ok: true, applied: true, reason: null, snapshot: out };
+}
+
+// Стабильный hash без часов и случайностей (FNV-1a, base36): повтор миграции
+// той же legacy-записи обязан дать тот же id даже при потерянной таблице.
+function plannerHash(value) {
+  let hash = 0x811c9dc5;
+  for (let i = 0; i < value.length; i++) {
+    hash ^= value.charCodeAt(i);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(36);
+}
+
+// Детерминированная миграция legacy-списка в снимок plannerV1: старые id
+// сохраняются, записи без id получают стабильный id через таблицу
+// соответствия mapping (её повтор даёт ТЕ ЖЕ id, а не дубликаты). Версии
+// полей — counter 1 от actorId установки. Никаких часов: два прогона —
+// байт-в-байт один результат.
+export function migratePlannerV1(legacy, migrationState) {
+  const state = plannerPlainObject(migrationState) ? migrationState : {};
+  const actorId = typeof state.actorId === 'string' && state.actorId !== '' ? state.actorId : 'migrate';
+  const mapping = plannerPlainObject(state.mapping) ? Object.assign({}, state.mapping) : {};
+  const snapshot = { schemaVersion: PLANNER_SCHEMA_VERSION, entries: {}, settings: {}, tombstones: {} };
+
+  const source = plannerPlainObject(legacy) ? legacy : {};
+  const list = Array.isArray(source.entries) ? source.entries : [];
+  for (let i = 0; i < list.length; i++) {
+    const raw = list[i];
+    if (!plannerPlainObject(raw)) continue;
+    const fields = plannerPlainObject(raw.fields) ? raw.fields : {};
+    const key = 'm:' + i + ':' + plannerCanonicalJson(fields);
+    let id = typeof raw.id === 'string' && raw.id !== '' ? raw.id : null;
+    if (!id) {
+      if (typeof mapping[key] === 'string' && mapping[key] !== '') {
+        id = mapping[key];
+      } else {
+        id = 'm' + plannerHash(key);
+        mapping[key] = id;
+      }
+    }
+    if (!plannerValidId(id)) continue;
+    const clean = {};
+    const names = Object.keys(fields).sort();
+    for (let j = 0; j < names.length; j++) {
+      const name = names[j];
+      if (name === '' || name.length > PLANNER_ID_MAX) continue;
+      if (fields[name] === undefined) continue;
+      clean[name] = { value: plannerJsonSafe(fields[name], 0), version: { counter: 1, actorId: actorId } };
+    }
+    snapshot.entries[id] = { id: id, fields: plannerSortedMap(clean) };
+  }
+
+  if (plannerPlainObject(source.settings)) {
+    const keys = Object.keys(source.settings).sort();
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i];
+      if (key === '' || key.length > PLANNER_ID_MAX) continue;
+      if (source.settings[key] === undefined) continue;
+      snapshot.settings[key] = { value: plannerJsonSafe(source.settings[key], 0), version: { counter: 1, actorId: actorId } };
+    }
+  }
+
+  if (plannerPlainObject(source.tombstones)) {
+    const ids = Object.keys(source.tombstones).sort();
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i];
+      const raw = source.tombstones[id];
+      if (!plannerValidId(id) || !plannerPlainObject(raw)) continue;
+      if (typeof raw.deletedAt !== 'string' || raw.deletedAt === '') continue;
+      snapshot.tombstones[id] = {
+        version: plannerValidVersion(raw.version) ? plannerFieldVersion(raw.version) : { counter: 1, actorId: actorId },
+        deletedAt: raw.deletedAt,
+      };
+    }
+  }
+
+  snapshot.entries = plannerSortedMap(snapshot.entries);
+  snapshot.settings = plannerSortedMap(snapshot.settings);
+  snapshot.tombstones = plannerSortedMap(snapshot.tombstones);
+  return { snapshot: snapshot, mapping: plannerSortedMap(mapping) };
+}
+
 // Метка свежести раздела из снимка. Снимки до введения sectionTs метки не
 // несут — тогда свежесть раздела равна свежести всего снимка.
 export function sectionTsOf(cloud, section, fallbackTs) {

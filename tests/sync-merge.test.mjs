@@ -411,3 +411,32 @@ test('syncToCloudNow: сервер не новее — слияния нет, PU
   assert.deepEqual(Object.keys(body.records), ['2026-10-20']);
   assert.equal(app.run('globalThis.__applied'), 0, 'sync:applied без слияния');
 });
+
+// ── plannerV1 (ТЗ Воркера 1): аддитивное подключение ────────────────────────
+// Раздел plannerV1 сливается НЕ здесь (он живёт в локальном envelope и
+// разрешается mergePlannerV1/planPlannerApply в js/sync/sync.js). Здесь
+// закрепляется обратное: чужой/новый узел plannerV1 не влияет на прежние
+// правила слияния разделов, а legacy-разделы не уходят в envelope-путь.
+
+test('plannerV1: снимок с новым узлом не меняет слияние legacy-разделов', () => {
+  const cloud = baseCloud();
+  cloud.plannerV1 = {
+    schemaVersion: 1,
+    entries: { t1: { id: 't1', fields: { title: { value: 'Из planner', version: { counter: 1, actorId: 'a' } } } } },
+    settings: {},
+    tombstones: {},
+  };
+  const merged = merge(baseLocal(), cloud);
+  assert.deepEqual(Object.keys(merged.records).sort(), ['2026-10-20', '2026-10-25'],
+    'узел plannerV1 сдвинул слияние записей');
+  assert.equal(merged.qaza.cursor, 0, 'узел plannerV1 сдвинул цельные разделы');
+  assert.equal(merged.plannerV1, undefined,
+    'mergeCloudIntoLocal не должен возвращать plannerV1 — у раздела свой путь через envelope');
+});
+
+test('plannerV1: отсутствие узла у старого снимка — прежнее поведение без изменений', () => {
+  const old = baseCloud();
+  delete old.plannerV1;
+  const merged = merge(baseLocal(), old);
+  assert.deepEqual(merged.habits.map(function (h) { return h.id; }), ['h1']);
+});

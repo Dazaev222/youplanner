@@ -4,7 +4,20 @@
     ".write": false,
     "youplanner-d8aaea12-60e6-4ac9-973c-46c19b387cd9": {
       ".read": "auth != null && auth.uid === \"OWNER_UID\"",
-      ".write": "auth != null && auth.uid === \"OWNER_UID\""
+      ".write": "auth != null && auth.uid === \"OWNER_UID\"",
+      "plannerV1": {
+        ".validate": "newData.child('schemaVersion').val() === 1",
+        "entries": {
+          "$entryId": {
+            ".validate": "newData.child('id').val() === $entryId && (!newData.hasChild('fields') || newData.child('fields').isOther())"
+          }
+        },
+        "tombstones": {
+          "$tombId": {
+            ".validate": "newData.child('version').child('counter').isNumber() && newData.child('version').child('actorId').isString() && newData.child('deletedAt').isString()"
+          }
+        }
+      }
     },
     "youplanner-d8aaea12-60e6-4ac9-973c-46c19b387cd9-backups": {
       ".read": "auth != null && auth.uid === \"OWNER_UID\"",
