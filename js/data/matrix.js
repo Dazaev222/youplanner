@@ -350,6 +350,14 @@ export function ensurePlannerEnvelope() {
   return { env: built, created: true, saved: saved };
 }
 
+// Только чтение: envelope или baseline из legacy-списка, БЕЗ записи. Нужен
+// sync-слою, который собирает stage и пишет всё или ничего (три фазы
+// applyCloudData), и saveTasks, которая откатывает envelope при отказе
+// записи списка.
+export function plannerLoadOrBuildEnvelope() {
+  return loadPlannerEnvelope() || plannerBuildEnvelopeFromLegacy();
+}
+
 function plannerDiffOps(env, list) {
   const byId = Object.create(null);
   for (let i = 0; i < list.length; i++) {
@@ -404,7 +412,7 @@ export function saveTasks(tasks) {
   } catch (e) {
     rawBefore = null;
   }
-  const env = loadPlannerEnvelope() || plannerBuildEnvelopeFromLegacy();
+  const env = plannerLoadOrBuildEnvelope();
   const ops = plannerDiffOps(env, list);
 
   // Операции применяются к снимку в памяти и только потом уезжают в

@@ -651,12 +651,16 @@ test('гонка на одном ETag: чужой PUT раньше → свой 
   app.sandbox.localStorage.setItem('youplanner.sync.ts', '1');
   assert.equal(app.context.saveTasks([mkTask('tA', { title: 'Задача A' })]), true);
 
-  // Устройство B легально записалось между нашим GET и PUT: снимок и ETag
-  // изменились, наш условный PUT обязан получить 412, перечитать, слить и
-  // написать объединение
-  server.externalWrite(plannerCloudNode({
-    tB: entry('tB', { title: fld('Задача B', 4, 'devB') }),
-  }));
+  // Устройство B легально записалось между нашим GET и PUT: полный снимок
+  // узла (externalWrite имитирует чужой корневой PUT), ETag изменился —
+  // наш условный PUT обязан получить 412, перечитать, слить и написать
+  // объединение
+  server.externalWrite({
+    updatedAt: 777,
+    plannerV1: plannerCloudNode({
+      tB: entry('tB', { title: fld('Задача B', 4, 'devB') }),
+    }),
+  });
   await app.context.syncToCloudNow();
 
   const final = server.snapshot;
