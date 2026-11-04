@@ -529,6 +529,29 @@ test('materializePlannerTasks: schedule атомарен (дата+время+з
   assert.equal(t2.schedule.whatever, 'сохранилось');
 });
 
+test('ЧАСЫ не арбитр: исход конфликта не зависит от wall-clock надгробий', () => {
+  // ТЗ §1.3: «настенные часы только для отображения, не арбитр конфликта».
+  // deletedAt — отображаемая метка самого надгробия; решение «запись мертва»
+  // принимается версией, а не часами.
+  const old = snap({}, {}, { t1: { version: v(9, 'A'), deletedAt: '2020-01-01T00:00:00Z' } });
+  const future = snap({}, {}, { t1: { version: v(9, 'A'), deletedAt: '2099-12-31T23:59:59Z' } });
+  const edit = snap({ t1: entry('t1', { title: fld('Правка', 40, 'B') }) });
+
+  const m1 = mergePlannerV1(old, edit);
+  const m2 = mergePlannerV1(future, edit);
+  assert.equal(m1.entries.t1, undefined);
+  assert.equal(m2.entries.t1, undefined);
+  assert.deepEqual(m1.tombstones.t1.version, m2.tombstones.t1.version,
+    'версия победившего надгробия зависит от часов');
+
+  // оба надгробия живы на разных сторонах — детерминированный победитель
+  // канонической строкой, порядок прихода не важен
+  const m3 = mergePlannerV1(future, old);
+  const m4 = mergePlannerV1(old, future);
+  assert.equal(canon(m3), canon(m4), 'перестановка сторон меняет итог');
+  assert.equal(m3.tombstones.t1.deletedAt, '2020-01-01T00:00:00Z');
+});
+
 test('envelope: много tombstones — ни GC, ни вытеснения при очередной правке', () => {
   const app = loadApp();
   const many = {};

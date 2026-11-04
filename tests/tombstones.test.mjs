@@ -422,3 +422,42 @@ test('writeTombstone при лимите вытесняет самую стар�
   assert.equal(tombstones['hz' + (TOMBSTONES_LIMIT - 1)], 1000 + TOMBSTONES_LIMIT - 1,
     'свежие метки не должны теряться');
 });
+
+// ── plannerV1 и надгробия привычек — независимые разделы (ТЗ Воркера 1) ─────
+// Числовые политики tombstones привычек (лимит 500, max(ts)) не менялись;
+// снимок с новым узлом plannerV1 не имеет права трогать youplanner.tombstones,
+// и наоборот.
+
+test('снимок с plannerV1: надгробия привычек сливаются по прежним правилам, envelope — отдельный ключ', async () => {
+  const snapshot = {
+    updatedAt: CLOUD_TS + 6000,
+    sectionTs: {
+      habits: CLOUD_TS + 6000, records: CLOUD_TS + 6000, qaza: CLOUD_TS, prayer: CLOUD_TS,
+      fast: CLOUD_TS, qazaLog: CLOUD_TS, sleep: CLOUD_TS, schedule: CLOUD_TS,
+    },
+    habits: [habit()],
+    tombstones: { h9: DELETE_TS - 1000 },
+    plannerV1: {
+      schemaVersion: 1,
+      entries: { t1: { id: 't1', fields: { title: { value: 'Задача', version: { counter: 1, actorId: 'a' } } } } },
+      settings: {},
+      tombstones: { gone: { version: { counter: 1, actorId: 'a' }, deletedAt: '2026-11-04T00:00:00Z' } },
+    },
+  };
+  const fetchImpl = function () {
+    return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve(snapshot); } });
+  };
+  const app = loadApp({ fetchImpl: fetchImpl });
+  app.sandbox.localStorage.setItem('youplanner.habits', JSON.stringify([habit()]));
+  app.sandbox.localStorage.setItem('youplanner.sync.ts', String(LOCAL_TS));
+  // локальное надгробие привычки СВЕЖЕЕ серверного: merge по max(ts) обязан оставить локальное
+  app.sandbox.localStorage.setItem('youplanner.tombstones', JSON.stringify({ h9: DELETE_TS }));
+
+  app.context.applyCloudData(snapshot, CLOUD_TS + 6000);
+
+  const habitTombstones = JSON.parse(app.sandbox.localStorage.getItem('youplanner.tombstones'));
+  assert.equal(habitTombstones.h9, DELETE_TS, 'надгробие привычек затёрто чужим снимком');
+  const envelope = JSON.parse(app.sandbox.localStorage.getItem('youplanner.planner.v1'));
+  assert.ok(envelope && envelope.snapshot.entries.t1, 'plannerV1 не применён');
+  assert.ok(envelope.snapshot.tombstones.gone, 'planner-tombstone не применён');
+});

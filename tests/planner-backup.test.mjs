@@ -193,6 +193,57 @@ test('старый backup НЕ воскрешает удалённые id: ко�
   assert.ok(env.snapshot.tombstones.t1, 'надгробие потеряно при импорте');
 });
 
+// RED-строка 7 таблицы 1.5: offline-цепочка «удалил → импортировал копию до
+// удаления → reconnect». Удалённый id не должен воскреснуть НИ локально, НИ
+// в облаке после первой же успешной отправки.
+test('offline: удаление → импорт pre-удаленной копии → reconnect: id отсутствует и локально, и в облачном снимке', async () => {
+  const app = loadApp(); // fetch по умолчанию «нет сети» — вся цепочка offline
+  app.sandbox.localStorage.setItem('youplanner.fb.owner', JSON.stringify({ email: 'o@e', uid: 'uid-A' }));
+  app.sandbox.localStorage.setItem('youplanner.sync.ts', '1');
+  app.context.saveTasks([mkTask('t1'), mkTask('keep')]);
+  const oldText = JSON.stringify(app.context.buildBackup());
+
+  app.context.saveTasks([mkTask('keep')]); // offline purge t1 → tombstone
+  const data = app.context.parseBackup(oldText);
+  assert.equal(app.context.applyBackup(data), true); // импорт «до удаления», всё ещё offline
+  const envLocal = readEnvelope(app);
+  assert.equal(envLocal.snapshot.entries.t1, undefined, 'удалённый id вернулся в снимок envelope');
+  assert.ok(envLocal.snapshot.tombstones.t1, 'локальный tombstone не пережил импорт');
+  assert.equal(app.context.loadTasks().some(function (t) { return t.id === 't1'; }), false,
+    'удалённый id воскрес локально после импорта старой копии');
+
+  // reconnect: тот же аппарат, сеть появляется
+  const server = { snapshot: {}, etag: 'e1' };
+  app.sandbox.fetch = function (url, opts) {
+    const options = opts || {};
+    const method = options.method || 'GET';
+    if (method === 'GET' && String(url).includes('backups')) {
+      return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve([]); } });
+    }
+    if (method === 'GET') {
+      return Promise.resolve({
+        ok: true, status: 200,
+        headers: { get: function (n) { return String(n).toLowerCase() === 'etag' ? server.etag : null; } },
+        json: function () { return Promise.resolve(server.snapshot); },
+      });
+    }
+    if (String(url).includes('backups')) {
+      return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve({}); } });
+    }
+    server.snapshot = JSON.parse(options.body);
+    server.etag = 'e2';
+    return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve({}); } });
+  };
+
+  await app.context.syncToCloudNow();
+
+  const cloud = server.snapshot.plannerV1;
+  assert.ok(cloud, 'облако не получило plannerV1');
+  assert.equal(cloud.entries.t1, undefined, 'удалённый id воскрес в облачном снимке');
+  assert.ok(cloud.tombstones.t1, 'delete-wins не доехал до облака');
+  assert.ok(cloud.entries.keep);
+});
+
 // ── отказ на битом/чужом формате ────────────────────────────────────────────
 
 test('битый plannerV1 в v12-файле: parseBackup возвращает null, apply не вызывается, ничего не меняется', () => {
