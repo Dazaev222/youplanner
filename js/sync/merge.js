@@ -33,6 +33,19 @@ import {
 import { validQazaLogEntries } from '../data/qaza.js';
 import { validSleepHistory } from '../data/sleep.js';
 
+// ── plannerV1: ядро слияния области планирования (заглушки RED) ────────────
+// Контракт — ТЗ Воркера 1 §1.3. Нормализация/слияние/операции/миграция
+// снимка plannerV1 (Матрица и настройки календаря) поверх per-field
+// Lamport-версий {counter, actorId} с delete-wins надгробиями.
+export const PLANNER_SCHEMA_VERSION = 1;
+
+export function plannerCanonicalJson(value) { return null; }
+export function cmpPlannerVersion(a, b) { return 0; }
+export function normalizePlannerV1(raw) { return null; }
+export function mergePlannerV1(left, right, report) { return null; }
+export function applyPlannerOperation(snapshot, operation, report) { return null; }
+export function migratePlannerV1(legacy, migrationState) { return null; }
+
 // Метка свежести раздела из снимка. Снимки до введения sectionTs метки не
 // несут — тогда свежесть раздела равна свежести всего снимка.
 export function sectionTsOf(cloud, section, fallbackTs) {
