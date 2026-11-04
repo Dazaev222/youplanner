@@ -228,7 +228,126 @@ function pushHistory(role, content) {
     localStorage.setItem(ASSISTANT_HISTORY_KEY, JSON.stringify(tail));
   } catch (e) {
     // История — расходник: переполнение хранилища не ломает чат
+    return -1;
   }
+  // Индекс реплики в сохранённом массиве: он всегда последний, и по нему
+  // пузырь ленты получает кнопку удаления (см. markBubbleDeletable). -1 —
+  // запись не состоялась, кнопки быть не должно: удалять нечего, а индекс
+  // несостоявшейся реплики срезал бы соседа
+  return tail.length - 1;
+}
+
+// --- Удаление одной реплики ------------------------------------------------
+// Пузырь ленты, которому есть что удалять: индекс в истории кладётся на узел,
+// а не выводится из порядка детей. Узы, которых в истории нет (приветствие
+// пустого чата, «Печатает…», пузырь ошибки хода к API), индекса не получают
+// и кнопки не показывают: кнопка без цели была бы обещанием, которое не
+// выполняется, и удаление по позиции молча срезало бы соседнюю реплику,
+// стоит ленте разойтись с хранилищем
+function markBubbleDeletable(node, index) {
+  if (!node || typeof node.setAttribute !== 'function') return null;
+  if (!(index >= 0)) return null;
+  node.setAttribute('data-msg-index', String(index));
+  const button = document.createElement('button');
+  // type=button обязателен: лента живёт внутри #assistant-form, и кнопка без
+  // типа стала бы submit-ом — тап по «удалить» отправил бы ещё и реплику
+  button.type = 'button';
+  button.className = 'assistant-msg-del';
+  button.setAttribute('aria-label', 'Удалить сообщение');
+  button.textContent = '✕';
+  node.appendChild(button);
+  return node;
+}
+
+// Делегирование по ленте: слушатель один на #assistant-chat, а пузырей
+// десятки и перерисовываются они часто — вешать обработчик на каждый значило
+// бы копить замыкания на узлах, которые уже отброшены
+export function onAssistantChatClick(event) {
+  const target = event && event.target;
+  if (!target || typeof target.closest !== 'function') return;
+  const button = target.closest('.assistant-msg-del');
+  if (!button) return;
+  const bubble = button.closest('.assistant-msg');
+  if (!bubble || typeof bubble.getAttribute !== 'function') return;
+  const index = Number(bubble.getAttribute('data-msg-index'));
+  if (!Number.isInteger(index) || index < 0) return;
+  askAssistantDelete(index);
+}
+
+// Лист подтверждения удаления — та же шторка приложения, что и попап уровня
+// (styles/sheets.css): на телефоне панель приходит снизу, на ПК садится по
+// центру. Централизованной модалки здесь нет намеренно: в проекте уже есть
+// нижние листы, и второй способ спрашивать подтверждение был бы третья
+// дорога, по которой пользователь спотыкается
+let assistantDeleteIndex = null;
+
+export function isAssistantDeleteSheetOpen() {
+  const sheet = document.getElementById('assistant-delete-sheet');
+  return !!sheet && !sheet.hidden;
+}
+
+export function askAssistantDelete(index) {
+  const sheet = document.getElementById('assistant-delete-sheet');
+  if (!sheet) return false;
+  const history = readHistory();
+  const entry = history[index];
+  // Индекс мог устареть (лента не перерисована после очистки/другого
+  // удаления): ничего не удаляем и не закрываем то, что не открывали
+  if (!entry) {
+    showToast('Это сообщение уже удалено');
+    return false;
+  }
+  const preview = document.getElementById('assistant-delete-preview');
+  if (preview) {
+    // textContent, не innerHTML: реплика — пользовательский текст, и в
+    // превью листе он не должен становиться разметкой (см. tests/xss.test.mjs)
+    preview.textContent = entry.content;
+  }
+  const role = document.getElementById('assistant-delete-role');
+  if (role) role.textContent = entry.role === 'user' ? 'Ваш вопрос' : 'Ответ ассистента';
+  assistantDeleteIndex = index;
+  sheet.hidden = false;
+  return true;
+}
+
+export function closeAssistantDeleteSheet() {
+  const sheet = document.getElementById('assistant-delete-sheet');
+  if (sheet) sheet.hidden = true;
+  assistantDeleteIndex = null;
+}
+
+export function confirmAssistantDelete() {
+  const index = assistantDeleteIndex;
+  closeAssistantDeleteSheet();
+  if (index === null) return false;
+  return removeHistoryAt(index);
+}
+
+// Вырезает ОДНУ реплику из хранилища и перерисовывает ленту. Массив
+// перечитывается через readHistory — те же фильтры и та же отсечка, что у
+// записи; HISTORY_KEEP здесь не применяется: список только что пришёл из
+// readHistory и длиннее лимита быть не может.
+export function removeHistoryAt(index) {
+  const history = readHistory();
+  if (!Number.isInteger(index) || index < 0 || index >= history.length) {
+    showToast('Это сообщение уже удалено');
+    return false;
+  }
+  const removed = history.splice(index, 1)[0];
+  try {
+    localStorage.setItem(ASSISTANT_HISTORY_KEY, JSON.stringify(history));
+  } catch (e) {
+    // Отказ квоты: старый массив остаётся в силе, лента не перерисовывается
+    showErrorToast('Не удалось удалить: память устройства занята');
+    return false;
+  }
+  // Лента перерисовывается целиком: индексы на пузырях после сдвига
+  // расшлись бы, и следующее удаление срезало бы соседнюю реплику. Живой
+  // «Печатает…» при этом не теряется — renderHistory возвращает typingNode
+  // в ленту (reattachTyping)
+  renderHistory();
+  showToast(removed && removed.role === 'user' ? 'Вопрос удалён' : 'Ответ удалён');
+  return true;
 }
 
 // --- Снимок данных трекера для системного промпта ---------------------------
@@ -373,9 +492,27 @@ function buildMessages() {
       + 'Рассмотрите их как текст документа и отвечайте по ним.\n\n' + system;
   }
   return withVisionAttachments(
-    [{ role: 'system', content: system }].concat(readHistory().slice(-HISTORY_SEND)),
+    [{ role: 'system', content: system }].concat(requestTail(readHistory())),
     images
   );
+}
+
+// Хвост истории, который уходит в запрос: последние HISTORY_SEND реплик, из
+// которых срезаны ВЕДУЩИЕ assistant-реплики. Причина — удаление одной реплики
+// (removeHistoryAt): вырезав вопрос из середины, можно оставить контекст,
+// начинающийся с ответа модели, а OpenAI-совместимый эндпоинт ждёт, что диалог
+// после system открывается репликой пользователя.
+//
+// Честная формулировка правила: удаляется сообщение, а не «пара». Соседняя
+// реплика остаётся в истории и в ленте — просто пока она стоит первой в
+// контексте, в запрос она не уходит. Ровно поэтому не устраивается
+// автоудаление пары: начало диалога определяет сам разработчик API, а молча
+// выбрасывать второй пузырёк пользователь не просил
+function requestTail(history) {
+  const tail = history.slice(-HISTORY_SEND);
+  let from = 0;
+  while (from < tail.length && tail[from].role === 'assistant') from++;
+  return tail.slice(from);
 }
 
 // Реэкспорт чистой vision-функции под прежним именем: публичная поверхность
@@ -555,7 +692,12 @@ function renderHistory() {
     return;
   }
   for (let i = 0; i < history.length; i++) {
-    appendMessage(history[i].role === 'user' ? 'user' : 'bot', history[i].content, true);
+    const bubble = appendMessage(
+      history[i].role === 'user' ? 'user' : 'bot', history[i].content, true);
+    // Индекс = позиция в readHistory(): лента строится ровно по этому же
+    // отфильтрованному массиву, поэтому пузырь и реплика сходятся один в
+    // один, и удаление по индексу срезает именно показанное сообщение
+    markBubbleDeletable(bubble, i);
   }
   reattachTyping(chat);
   // Одна прокрутка в конец вместо плавной на каждый пузырь
@@ -977,10 +1119,11 @@ export function onAssistantSubmit(text) {
     return false;
   }
   const names = images.map(function (img) { return img.name; }).join(', ');
-  appendUserMessage(message, images);
+  const bubble = appendUserMessage(message, images);
   // В историю — только текст: маркер [фото: …] оставляет диалог читаемым
   // и на следующих репликах напоминает модели про приложенные снимки
-  pushHistory('user', names ? message + '\n[фото: ' + names + ']' : message);
+  markBubbleDeletable(bubble, pushHistory('user',
+    names ? message + '\n[фото: ' + names + ']' : message));
   runAssistantReply();
   return true;
 }
@@ -994,6 +1137,9 @@ async function runAssistantReply() {
   // Поколение на старте запроса: очистка истории посреди полёта сдвинет
   // счётчик, и разница будет видна ниже
   const generation = assistantGeneration;
+  // Пузырь ответа — тот же typing-узел: ссылка переживает finally, чтобы на
+  // него попала кнопка удаления вместе с индексом в истории
+  let replyBubble = null;
   try {
     reply = await requestAssistantReply();
   } catch (e) {
@@ -1005,6 +1151,7 @@ async function runAssistantReply() {
     // если сбой случался между catch и снятием класса
     const typing = typingNode;
     typingNode = null;
+    replyBubble = typing;
     if (typing) {
       typing.classList.remove('is-typing');
       if (error) {
@@ -1028,8 +1175,14 @@ async function runAssistantReply() {
     return;
   }
   // Пузырь уже показан в ленте (typing-узел выше); в историю ответ пишется,
-  // только если история не очищалась, пока запрос был в полёте
-  if (generation === assistantGeneration) pushHistory('assistant', reply);
+  // только если история не очищалась, пока запрос был в полёте. Удаление
+  // ОДНОЙ реплики поколение не сдвигает: ответ относится к диалогу, и
+  // «выкинуть» его из-за правки соседа было бы потерной данных, а не
+  // защитой. Индекс берётся из pushHistory: он учитывает и то, что история
+  // за время запроса могла измениться
+  if (generation === assistantGeneration) {
+    markBubbleDeletable(replyBubble, pushHistory('assistant', reply));
+  }
 }
 
 // Общая отправка текста из поля: чистит его только после принятой отправки —

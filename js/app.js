@@ -18,7 +18,8 @@ import { APP_BUILD, APP_VERSION } from './ui/constants.js';
 import { SYNC_STATUS_MS, clearSyncPending, syncPending } from './sync/core.js';
 import { deniedStatus, flushPendingSync, markCloudReady, scheduleSync, settleHabitsAfterSync, syncFromCloud, syncToCloud } from './sync/sync.js';
 import {
-  closeAssistantKeyModal, onAssistantChipClick, onAssistantClear,
+  closeAssistantKeyModal, confirmAssistantDelete, closeAssistantDeleteSheet,
+  onAssistantChatClick, onAssistantChipClick, onAssistantClear,
   onAssistantFormSubmit, onAssistantImageClear, onAssistantImagePick,
   onAssistantInputInput, onAssistantInputKeydown, onAssistantKeyCancel,
   onAssistantKeySave, onAssistantModelChange, onAssistantPdfClear,
@@ -702,6 +703,24 @@ export function bindEvents() {
   const assistantChips = document.getElementById('assistant-chips');
   if (assistantChips) assistantChips.addEventListener('click', onAssistantChipClick);
 
+  // Удаление одной реплики: лента делегирует клик по кнопке пузыря (один
+  // слушатель на контейнер, а не по обработчику на каждом пузыре — лента
+  // перерисовывается целиком на каждое изменение истории), а подтверждение
+  // берётся в нижнем листе приложения, не в централизованной модалке
+  const assistantChat = document.getElementById('assistant-chat');
+  if (assistantChat) assistantChat.addEventListener('click', onAssistantChatClick);
+
+  const assistantDeleteConfirm = document.getElementById('assistant-delete-confirm');
+  if (assistantDeleteConfirm) {
+    assistantDeleteConfirm.addEventListener('click', confirmAssistantDelete);
+  }
+
+  // Подложка и «Отмена» листа удаления — тем же манером, что у попапа уровня
+  const assistantDeleteClosers = document.querySelectorAll('[data-assistant-delete-close]');
+  for (let i = 0; i < assistantDeleteClosers.length; i++) {
+    assistantDeleteClosers[i].addEventListener('click', closeAssistantDeleteSheet);
+  }
+
   const assistantKeySave = document.getElementById('assistant-key-save');
   if (assistantKeySave) assistantKeySave.addEventListener('click', onAssistantKeySave);
 
@@ -939,6 +958,14 @@ export function bindEvents() {
       return;
     }
 
+    // Лист подтверждения удаления сообщения — та же шторка: z-index ниже
+    // попапа уровня, поэтому проверяется после него (верхний слой первым)
+    const deleteSheet = document.getElementById('assistant-delete-sheet');
+    if (deleteSheet && !deleteSheet.hidden) {
+      closeAssistantDeleteSheet();
+      return;
+    }
+
   });
 
   const form = document.getElementById('habit-form');
@@ -1128,6 +1155,10 @@ export function switchAppView(name) {
   closeStatsMenu();
   closeLevelSheet();
   closeAssistantKeyModal();
+  // Лист удаления сообщения — модалка экрана ассистента: программный переход
+  // без этого оставил бы висящую шторку поверх нового раздела с чужим
+  // подтверждением внутри
+  closeAssistantDeleteSheet();
   closeModal();
 
   // Вход в раздел запоминает, откуда вошли, — туда «Назад» из хаба и вернёт

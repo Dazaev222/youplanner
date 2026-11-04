@@ -935,6 +935,27 @@
   </div>
 </div>
 
+<!-- Лист подтверждения удаления ОДНОГО сообщения ассистента. Тот же слой
+     шторки, что у попапа уровня (§styles/sheets.css): нижняя панель на
+     телефоне, окошко по центру на ПК — отдельной «централизованной модалки»
+     в проекте нет, и ещё один способ спрашивать подтверждение стал бы
+     третьей дорогой, о которую пользователь спотыкается. Лист живёт вне
+     #assistant-form: кнопка «Удалить» внутри формы стала бы её submit-ом -->
+<div id="assistant-delete-sheet" class="sheet" hidden>
+  <div class="sheet-backdrop" data-assistant-delete-close></div>
+  <div class="sheet-panel" role="dialog" aria-modal="true"
+       aria-labelledby="assistant-delete-title">
+    <div class="sheet-head">
+      <h2 id="assistant-delete-title">Удалить сообщение?</h2>
+    </div>
+    <p class="assistant-delete-role" id="assistant-delete-role"></p>
+    <blockquote class="assistant-delete-preview" id="assistant-delete-preview"></blockquote>
+    <button type="button" id="assistant-delete-confirm" class="btn btn-primary">Удалить</button>
+    <button type="button" class="btn btn-secondary sheet-cancel-btn"
+            data-assistant-delete-close>Отмена</button>
+  </div>
+</div>
+
 <!-- Тост: короткая подсказка поверх шторок. Текст кладёт showToast() -->
 <div id="toast" role="status" hidden></div>
 
