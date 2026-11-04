@@ -38,13 +38,22 @@ export function closeModal() {
 // остальные — когда по привычке уже есть записи), подсказка и строковое
 // значение цели. Раньше этот блок был скопирован в два построителя дословно.
 function habitRowFields(habit) {
-  // У каза тип задаётся вкладкой «Каза-намазы» и заблокирован всегда;
-  // у остальных — только если по привычке уже есть записи
+  // У каза тип задаётся вкладкой «Каза-намазы» и заблокирован всегда.
+  // У привычек с уровнями тип задан самим id: у Корана это числовое поле с
+  // попапом уровня, у Спорта и Пресса — свои списки кодов
+  // (records.isChoiceLevelHabit). Таблица (main-table:814), карточки дня,
+  // прогресс (records.calcProgress) и попап уровня ветвятся по id, поэтому
+  // разрешённая здесь смена type разъезжается с ними: вбитое число остаётся
+  // в хранилище, а карточка показывает пустой список и ноль процентов.
+  // Остальные — блокируются только если по привычке уже есть записи.
   const isQaza = habit.id === QAZA_HABIT_ID;
-  const locked = isQaza || hasRecords(habit.id);
+  const typeFromId = isLevelHabit(habit.id);
+  const locked = isQaza || typeFromId || hasRecords(habit.id);
   const lockedTitle = isQaza
     ? 'Тип каза задаётся вкладкой «Каза-намазы»'
-    : 'Тип нельзя изменить: по привычке уже есть записи';
+    : typeFromId
+      ? 'Тип задан самой привычкой: у неё свои поля уровней и коды'
+      : 'Тип нельзя изменить: по привычке уже есть записи';
   return {
     isQaza: isQaza,
     lockedAttr: locked
@@ -163,8 +172,11 @@ export function buildHabitPatch(habitId, data) {
   const patch = { name: data.name.trim(), unit: data.unit, goal: data.goal };
   // Время есть только у привычек с уровнями: поле пустое — время не задано
   if (isLevelHabit(habitId)) patch.time = data.time;
-  // Тип меняем только у привычки без записей
-  if (!hasRecords(habitId)) patch.type = data.type;
+  // Тип меняем только у привычки без записей. Привычки с уровнями выпадут
+  // всегда: их тип задан id, и правка его разъезжается с таблицей, карточками
+  // и прогрессом (см. habitRowFields). Проверка именно здесь, а не только в
+  // disabled: patch может прийти из другого места.
+  if (!hasRecords(habitId) && !isLevelHabit(habitId)) patch.type = data.type;
   return patch;
 }
 
