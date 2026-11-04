@@ -1,6 +1,14 @@
 {
   "rules": {
-    ".read": "auth != null",
-    ".write": "auth != null"
+    ".read": false,
+    ".write": false,
+    "youplanner-d8aaea12-60e6-4ac9-973c-46c19b387cd9": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    },
+    "youplanner-d8aaea12-60e6-4ac9-973c-46c19b387cd9-backups": {
+      ".read": "auth != null",
+      ".write": "auth != null"
+    }
   }
 }
