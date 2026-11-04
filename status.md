@@ -1,13 +1,13 @@
 # YouPlanner — текущий статус
 
-Обновлено: 2026-11-03
+Обновлено: 2026-11-05
 
 ## Расположение
 
-- Папка: `C:\Users\Admin\Desktop\youplanner-new`
+- Папка: `C:\Users\Admin\Desktop\проекты\youplanner-new`
 - Код: `index.html` (разметка) + `styles/` (CSS по секциям) + `js/`
   (ES-модули: `core/`, `data/`, `sync/`, `ui/`, `vendor/`); сборки нет.
-- PWA: `manifest.json`, `sw.js` (кэш `youplanner-v39`), иконки.
+- PWA: `manifest.json`, `sw.js` (кэш `youplanner-v44`), иконки.
 - Документация: `README.md`, `Spec.md`, `status.md`.
 - Репозиторий: https://github.com/Dazaev222/youplanner
 - Сайт: https://dazaev222.github.io/youplanner/
@@ -79,7 +79,56 @@
 
 ## Заходы
 
+- 2026-11-05 (ночная смена «Фабрика», оркестратор + субагенты). Владелец
+  ушёл спать с ТЗ на четыре задачи; здесь то, что изменилось в репозитории.
+  1. Матрица переложена по образцу TickTick (приоритет ТЗ): «+» вписаны в
+     шапки квадрантов вместо плавающего FAB и многоточий, пилюли тулбара
+     стали плоскими, заголо квадранта — 20 px с цветной точкой вместо
+     цветной плашки. Выбор квадранта и приоритета — нижние листы
+     (`choiceSheet` через `pushOverlay`), а не всплывающее меню: `popover()`
+     удалён вместе с классами `.matrix-pop*`. Лист приоритетов открывается
+     поверх листа квадранта, Escape закрывает только верхний, фокус
+     возвращается на кнопку-открыватель и встаёт на текущий пункт, Tab
+     зациклен внутри панели (`acf08df`, `5a00ff4`). Граница «не трогать
+     цвета, шрифты и фоны» соблюдена: изменены только `styles/matrix.css`
+     и `js/ui/matrix-view.js`.
+  2. ТЗ раздел 1 — синхронизация Матрицы (`c8cf2f0`, шесть юнитов TDD):
+     нормализация и Lamport-merge с delete-wins, envelope и адаптер
+     `saveTasks`, повторяемая миграция, транспорт plannerV1 (ETag/If-Match
+     CAS с пятью повторами, ack по opIds, владелец-гейт — анонимный режим
+     узел не публикует), бэкап v12 с tombstones и round-trip, изолированная
+     модель правил Firebase под новый узел. Корневой PUT теперь тоже
+     CAS-ованный: два устройства перестали перезаписывать друг друга
+     молча.
+  3. Рутина ТЗ: микро-тренды своих разделов в пунктах бокового меню
+     (`79ef3f4`), удаление отдельной реплики в чате с ИИ (`825af41`).
+  4. Аудит постраничный — исправленное (каждое с RED): тренд строки
+     привычки считал проценты как доли и отвечал только «было/не было»
+     (`0ec5127`); битый счётчик уразы затирался молча (`edfc09f`); уровень
+     вчерашней ячейки брался из сегодняшних часов (`e6cebf8`); экран
+     расписания не сортировал пункты, редактор — да (`e4cbc88`); делегат
+     клика жидкой капсулы требовал кнопку только у последнего
+     переключателя и пересчитывал каплю от клика по фону (`6b310d9`);
+     тип уровневой привычки можно было поменять при уже записанных
+     отметках (`aebd7dd`); тап-цели карточки дня на телефоне дотянуты до
+     44 px по замерам в Chromium (`dc9495f`); `scope="col"` у шапки таблицы
+     привычек (`3c0d2f3`); закрытие модалки больше не пересобирает список
+     «на всякий случай» и возвращает фокус кнопке-открывателю (`203dff1`);
+     плашка о хранении Матрицы выбрана по режиму входа, а не одна на все
+     случаи — после слияния plannerV1 прежнее слово «не синхронизируются»
+     стало ложью (`2f32d1d`).
+  5. Service Worker: `v42` (пересобранная Матрица), `v43` (транспорт
+     plannerV1 из слияния), `v44` (восемь файлов аудита). Без смены имени
+     кэша ни одна из этих правок до телефона бы не доехала.
+  Чего не делал и почему — в `../FACTORY_REPORT.md`: `firebase deploy
+  --only database` (публичный файл с заглушкой `OWNER_UID` = закрыть себе
+  синхронизацию) и `git filter-repo` (переписывание уже опубликованной
+  истории — ТЗ прямо запрещал этой ночью публикацию).
+  Тесты 372 → 682, файлов тестов 35 → 51; браузерные наборы — матричная
+  геометрия 24 PASS, тап-цели, chaos-E2E 7/7.
+
 - 2026-11-04 (вторая половина) — Аудит GPT-6.1 Sol: закрыты F1, F3, F4, F5,
+
   F8, F9 и уборка F-остатков; всё по TDD (сначала падающий тест, потом правка).
   1. `database.rules.json` был «читает и пишет любая Firebase-сессия» (F1).
      Исправлено как deny-by-default с списком рабочих узлов, а НЕ привязкой к
@@ -493,10 +542,17 @@
 
 ## В работе
 
-- Матрица (`js/data/matrix.js`) не участвует в синхронизации: раздел не
-  входит в `STORAGE_KEYS`, потому что слияние задач по `updatedAt` и
-  надгробия удалений для него ещё не написаны. Второе устройство вернёт
-  удалённое — правило выключено до появления слияния.
+- Матрица (`js/data/matrix.js`) синхронизируется узлом `plannerV1` внутри
+  рабочего узла: envelope с Lamport-версиями по полям, delete-wins по
+  надгробиям, outbox операций, CAS через ETag/If-Match на корневом PUT и
+  бэкап v12, который уносит `plannerV1` вместе с остальным (заход 2026-11-05).
+  Осталось одно окно, и оно не в коде: старый клиент (кэш ниже v42) ключа
+  `plannerV1` не знает и его PUT-ом узел с сервера стирается. Данные
+  переживают это, пока лежат локально на устройстве-создателе, но после
+  очистки хранилища восстанавливать будет нечем. Закрытие — перенести
+  `plannerV1` на соседний корень по образцу `FIREBASE_BACKUPS_URL`
+  (плюс `database.rules.json` и миграция уже лежащих снимков). Решение
+  владельца, не ночная правка.
 
 ## Следующее
 
@@ -514,30 +570,48 @@ youplanner.schedule, youplanner.sleep, youplanner.archive (месячные
 youplanner.assistant_model,
 youplanner.assistant_history (ключи ассистента — только устройство),
 youplanner.app_bg (затемнение фона; фото фона — Blob в IndexedDB).
+С 2026-11-05: `youplanner.matrix.tasks` (задачи Матрицы на устройстве),
+`youplanner.planner.v1` (envelope plannerV1: снимок с Lamport-версиями,
+outbox операций, счётчики актёров — в облако уезжает только `snapshot`
+узлом `plannerV1`), `youplanner.fb.owner` (email и uid подтверждённого
+владельца; в анонимном режиме ключа нет) и `youplanner.fb.refresh`
+(обновляемый токен входа — только это устройство).
 
 ## Тесты
 
-Штатный прогон (без браузера): `npm test` → **372/372** в 35 файлах
-`tests/*.test.mjs` (smoke, bus, backup, sync, sync-merge, sync-render,
-sync-render-audit, archive, debounce, core, modules, timers, xss, assistant, assistant-api,
-assistant-vision, assistant-analysis, sw-assets, sw-offline, firebase-rules, sleep, qaza-done, qaza-load,
-schedule, fast, records, habits, habits-edit, calcprogress-stress,
-firebase-auth, migrations, tombstones, matrix, sparkline, router). Покрывают граф
-модулей и висячие id, шину, бэкапы, single-flight синхронизации и слияние
-снимков, архивацию историй, debounce, XSS-экранирование, fallback-таймеры
-fetch, PDF-чанкинг, покрытие `ASSETS` в `sw.js`, квадранты матрицы и
-спарклайны. С 2026-11-04 добавлено: `sw-offline` (7 проверок — `sw.js`
-грузится в `node:vm`, обработчик `fetch` ЗОВЁТСЯ, проверяется ответ
-`respondWith` и содержимое кэша, а не текст файла), `firebase-rules`
-(5 — deny-by-default, разрешения только рабочие узлы синхронизации, никакого
-`"auth != null"`-всеглаза), а также ветки отказа хранилища в `matrix` и
-чтения тела под дедлайном в `assistant-api`/`assistant-vision`.
+Штатный прогон (без браузера): `npm test` → **682/682** в 51 файле
+`tests/*.test.mjs`: smoke, bus, core, modules, debounce, timers, xss,
+archive, backup, migrations, tombstones, sync, sync-merge, sync-render,
+sync-render-audit, planner-sync, planner-backup, firebase-auth,
+firebase-rules, sw-assets, sw-offline, settings-owner, set-owner-uid,
+assistant, assistant-api, assistant-vision, assistant-analysis,
+assistant-delete, sleep, qaza-done, qaza-load, fast, records,
+habits, habits-edit, calcprogress-stress, schedule, router, matrix,
+matrix-ui, matrix-calendar, matrix-tz, matrix-recurrence, matrix-schedule,
+matrix-notices, matrix-reminders, sparkline, sparkline-menu, table-header,
+modal-focus, mobile-tap. Покрывают граф модулей и висячие id, шину, бэкапы (v11 и v12 с
+plannerV1), single-flight синхронизации, CAS-повторы на 412 и ack по
+opIds, Lamport-слияние Матрицы с delete-wins, архивацию историй, debounce,
+XSS-экранирование, fallback-таймеры fetch, PDF-чанкинг, покрытие `ASSETS`
+в `sw.js`, квадранты и расписание матрицы, напоминания, спарклайны — свои
+разделы в карточке статистики и микро-тренды в боковом меню, `scope` шапки
+таблицы, возврат фокуса при закрытии модалки.
 
-Браузерный chaos-E2E: `node tests/e2e/chaos.e2e.mjs` → **7/7** (Playwright,
-внешняя сеть заблокирована, Firebase — заглушка): недоступный Firebase,
-кнопка «Выполнено», 1000 кликов, офлайн, квота, битый JSON, JSON чужой
-схемы. Playwright работает: браузер запускается bundled-сборкой или
-каналом Edge/Chrome.
+Что добавилось этой ночью: `planner-sync` (envelope, merge, транспорт,
+владелец-гейт), `planner-backup` (round-trip v12, отказ битого и будущего
+формата), `assistant-delete` (удаление отдельной реплики),
+`sparkline-menu` (тренды пунктов меню), `table-header`, `modal-focus`,
+`mobile-tap` (последние три — аудит 2026-11-05).
+
+Браузерные наборы (вне glob `npm test`): `node tests/matrix-layout.browser.mjs`
+→ 24 PASS (геометрия Матрицы, 44 px у «+», нижние листы вместо
+всплывающих меню, скоуп Escape), `node tests/matrix-calendar.browser.mjs`,
+`node tests/mobile-tap.browser.mjs` (реальные `getBoundingClientRect`
+тап-целей на 320–390 px), chaos-E2E `node tests/e2e/chaos.e2e.mjs` → **7/7**
+(Playwright, внешняя сеть заблокирована, Firebase — заглушка): недоступный
+Firebase, кнопка «Выполнено», 1000 кликов, офлайн, квота, битый JSON, JSON
+чужой схемы. Playwright работает: браузер запускается bundled-сборкой или
+каналом Edge/Chrome. Скриншоты прогонов — в gitignored `.test_tmp/`.
 
 Исторический архив: 12 наборов в `.scratch` (1861 проверка) сохранён для
 регрессий и в штатный прогон не входит. Сверка чисел —
@@ -546,8 +620,10 @@ fetch, PDF-чанкинг, покрытие `ASSETS` в `sw.js`, квадран�
 ## Как обновлять
 
 1. Правки — в `index.html`, `styles/` или `js/`; сборки нет.
-2. При изменении списка ассетов поднять `CACHE` в `sw.js` (сейчас
-   `youplanner-v39`) и прогнать `sw-assets` вместе с `npm test`.
+2. При изменении любого файла из `ASSETS` (а это весь `js/` и весь `styles/`)
+   поднять `CACHE` в `sw.js` (сейчас `youplanner-v44`) и прогнать `sw-assets`
+   вместе с `npm test`. Без смены имени кэша устройство продолжит запускать
+   прежние модули — на этом прогорели уже три правки истории проекта.
 3. `npm test` и `node tests/e2e/chaos.e2e.mjs`.
 4. Коммит и push в `main`; GitHub Pages публикует статику.
 5. iPhone: закрыть иконку и открыть заново — новый Service Worker
