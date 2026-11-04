@@ -382,3 +382,29 @@ test('облачные бэкапы не лежат внутри синхрон�
     'backupCloudSnapshot() не использует отдельный узел бэкапов',
   );
 });
+
+/* Аудит 2026-11-04: обработчик клика жидкой капсулы собирал делегат как
+   `LIQUID_SWITCH_SELECTORS.join(', ') + ' > button'`, поэтому «> button»
+   доставалось только последнему элементу списка. closest() при этом находил
+   сам контейнер (#tab-bar и остальные входят в селект-лист целиком), и
+   пересчёт капли стартовал от клика по любой точке переключателя — по фону,
+   по svg-индикатору, по подписи. Ожидание: ветка селектора заканчивается
+   кнопкой для каждого контейнера, а не для одного. */
+
+test('селектор-делегат жидкой капсулы ведёт кнопку от каждого переключателя', () => {
+  const app = loadApp();
+  const containers = app.run('LIQUID_SWITCH_SELECTORS');
+  const selector = app.run('LIQUID_SWITCH_BUTTON_SELECTOR');
+
+  assert.ok(Array.isArray(containers) && containers.length > 1,
+    'список переключателей пуст или потерял элементы');
+  assert.equal(typeof selector, 'string', 'LIQUID_SWITCH_BUTTON_SELECTOR не строка');
+
+  const branches = selector.split(', ');
+  assert.equal(branches.length, containers.length,
+    'веток селектора не столько, сколько переключателей: ' + selector);
+  branches.forEach((branch, i) => {
+    assert.equal(branch, containers[i] + ' > button',
+      `ветка ${i} не «контейнер > кнопка»: ${branch}`);
+  });
+});

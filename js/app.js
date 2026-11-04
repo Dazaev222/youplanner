@@ -1602,6 +1602,17 @@ export const LIQUID_SWITCH_SELECTORS = [
   '#assistant-settings-switch'
 ];
 
+// Делегат для клика: кнопка — прямой ребёнок переключателя, ровно как в
+// moveIndicator (`:scope > button.is-active`). Суффикс навешивается на
+// каждый селектор: `SELECTORS.join(', ') + ' > button'` дал бы «> button»
+// только последнему элементу списка, и closest() начал бы находить сам
+// контейнер — пересчёт капли стартовал бы от клика по любой точке контейнера.
+export const LIQUID_SWITCH_BUTTON_SELECTOR = LIQUID_SWITCH_SELECTORS
+  .map(function (selector) {
+    return selector + ' > button';
+  })
+  .join(', ');
+
 function moveIndicator(container) {
   if (!container || container.hidden) return;
 
@@ -1673,9 +1684,7 @@ export function scheduleLiquidIndicators() {
 }
 
 document.addEventListener('click', function (event) {
-  const button = event.target.closest(
-    LIQUID_SWITCH_SELECTORS.join(', ') + ' > button'
-  );
+  const button = event.target.closest(LIQUID_SWITCH_BUTTON_SELECTOR);
 
   if (!button) return;
 
