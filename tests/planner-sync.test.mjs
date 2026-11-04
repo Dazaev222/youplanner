@@ -127,22 +127,46 @@ test('mergePlannerV1: A и B правят разные поля offline — об
   assert.equal(canon(ab), canon(ba), 'merge не коммутативен по канонической форме');
 });
 
-// ── RED-строка 2: одинаковый counter, разные actorId ────────────────────────
+// ── RED-строка 2: одинаковые counter и разные actorId ───────────────────────
+// Контракт §1.3: сравнение версий лексикографическое (counter, actorId),
+// поэтому «одинаковый counter, разные actorId» разрешается САМИМ порядком
+// сравнения — победитель детерминирован и не зависит от того, какое устройство
+// пришло первым. Отдельный tie-break по канонической строке нужен лишь при
+// ПОЛНОСТЬЮ равной версии (тот же counter и тот же actorId) с разным
+// значением: он тоже детерминирован и сопровождается диагностикой без
+// содержимого.
 
-test('mergePlannerV1: одна версия с разным значением — детерминированный победитель и перестановка устройств', () => {
+test('mergePlannerV1: одинаковый counter и разные actorId — победитель по (counter, actorId), перестановка устройств не меняет итог', () => {
   const conflictA = snap({ t1: entry('t1', { title: fld('ВариантdeviceA', 5, 'deviceA') }) });
   const conflictB = snap({ t1: entry('t1', { title: fld('ВариантdeviceB', 5, 'deviceB') }) });
 
+  const first = mergePlannerV1(conflictA, conflictB);
+  const second = mergePlannerV1(conflictB, conflictA);
+
+  // (5,'deviceA') < (5,'deviceB') лексикографически: deviceB побеждает в
+  // обоих порядках прихода
+  assert.equal(first.entries.t1.fields.title.value, 'ВариантdeviceB');
+  assert.deepEqual(first.entries, second.entries, 'перестановка устройств меняет итог');
+  assert.deepEqual(first.entries.t1.fields.title.version, v(5, 'deviceB'));
+});
+
+test('mergePlannerV1: полностью равная версия с разным значением — канонический победитель и диагностика без содержимого', () => {
+  const sideA = snap({ t1: entry('t1', { title: fld('яблочный', 6, 'shared') }) });
+  const sideB = snap({ t1: entry('t1', { title: fld('апельсиновый', 6, 'shared') }) });
+
   const report1 = { conflicts: [] };
   const report2 = { conflicts: [] };
-  const first = mergePlannerV1(conflictA, conflictB, report1);
-  const second = mergePlannerV1(conflictB, conflictA, report2);
+  const first = mergePlannerV1(sideA, sideB, report1);
+  const second = mergePlannerV1(sideB, sideA, report2);
 
-  assert.deepEqual(first.entries, second.entries, 'перестановка устройств меняет итог');
-  assert.ok(report1.conflicts.length === 1 && report2.conflicts.length === 1,
-    'конфликт равных версий обязан быть зафиксирован в отчёте');
+  assert.deepEqual(first.entries, second.entries, 'перестановка сторон меняет итог при равной версии');
+  assert.equal(first.entries.t1.fields.title.value, 'апельсиновый',
+    'при равной версии обязан побеждать меньший канонический JSON');
+  assert.equal(report1.conflicts.length, 1,
+    'конфликт равных версий с разным значением обязан быть зафиксирован в отчёте');
+  assert.equal(report2.conflicts.length, 1);
   // диагностика без содержимого: в конфликтах нет значений
-  assert.equal(JSON.stringify(report1.conflicts).includes('Вариантdevice'), false,
+  assert.equal(JSON.stringify(report1.conflicts).includes('апельсин'), false,
     'отчёт о конфликте протёк содержимым');
   assert.equal(report1.conflicts[0].entryId, 't1');
   assert.equal(report1.conflicts[0].field, 'title');
