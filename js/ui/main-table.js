@@ -394,7 +394,7 @@ export function onTableChange(event) {
   if (target.classList.contains('cell-select')) {
     const value = target.value === '' ? undefined : target.value;
     if (current === value) return;
-    if (!onCellChange(habit, date, value, kept === undefined ? defaultLevel(habit, value) : kept)) {
+    if (!onCellChange(habit, date, value, kept === undefined ? defaultLevel(habit, value, date) : kept)) {
       target.value = current === undefined ? '' : current;
       return;
     }
@@ -412,7 +412,7 @@ export function onTableChange(event) {
       value = (isFinite(parsed) && parsed >= 0) ? parsed : undefined;
     }
     if (current === value) return;
-    if (!onCellChange(habit, date, value, kept === undefined ? defaultLevel(habit, value) : kept)) {
+    if (!onCellChange(habit, date, value, kept === undefined ? defaultLevel(habit, value, date) : kept)) {
       target.value = current === undefined ? '' : current;
       return;
     }

@@ -10,6 +10,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadApp } from './helpers/load-app.mjs';
+import { addDays, toISODate } from '../js/core/dates.js';
 
 // Привычка для теста: calcProgress читает из habit ровно id, type и goal
 function habit(id, type, goal) {
@@ -346,3 +347,31 @@ for (const scenario of recordsCases) {
     scenario.run(context, sandbox);
   });
 }
+
+/* --- defaultLevel: уровень привязан к ДНЮ ячейки, а не к часам правки ----- */
+
+/* Привычка с временем 05:15, вечерняя правка вчерашней строки. прежний код
+   звал habitLevelByTime(habit, new Date()) безусловно и записывал в прошлый
+   день уровень «поздно» — по часам СЕГОДНЯШНЕГО вечера. Вчерашнее выполнение
+   от этого ни лучше, ни хуже, но подсветка клетки и статистика опозданий
+   менялись на пустом месте. */
+
+test('defaultLevel: прошлый день не получает уровень из текущих часов', () => {
+  const { context: ctx } = loadApp();
+  const habit = { id: 'h8', name: 'Коран', type: 'number', goal: 5, time: '05:15' };
+  const yesterday = toISODate(addDays(new Date(), -1));
+  const today = toISODate(new Date());
+
+  assert.equal(ctx.defaultLevel(habit, 3, yesterday), null,
+    'вчерашняя ячейка не может быть «поздно» из-за сегодняшнего времени');
+  assert.equal(ctx.defaultLevel(habit, 3, today), ctx.habitLevelByTime(habit, new Date()),
+    'сегодняшняя — выводится из времени, как и раньше');
+  // «2 минуты» — уровень самого значения, он не зависит от даты
+  assert.equal(ctx.defaultLevel(habit, 'two-min', yesterday), 'two-min',
+    'явный уровень остаётся явным и в прошлом дне');
+  // Спорт: «нет»/«отдых» уровнем не отмечаются — и в прошлом дне тоже
+  const sport = { id: 'h7', name: 'Спорт', type: 'choice', goal: null, time: '07:00' };
+  assert.equal(ctx.defaultLevel(sport, 'no', yesterday), null);
+  assert.equal(ctx.defaultLevel(sport, 'yes', yesterday), null,
+    'вчерашнее «да» без уровня, а не «опоздал к 07:00 сегодня»');
+});

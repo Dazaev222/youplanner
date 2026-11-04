@@ -231,9 +231,16 @@ export function habitMarkDate(habit, date, now) {
 // у Спорта выполнением считается только ответ «да» — «нет» и «отдых»
 // уровнем не отмечаются, а у Корана и «да» он выводится из времени
 // отметки и бывает пустым, когда время у привычки не задано (§1.6).
-export function defaultLevel(habit, value) {
+// date — день ячейки. Уровень по часам выводится ТОЛЬКО для сегодняшнего
+// дня: вчерашнюю строку правят сегодня, и текущее время ничего не знает о
+// том, во сколько человек сделал то вчера. Без этого правила вечерняя
+// правка утренней привычки молча помечала прошлый день «поздно».
+export function defaultLevel(habit, value, date) {
   if (value === LEVEL_TWO_MIN) return LEVEL_TWO_MIN;
   if (isChoiceLevelHabit(habit.id) && value !== 'yes') return null;
+  if (date !== undefined && date !== null && date !== toISODate(new Date())) {
+    return null;
+  }
   return habitLevelByTime(habit, new Date());
 }
 // Запись отметки вместе с уровнем. value: undefined — запись удаляется,

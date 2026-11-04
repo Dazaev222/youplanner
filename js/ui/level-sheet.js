@@ -70,7 +70,7 @@ export function onLevelPick(event) {
   if (option.getAttribute('data-level') === 'two-min') {
     level = LEVEL_TWO_MIN;
   } else {
-    level = defaultLevel(habit, value);
+    level = defaultLevel(habit, value, date);
   }
 
   // Числа ещё нет — «2 минуты» пишутся нулём страниц (§2.4).
