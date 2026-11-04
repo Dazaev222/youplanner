@@ -100,3 +100,51 @@ test('не-массив weekday читается как расписание п�
   assert.equal(schedule.weekday[0].time, '04:30');
   assert.equal(schedule.weekday[0].text, 'Подъём');
 });
+
+/* Аудит 2026-11-04: редактор расписания сортирует список по времени, а
+   экран «Расписание» (renderScheduleView) рисовал массив как лежит. Новый
+   пункт добавляется push'ем в конец, поэтому «03:00» показывался внизу —
+   под «21:00», — и тот же пункт стоял сверху в редакторе. Ожидание: один
+   и тот же список на обоих экранах идёт по времени. */
+
+function renderedTimes(app, html) {
+  app.sandbox.document.getElementById = (id) => (id === 'schedule-list'
+    ? { set innerHTML(v) { html.target = v; }, get innerHTML() { return html.target; } }
+    : null);
+  app.context.renderScheduleView();
+  return [...String(html.target).matchAll(/class="schedule-time">([^<]+)</g)].map(m => m[1]);
+}
+
+test('экран расписания показывает пункты по времени, а не по порядку массива', () => {
+  const app = loadApp();
+  const html = { target: '' };
+  setSchedule(app, {
+    weekday: [
+      { time: '21:00', text: 'Отбой' },
+      { time: '12:30', text: 'Зухр' },
+      { time: '03:00', text: 'Ночная молитва' },
+    ],
+    weekend: [],
+    fasting: [],
+    physical: [],
+  });
+
+  assert.deepEqual(renderedTimes(app, html), ['03:00', '12:30', '21:00']);
+});
+
+test('рендер экрана не переставляет пункты в хранилище', () => {
+  const app = loadApp();
+  const html = { target: '' };
+  setSchedule(app, {
+    weekday: [{ time: '21:00', text: 'Отбой' }, { time: '03:00', text: 'Сухур' }],
+    weekend: [],
+    fasting: [],
+    physical: [],
+  });
+
+  renderedTimes(app, html);
+
+  const stored = JSON.parse(app.sandbox.localStorage.getItem(SCHEDULE_KEY)).weekday;
+  assert.deepEqual(stored.map(i => i.time), ['21:00', '03:00'],
+    'чтение порядка не должно быть записью в хранилище');
+});

@@ -8,7 +8,11 @@ export function renderScheduleView() {
   if (!list) return;
 
   const scheduleData = loadSchedule();
-  const items = scheduleData[ui.scheduleType] || [];
+  // Тот же порядок, что в редакторе: пункт добавляется push'ем в конец,
+  // поэтому без сортировки свежий «03:00» висел бы под «21:00» здесь и
+  // сверху — там. Срез, а не сам массив: рендер только читает.
+  const items = (scheduleData[ui.scheduleType] || []).slice()
+    .sort((a, b) => a.time.localeCompare(b.time));
   let html = '';
   for (let i = 0; i < items.length; i++) {
     html += '<li>' +
