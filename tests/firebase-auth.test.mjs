@@ -5,14 +5,22 @@
 // без исключений; после неудачи пауза 5 минут, в ней сеть не дёргается;
 // refresh-токен живёт в localStorage и переживает перезагрузку приложения.
 //
-// Ключ в репозитории пустой, поэтому тесты подставляют его через
-// context.setFirebaseApiKey(): getAuthToken/setFirebaseApiKey — верхне-
-// уровневые function-объявления, песочница vm выставляет их свойствами
-// контекста (как ctx.syncToCloud в sync.test.mjs).
+// Песочница стартует с пустым ключом (tests/helpers/load-app.mjs обнуляет его
+// намеренно: сетевые заглушки не должны получать лишних identitytoolkit-
+// вызовов), поэтому тесты подставляют ключ через context.setFirebaseApiKey():
+// getAuthToken/setFirebaseApiKey — верхнеуровневые function-объявления,
+// песочница vm выставляет их свойствами контекста (как ctx.syncToCloud в
+// sync.test.mjs). Что настоящий ключ из исходника никуда не делся, сторожит
+// отдельный тест в конце файла — он читает сам файл.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { loadApp } from './helpers/load-app.mjs';
+
+const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 
 const KEY = 'AIzaSyTestKeyForUnit';
 const AUTH_REFRESH_KEY = 'youplanner.fb.refresh';
@@ -480,4 +488,30 @@ test('пустые email или пароль: ошибка до сети, ни �
   await assert.rejects(() => context.ownerSignIn('', 'pw'), /email/i);
   await assert.rejects(() => context.ownerSignIn('owner@example.com', ''), /парол/i);
   assert.equal(fetchImpl.calls.length, 0, 'проверка полей ушла в сеть');
+});
+
+// Вход по email/паролю падает с «Ключ Firebase-проекта не задан», если
+// FIREBASE_WEB_API_KEY пуст. Песочница тестов обнуляет ключ намеренно,
+// поэтому проверить настоящий исходник можно только снаружи: чтение файла, а
+// не контекста. Ключ web-приложения Firebase не секрет (идентификатор
+// проекта, свободно живёт в клиентском бандле), поэтому в репозитории он и
+// лежит.
+test('исходник аутентификации: рабочий ключ Firebase вписан', () => {
+  const source = readFileSync(join(ROOT, 'js', 'data', 'firebase-auth.js'), 'utf8');
+  const match = source.match(/export let FIREBASE_WEB_API_KEY = '([^']*)'/);
+  assert.ok(match, 'строка FIREBASE_WEB_API_KEY не найдена — формат изменился, правь и тест');
+  assert.match(match[1], /^AIza[A-Za-z0-9_-]{20,}$/,
+    'ключ web-приложения пуст или обрезан: вход владельца не поднимется');
+});
+
+// Тот же класс ошибки, но на другом конце: модули приложения обязаны быть в
+// precache service worker. Не-HTML отдаётся network-first, и при офлайне или
+// битом ответе браузер получает копию из кэша — устаревшая firebase-auth.js
+// без ключа и давала «ключ не вписан» при целом исходнике (2026-11-04).
+test('service worker кэширует модули аутентификации и синхронизации', () => {
+  const sw = readFileSync(join(ROOT, 'sw.js'), 'utf8');
+  for (const file of ['./js/data/firebase-auth.js', './js/sync/sync.js', './js/app.js']) {
+    assert.ok(sw.indexOf("'" + file + "'") !== -1,
+      file + ' нет в ASSETS sw.js: офлайн-копия клиента останется без него');
+  }
 });

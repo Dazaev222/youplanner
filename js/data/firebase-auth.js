@@ -176,7 +176,15 @@ export async function ownerSignIn(email, password) {
   const secret = String(password || '');
   if (!login) throw new Error('Нужен email аккаунта владельца');
   if (!secret) throw new Error('Нужен пароль аккаунта владельца');
-  if (!FIREBASE_WEB_API_KEY) throw new Error('Ключ Firebase-проекта не вписан в js/data/firebase-auth.js');
+  if (!FIREBASE_WEB_API_KEY) {
+    // Пустой ключ = «аутентификации нет». Причина для человека бывает две:
+    // ключ правда не вписан в исходник (локальная копия) или браузер держит
+    // СТАРУЮ версию этого модуля из кэша service worker — вход тогда падает
+    // ровно с этой надписью при целом исходнике. Оба выхода названы, иначе
+    // человек правит файл, который и так правильный.
+    throw new Error('Ключ Firebase-проекта не задан. Обновите страницу (Ctrl+Shift+R) — ' +
+      'старая версия модуля в кэше. Если не поможет, ключ вписывают в js/data/firebase-auth.js');
+  }
 
   const response = await authPost(
     'https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=' + encodeURIComponent(FIREBASE_WEB_API_KEY),
