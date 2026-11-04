@@ -1,12 +1,13 @@
 import { setHidden } from '../core/dom.js';
-import { FAST_MAX_INPUT, FAST_VERSION, addFast, fastRemainingLabel, loadFast, markFastDone, parseFastInput, setFast } from '../data/fast.js';
+import { FAST_MAX_INPUT, FAST_VERSION, addFast, fastRemainingLabel, hasFastKey, loadFast, markFastDone, parseFastInput, setFast } from '../data/fast.js';
 // Форма открыта кнопкой обычного экрана: 'add' или 'edit'. Первый запуск
 // сюда не пишется — он выводится из отсутствия ключа. Иначе «ключ стёрли»
 // и «форму ещё не закрыли» стали бы одним состоянием.
 export let fastInitMode = null;
 // Экран раздела: форма ввода или обычный экран. Признак первого запуска —
-// только loadFast() === null. Остаток 0 — существующий счётчик, и экран
-// у него обычный: возмещать нечего, но добавлять и править есть что.
+// loadFast() === null И ключа нет вовсе (hasFastKey()). Остаток 0 —
+// существующий счётчик, и экран у него обычный: возмещать нечего, но
+// добавлять и править есть что.
 export function renderFastView() {
   const fast = loadFast();
   const mode = fastInitMode || (fast === null ? 'start' : null);
@@ -28,6 +29,15 @@ export function renderFastView() {
     // Сообщение об ошибке снимается при каждом открытии формы заново
     const note = document.getElementById('fast-init-note');
     if (note) note.textContent = '';
+
+    // Ключ есть, но не разобрался — это НЕ первый запуск. Без предупреждения
+    // «Сохранить» вызвало бы setFast(fast || {remaining: 0, …}) и молча
+    // заменило бы неразбираемый счётчик с историей постов чистым значением.
+    // Отказывать здесь нельзя: починить раздел иначе было бы нечем.
+    if (note && fast === null && hasFastKey()) {
+      note.textContent = 'Прежние данные счётчика уразы не читаются. '
+        + 'Сохранение заменит их новыми: история отмеченных дней будет потеряна.';
+    }
     return;
   }
 

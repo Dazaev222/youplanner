@@ -112,3 +112,55 @@ for (const scenario of fastCases) {
     scenario.run(context);
   });
 }
+
+/* --- «ключа нет» и «ключ битый» обязаны различаться ----------------------- */
+
+/* loadFast() возвращает null в обоих случаях, и прежний экран показывал
+   стартовую форму молча. «Сохранить» в ней зовёт setFast(fast ||
+   {remaining: 0, history: []}) — то есть неразбираемый, но существующий
+   счётчик с историей отмеченных дней стирался без единого слова.
+   Отказывать нельзя: чинить раздел иначе нечем, поэтому предупреждение
+   ложится в уже существующий note формы. */
+
+function fastDom(context, values) {
+  const nodes = new Map();
+  for (const id of ['fast-init', 'fast-main', 'fast-init-cancel', 'fast-init-note',
+    'fast-remaining', 'fast-done']) {
+    nodes.set(id, { id, hidden: true, textContent: '', disabled: false });
+  }
+  context.document.getElementById = (id) => nodes.get(id) || null;
+  context.document.querySelector = () => null;
+  for (const [key, value] of Object.entries(values || {})) {
+    if (value === undefined) context.localStorage.removeItem(key);
+    else context.localStorage.setItem(key, value);
+  }
+  return nodes;
+}
+
+test('hasFastKey: различает отсутствие ключа и битый JSON', () => {
+  const { context } = loadApp();
+  context.localStorage.removeItem('youplanner.qaza.fast');
+  assert.equal(context.hasFastKey(), false, 'без ключа — первого запуска нет');
+  context.localStorage.setItem('youplanner.qaza.fast', '{"remaining":2,"hist');
+  assert.equal(context.hasFastKey(), true, 'битый ключ — он существует');
+  assert.equal(context.loadFast(), null, 'и при этом не читается');
+});
+
+test('start-форма при битом ключе предупреждает о потере истории', () => {
+  const { context } = loadApp();
+  const nodes = fastDom(context, {
+    'youplanner.qaza.fast': '{"remaining":4,"history":[{"date":"2026-11-01"',
+  });
+  context.renderFastView();
+  const note = nodes.get('fast-init-note').textContent;
+  assert.match(note, /не читаются/, 'экран обязан сказать, что данные битые');
+  assert.match(note, /потеря/, 'и что сохранение уничтожит историю');
+});
+
+test('первый запуск (ключа нет) — без пугающего предупреждения', () => {
+  const { context } = loadApp();
+  const nodes = fastDom(context, {});
+  context.renderFastView();
+  assert.equal(nodes.get('fast-init-note').textContent, '',
+    'чистое хранилище не «повреждённые данные», а первый запуск');
+});
