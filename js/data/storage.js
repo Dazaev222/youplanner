@@ -21,3 +21,8 @@ export const STORAGE_KEYS = {
   // не входит (buildBackup), поэтому разбор копий его никогда не видит.
   tombstones: 'youplanner.tombstones',
 };
+
+// ── plannerV1: локальный envelope области планирования (ТЗ §1.4.3) ─────────
+// Заглушки RED: реальные помощники добавлены следующим коммитом.
+export function loadPlannerEnvelope() { return null; }
+export function savePlannerEnvelope(env) { return false; }

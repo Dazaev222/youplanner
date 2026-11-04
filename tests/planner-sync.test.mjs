@@ -324,3 +324,221 @@ test('migratePlannerV1: пустое прошлое — пустой снимо�
   assert.equal(Object.keys(result.snapshot.entries).length, 0);
   assert.equal(result.snapshot.schemaVersion, PLANNER_SCHEMA_VERSION);
 });
+
+// ── Unit 2: локальный envelope и адаптер Матрицы (ТЗ §1.3–§1.4.3, §1.4.5) ───
+// saveTasks — единственная запись Матрицы (её зовёт commitTasks экрана):
+// адаптер обязан сохранить публичную сигнатуру и предметные поля, а поверх
+// писать атомарный envelope {snapshot, outbox, lamport, actorId, ownerUid}.
+// Сначала envelope, потом список; отказ хранилища — честное «нет» без
+// частичного состояния. Повтор операции не дублирует outbox и не растит
+// версии; tombstones без GC; миграция сохраняет id и не трогает привычки.
+
+import { loadApp } from './helpers/load-app.mjs';
+
+const MATRIX_KEY = 'youplanner.matrix.tasks';
+const ENVELOPE_KEY = 'youplanner.planner.v1';
+
+function mkTask(id, overrides) {
+  return Object.assign({
+    id: id,
+    title: 'Задача ' + id,
+    notes: '',
+    due: '2026-11-05',
+    doDate: null,
+    priority: 2,
+    done: false,
+    doneAt: null,
+    createdAt: '2026-11-04T00:00:00.000Z',
+    updatedAt: '2026-11-04T00:00:00.000Z',
+    order: 1,
+    archived: false,
+    schedule: null,
+    scheduleUnsupported: false,
+    previousOccurrenceId: null,
+    generatedAt: null,
+  }, overrides || {});
+}
+
+function readEnvelope(app) {
+  const raw = app.sandbox.localStorage.getItem(ENVELOPE_KEY);
+  return raw === null ? null : JSON.parse(raw);
+}
+
+test('saveTasks: пишет envelope plannerV1 поверх прежней записи списка, список круглится через loadTasks', () => {
+  const app = loadApp();
+  assert.equal(app.context.saveTasks([mkTask('t1'), mkTask('t2', { priority: 3 })]), true);
+
+  const env = readEnvelope(app);
+  assert.ok(env, 'envelope не записан');
+  assert.equal(env.snapshot.schemaVersion, PLANNER_SCHEMA_VERSION);
+  assert.deepEqual(Object.keys(env.snapshot.entries).sort(), ['t1', 't2']);
+  const title = env.snapshot.entries.t1.fields.title;
+  assert.equal(title.value, 'Задача t1');
+  assert.ok(Number.isInteger(title.version.counter) && title.version.counter >= 1,
+    'у поля нет Lamport-версии');
+  assert.equal(typeof title.version.actorId, 'string');
+  assert.ok(title.version.actorId !== '');
+  // schedule — атомарное поле: дата, время, часовой пояс, повтор и
+  // напоминания живут в одном value
+  assert.ok(env.snapshot.entries.t1.fields.schedule, 'поля schedule нет');
+
+  // outbox: создание — это операция {opId, ownerKey, operation}
+  assert.ok(Array.isArray(env.outbox) && env.outbox.length >= 1, 'outbox пуст при создании');
+  const firstOp = env.outbox[0];
+  assert.ok(typeof firstOp.opId === 'string' && firstOp.opId !== '');
+  assert.ok('ownerKey' in firstOp, 'op без ownerKey');
+  assert.ok(firstOp.operation.entryId === 't1' || firstOp.operation.entryId === 't2',
+    'opIds не связаны с записями');
+
+  assert.deepEqual(app.context.loadTasks().map(function (t) { return t.id; }), ['t1', 't2']);
+});
+
+test('saveTasks: правка одного поля двигает версию только у него; повтор той же правки не плодит операций', () => {
+  const app = loadApp();
+  app.context.saveTasks([mkTask('t1', { notes: 'важные заметки' })]);
+  const env1 = readEnvelope(app);
+  const notesVersion = env1.snapshot.entries.t1.fields.notes.version;
+  const titleVersion = env1.snapshot.entries.t1.fields.title.version;
+
+  app.context.saveTasks([mkTask('t1', { notes: 'важные заметки', title: 'Переименована' })]);
+  const env2 = readEnvelope(app);
+  assert.deepEqual(env2.snapshot.entries.t1.fields.notes.version, notesVersion,
+    'заметка не менялась — версия не должна расти');
+  assert.ok(cmpPlannerVersion(env2.snapshot.entries.t1.fields.title.version, titleVersion) > 0,
+    'правка заголовка не получила новую версию');
+  assert.equal(env2.outbox.length, env1.outbox.length + 1,
+    'одна правка поля — одна операция в outbox');
+
+  // повтор того же состояния: diff пуст → ни операций, ни роста версий
+  app.context.saveTasks([mkTask('t1', { notes: 'важные заметки', title: 'Переименована' })]);
+  const env3 = readEnvelope(app);
+  assert.equal(env3.outbox.length, env2.outbox.length, 'пустой diff породил операцию');
+  assert.equal(canon(env3.snapshot.entries), canon(env2.snapshot.entries));
+});
+
+test('saveTasks: purge записи пишет delete-tombstone; повторный put того же id не воскрешает запись', () => {
+  const app = loadApp();
+  app.context.saveTasks([mkTask('t1'), mkTask('t2')]);
+  app.context.saveTasks([mkTask('t2')]);
+
+  const env = readEnvelope(app);
+  assert.equal(env.snapshot.entries.t1, undefined, 'удалённая запись осталась живой');
+  assert.ok(env.snapshot.tombstones.t1, 'tombstone не записан');
+  assert.ok(env.snapshot.tombstones.t1.deletedAt, 'tombstone без метки отображения');
+
+  // «вернуть» тот же id прямой правкой списка нельзя: delete-wins навсегда
+  app.context.saveTasks([mkTask('t1'), mkTask('t2')]);
+  const env2 = readEnvelope(app);
+  assert.equal(env2.snapshot.entries.t1, undefined, 'put снял tombstone — скрытое resurrection');
+  assert.ok(env2.snapshot.tombstones.t1);
+});
+
+test('saveTasks при отказе хранилища: false, envelope и список остались побайтово прежними', () => {
+  const app = loadApp();
+  app.context.saveTasks([mkTask('t1')]);
+  const envBefore = app.sandbox.localStorage.getItem(ENVELOPE_KEY);
+  const listBefore = app.sandbox.localStorage.getItem(MATRIX_KEY);
+
+  app.sandbox.localStorage.setItem = function () {
+    const error = new Error('QuotaExceededError');
+    error.name = 'QuotaExceededError';
+    throw error;
+  };
+  assert.equal(app.context.saveTasks([mkTask('t1'), mkTask('t2')]), false,
+    'отказ записи не притворился успехом');
+  assert.equal(app.sandbox.localStorage.getItem(ENVELOPE_KEY), envBefore,
+    'envelope тронут при отказе');
+  assert.equal(app.sandbox.localStorage.getItem(MATRIX_KEY), listBefore,
+    'список тронут при отказе');
+});
+
+test('migratePlanner: повторяемая миграция сохраняет старые id, не трогает привычки, повтор побайтово идентичен', () => {
+  const app = loadApp();
+  app.sandbox.localStorage.setItem(MATRIX_KEY, JSON.stringify([mkTask('t1'), mkTask('t2')]));
+  app.sandbox.localStorage.setItem('youplanner.habits', JSON.stringify([{ id: 'h1', name: 'Фаджр', type: 'boolean' }]));
+  const habitsBefore = app.sandbox.localStorage.getItem('youplanner.habits');
+
+  assert.equal(app.context.migratePlanner(), true, 'миграция не состоялась');
+  const env1 = readEnvelope(app);
+  assert.ok(env1, 'envelope не создан миграцией');
+  assert.deepEqual(Object.keys(env1.snapshot.entries).sort(), ['t1', 't2'],
+    'миграция потеряла или переименовала старые id');
+  assert.equal(env1.snapshot.entries.t1.fields.title.version.counter, 1,
+    'миграция обязана начать версии с 1');
+
+  assert.equal(app.context.migratePlanner(), true);
+  const env2 = app.sandbox.localStorage.getItem(ENVELOPE_KEY);
+  assert.equal(env2, JSON.stringify(env1), 'повтор миграции изменил снимок — дубликаты/рост версий');
+  assert.equal(app.sandbox.localStorage.getItem('youplanner.habits'), habitsBefore,
+    'миграция тронула привычки');
+});
+
+test('migratePlanner: при уже существующем envelope — ничего не перетирает (без удаления новой области)', () => {
+  const app = loadApp();
+  app.context.saveTasks([mkTask('t1', { title: 'Актуальная' })]);
+  const envBefore = app.sandbox.localStorage.getItem(ENVELOPE_KEY);
+  // даже «старый» список не должен перебить живой envelope
+  app.sandbox.localStorage.setItem(MATRIX_KEY, JSON.stringify([mkTask('tX', { title: 'Легаси' })]));
+  assert.equal(app.context.migratePlanner(), true);
+  assert.equal(app.sandbox.localStorage.getItem(ENVELOPE_KEY), envBefore,
+    'повторная миграция затёрла существующий plannerV1');
+});
+
+test('materializePlannerTasks: schedule атомарен (дата+время+зона+повтор+напоминания), due выводится, unsupported сохраняется', () => {
+  const schedule = {
+    version: 1, allDay: false,
+    startDate: '2026-11-05', endDate: '2026-11-05',
+    startTime: '09:00', endTime: '09:45', timeZoneMode: 'device',
+    reminders: [{ id: 'r1', anchor: 'start', offsetMinutes: 30, date: null, time: null }],
+    repeat: null, series: null,
+  };
+  const snapshot = snap({
+    t1: entry('t1', {
+      title: fld('Встреча', 1, 'a'),
+      schedule: fld(schedule, 1, 'a'),
+      completion: fld({ done: false, doneAt: null }, 1, 'a'),
+      priority: fld(2, 1, 'a'),
+      notes: fld('', 1, 'a'),
+      doDate: fld(null, 1, 'a'),
+      order: fld(1, 1, 'a'),
+      archived: fld(false, 1, 'a'),
+      provenance: fld({
+        createdAt: '2026-11-04T00:00:00.000Z', updatedAt: '2026-11-04T00:00:00.000Z',
+        generatedAt: null, previousOccurrenceId: null,
+      }, 1, 'a'),
+    }),
+    t2: entry('t2', {
+      title: fld('Будущая версия', 1, 'a'),
+      schedule: fld({ version: 2, whatever: 'сохранилось' }, 1, 'a'),
+    }),
+  });
+  const app = loadApp();
+  const tasks = app.context.materializePlannerTasks(snapshot);
+  const t1 = tasks.find(function (t) { return t.id === 't1'; });
+  assert.ok(t1, 'запись не материализовалась');
+  assert.equal(t1.due, '2026-11-05', 'due не выведен из расписания');
+  assert.equal(t1.schedule.startTime, '09:00');
+  assert.equal(t1.schedule.reminders.length, 1, 'напоминание потерялось — расписание разбилось');
+  assert.equal(t1.schedule.timeZoneMode, 'device');
+  // unsupported-схема сохраняется дословно и помечается (прежнее поведение sanitizeTask)
+  const t2 = tasks.find(function (t) { return t.id === 't2'; });
+  assert.ok(t2, 'запись с неизвестной версией расписания потеряна');
+  assert.equal(t2.scheduleUnsupported, true);
+  assert.equal(t2.schedule.whatever, 'сохранилось');
+});
+
+test('envelope: много tombstones — ни GC, ни вытеснения при очередной правке', () => {
+  const app = loadApp();
+  const many = {};
+  for (let i = 0; i < 600; i++) {
+    many['g' + i] = { version: v(i + 1, 'a'), deletedAt: '2026-11-01T00:00:00Z' };
+  }
+  app.sandbox.localStorage.setItem(ENVELOPE_KEY, JSON.stringify({
+    version: 1, actorId: 'inst-test', ownerUid: null, lamport: { a: 600 },
+    snapshot: snap({}, {}, many), outbox: [], opSeq: 0, mapping: {},
+  }));
+  assert.equal(app.context.saveTasks([mkTask('alive')]), true);
+  const env = readEnvelope(app);
+  assert.equal(Object.keys(env.snapshot.tombstones).length, 600,
+    'надгробия planner прорежаны — контракт «нет автоматического GC» нарушен');
+});

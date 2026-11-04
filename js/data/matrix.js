@@ -706,3 +706,6 @@ export function quadrantStats(tasks, today) {
   }
   return out;
 }
+
+// ── plannerV1: адаптер операций Матрицы к метаданным (ТЗ §1.3, заглушки RED) ─
+export function materializePlannerTasks(snapshot) { return []; }

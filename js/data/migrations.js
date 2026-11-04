@@ -67,3 +67,7 @@ export function migratePressHabit() {
   if (saved === false) return;
   markMigration('press');
 }
+
+// plannerV1: повторяемая миграция локального списка Матрицы в envelope
+// (ТЗ §1.4.5). Заглушка RED — реализация следующим коммитом.
+export function migratePlanner() { return false; }
