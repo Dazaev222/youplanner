@@ -13,6 +13,16 @@
 
 import { safeSetItem } from '../core/storage.js';
 import { addDays, isDateLike, parseISODate, toISODate } from '../core/dates.js';
+import {
+  SCHEDULE_VERSION,
+  cloneSchedule,
+  emptySchedule,
+  nextOccurrence,
+  normalizeSchedule,
+  scheduleToDue,
+  seriesAnchor,
+  validateSchedule,
+} from './matrix-schedule.js';
 
 export const MATRIX_STORAGE_KEY = 'youplanner.matrix.tasks';
 
@@ -65,6 +75,21 @@ function cleanText(value, max) {
   return collapsed.length > max ? collapsed.slice(0, max) : collapsed;
 }
 
+/* Поле `schedule` (ТЗ Б3) — вложенный объект версии 1, а не пять несвязанных
+   полей. Три случая чтения:
+
+   1. ключа нет вообще → миграция из legacy `due`: all-day startDate=endDate=due;
+   2. версия 1 → нормализация; корректная `endDate` приоритетнее несовпадающего
+      `due`, после чего `due` синхронизируется (одна истина — расписание);
+   3. версия неизвестна → запись защищается: сохраняется ДОСЛОВНО (jsonClone),
+      помечается `scheduleUnsupported` и не исполняется нигде, включая scheduler.
+      Иначе сохранение списка после правки ДРУГОЙ задачи стёрло бы данные
+      будущей версии, а это ровно то, чего требовало Б3.3. */
+function sanitizeScheduleField(raw, legacyDue) {
+  const result = normalizeSchedule(raw, { legacyDue });
+  return result;
+}
+
 // Копия только известных полей: мусор из localStorage или чужой снимок не
 // должны приносить в карточку то, чего модель не предполагает (та же
 // дисциплина, что у `defaultHabit` в js/data/habits.js).
@@ -75,11 +100,15 @@ export function sanitizeTask(raw) {
   if (!title) return null;
   const priority = PRIORITY_VALUES.indexOf(raw.priority) >= 0 ? raw.priority : PRIORITY_NONE;
   const nowIso = new Date().toISOString();
+  const legacyDue = isoOrNull(raw.due);
+  const scheduleResult = sanitizeScheduleField(
+    raw.schedule === undefined || raw.schedule === null ? null : raw.schedule, legacyDue);
+  const unsupported = scheduleResult.unsupported === true;
   const task = {
     id: raw.id,
     title,
     notes: cleanText(raw.notes, NOTES_MAX),
-    due: isoOrNull(raw.due),
+    due: unsupported ? legacyDue : scheduleToDue(scheduleResult.schedule),
     doDate: isoOrNull(raw.doDate),
     priority,
     done: raw.done === true,
@@ -88,8 +117,57 @@ export function sanitizeTask(raw) {
     updatedAt: typeof raw.updatedAt === 'string' ? raw.updatedAt : nowIso,
     order: Number.isFinite(raw.order) ? raw.order : 0,
     archived: raw.archived === true,
+    schedule: scheduleResult.schedule,
+    scheduleUnsupported: unsupported,
+    // Б7.7: связь следующего экземпляра с предыдущим входит в whitelist,
+    // иначе она теряется при первой же пересборке списка.
+    previousOccurrenceId: typeof raw.previousOccurrenceId === 'string'
+      && raw.previousOccurrenceId !== '' ? raw.previousOccurrenceId : null,
+    generatedAt: typeof raw.generatedAt === 'string' ? raw.generatedAt : null,
   };
   return task;
+}
+
+/* Что именно пришлось починить при чтении — отдельный отчёт (Б3.6): молча
+   «восстановить» данные означало бы потерять доверие человека к списку.
+   Issues считаются из СЫРЫХ записей, потому что нормализация повреждённые
+   опции уже отбросила. */
+export function loadTasksReport() {
+  let parsed;
+  try {
+    parsed = JSON.parse(localStorage.getItem(MATRIX_STORAGE_KEY) || '[]');
+  } catch (e) {
+    return { tasks: [], issues: [{ taskId: null, codes: ['broken-json'] }], broken: true };
+  }
+  if (!Array.isArray(parsed)) return { tasks: [], issues: [], broken: false };
+
+  const issues = [];
+  const tasks = [];
+  const seen = Object.create(null);
+  for (let i = 0; i < parsed.length; i++) {
+    const entry = parsed[i];
+    const task = sanitizeTask(entry);
+    if (!task) continue;
+    if (seen[task.id]) continue;
+    seen[task.id] = true;
+    tasks.push(task);
+    if (plainObject(entry) && entry.schedule !== undefined && entry.schedule !== null) {
+      const result = normalizeSchedule(entry.schedule, {});
+      if (result.issues.length) {
+        issues.push({
+          taskId: task.id,
+          unsupported: result.unsupported === true,
+          codes: result.issues.map(issue => issue.code),
+          fields: result.issues.map(issue => issue.field),
+        });
+      }
+    }
+  }
+  return { tasks, issues, broken: false };
+}
+
+function plainObject(value) {
+  return !!value && typeof value === 'object' && !Array.isArray(value);
 }
 
 export function newTaskId() {
@@ -108,6 +186,8 @@ export function createTask(fields) {
     due: source.due,
     doDate: source.doDate,
     priority: source.priority,
+    schedule: source.schedule,
+    previousOccurrenceId: source.previousOccurrenceId,
     done: false,
     createdAt: nowIso,
     updatedAt: nowIso,
@@ -272,16 +352,103 @@ export function quadrantShape(quadrant, source, today) {
 // второй легендой правды, расходящейся с датой.
 //
 // Архив — НЕ следствие квадранта. «Не срочно и не важно» — настоящий
-// четвёртый квадрант, и перенос в него обязан оставить задачу видимой:
+// четвертый квадрант, и перенос в него обязан оставить задачу видимой:
 // иначе форма добавления, где человек выбрал именно этот квадрант, прятала
 // бы задачу в архив молча. Снятие в архив — отдельное действие (archiveTask).
+//
+// Задачи с НАЗНАЧЕННЫМ интервалом (timed, многодневный или повторяющийся —
+// Б6.4) переносятся по календарному правилу сдвигa: endDate становится сегодня
+// (q1), завтра (q3) или сегодня+3 (q2/q4 при близком сроке), а часы и
+// календарная длина сохраняются. Остальные сохраняют прежнюю семантику shape
+// (Б6.3: «legacy без нового интервала» — включая due=null в q2 и q4).
+export function isAppointedSchedule(schedule) {
+  if (!plainObject(schedule)) return false;
+  if (schedule.allDay === false && schedule.startTime && schedule.endTime) return true;
+  if (schedule.repeat) return true;
+  return !!(schedule.startDate && schedule.endDate && schedule.startDate !== schedule.endDate);
+}
+
+/* Носитель интервала при переносе: сдвигаем ВСЮ дату-пару, а не только конец,
+   иначе «трёхдневная встреча» превратилась бы в однодневную. */
+function shiftScheduleEnd(schedule, endDateIso, today) {
+  const lengthDays = Math.max(0, daySpan(schedule.startDate, schedule.endDate));
+  const start = addDays(parseISODate(endDateIso), -lengthDays);
+  return Object.assign({}, schedule, {
+    startDate: toISODate(start),
+    endDate: endDateIso,
+  });
+}
+
+function daySpan(fromIso, toIso) {
+  const a = parseISODate(fromIso);
+  const b = parseISODate(toIso);
+  return Math.round((Date.UTC(b.getFullYear(), b.getMonth(), b.getDate())
+    - Date.UTC(a.getFullYear(), a.getMonth(), a.getDate())) / 86400000);
+}
+
+// Candidate + список конфликтов (Б6.6): решение о подтверждении принимает
+// экран, а не данные — confirm и DOM из модуля данных недоступны по построению.
+export function prepareQuadrantMove(task, quadrant, today) {
+  const moved = applyQuadrantMove(task, quadrant, today);
+  if (!moved) return null;
+  const conflicts = [];
+  if (isAppointedSchedule(task.schedule) && plainObject(task.schedule)) {
+    conflicts.push({
+      code: 'interval-shift',
+      from: task.schedule.endDate,
+      to: moved.schedule.endDate,
+      message: 'Срок интервала изменится: ' + task.schedule.endDate + ' → ' + moved.schedule.endDate,
+    });
+    const absolute = (task.schedule.reminders || []).filter(r => r && r.anchor === 'absolute');
+    if (absolute.length) {
+      conflicts.push({
+        code: 'absolute-reminder',
+        ids: absolute.map(r => r.id),
+        message: 'Абсолютное напоминание не следует за интервалом — его надо сохранить или удалить',
+      });
+    }
+    if (task.schedule.repeat) {
+      conflicts.push({
+        code: 'series-anchor',
+        message: 'Изменится дату текущего экземпляра; правило серии сохранится',
+      });
+    }
+  }
+  return { candidate: moved, conflicts };
+}
+
 export function applyQuadrantMove(task, quadrant, today) {
   const shape = quadrantShape(quadrant, task, today);
   if (!shape) return null;
-  const next = Object.assign({}, task, shape, {
-    archived: task && task.archived === true,
+  const base = task && typeof task === 'object' ? task : {};
+  const now = isDateLike(today) ? today : new Date();
+  let next = Object.assign({}, base, shape, {
+    archived: base.archived === true,
     updatedAt: new Date().toISOString(),
   });
+
+  if (isAppointedSchedule(base.schedule)) {
+    const schedule = Object.assign({}, base.schedule);
+    const urgent = isUrgent({ due: base.schedule.endDate }, now);
+    if (quadrant === 'q1') {
+      next.schedule = shiftScheduleEnd(schedule, toISODate(now), now);
+    } else if (quadrant === 'q3') {
+      next.schedule = shiftScheduleEnd(schedule, toISODate(addDays(now, 1)), now);
+    } else if (quadrant === 'q2' || quadrant === 'q4') {
+      next.schedule = urgent
+        ? shiftScheduleEnd(schedule, toISODate(addDays(now, 3)), now)
+        : schedule;
+    } else {
+      next.schedule = schedule;
+    }
+    // due выводится из расписания — иначе sanitizeTask «вернул» бы старый срок
+    next.due = scheduleToDue(next.schedule);
+  } else if (plainObject(base.schedule) || base.schedule === undefined || base.schedule === null) {
+    // Legacy-путь: даты следуют за сроком, расписание не хранит вторую истину.
+    next.schedule = shape.due
+      ? Object.assign({}, emptySchedule(), { startDate: shape.due, endDate: shape.due })
+      : emptySchedule();
+  }
   return sanitizeTask(next);
 }
 
@@ -292,6 +459,227 @@ export function markDone(task, done) {
     updatedAt: new Date().toISOString(),
   });
   return sanitizeTask(next);
+}
+
+/* --- Экземпляры серии (Б7.6 — Б7.9) ---------------------------------------
+
+   Всё, что связано с повтором, собирается ЧИСТЫМ списком-кандидатом: экран
+   записывает его одним commitTasks, а значит отказ хранилища не оставляет
+   ни «выполненной» задачи, ни сиротского следующего экземпляра. */
+
+export function newSeriesId() {
+  return 's' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+}
+
+// Расписание из одного legacy-срока: общий мост для черновика и миграции.
+export function scheduleFromDue(due) {
+  const iso = isoOrNull(due);
+  return iso
+    ? Object.assign({}, emptySchedule(), { startDate: iso, endDate: iso })
+    : emptySchedule();
+}
+
+// Включение правила: series.id создаётся ОДИН РАЗ здесь, а не на каждом
+// render/sanitize (Б7.7).
+export function startSeries(task, today) {
+  const base = task && typeof task === 'object' ? task : null;
+  if (!base) return null;
+  const schedule = plainObject(base.schedule) ? cloneSchedule(base.schedule) : emptySchedule();
+  if (!schedule.repeat) return sanitizeTask(base);
+  if (schedule.series) return sanitizeTask(base);
+  schedule.series = seriesAnchor(schedule.startDate, newSeriesId());
+  if (!schedule.series) return sanitizeTask(base);
+  return sanitizeTask(Object.assign({}, base, {
+    schedule,
+    updatedAt: new Date(isDateLike(today) ? today : new Date()).toISOString(),
+  }));
+}
+
+/* Смена правила повтора (Б7.9): то же правило — та же серия; другое — новая
+   series.id и index=1, а выполненные экземпляры истории не переписываются.
+   Снятие правила обнуляет series, срок остаётся. */
+export function setTaskRepeat(task, repeat, today) {
+  const base = task && typeof task === 'object' ? task : null;
+  if (!base) return null;
+  const schedule = plainObject(base.schedule) ? cloneSchedule(base.schedule) : emptySchedule();
+  const incoming = normalizeSchedule(Object.assign({}, schedule, {
+    repeat: repeat === undefined ? null : repeat,
+    series: null,
+  }), {}).schedule.repeat;
+
+  const same = JSON.stringify(incoming) === JSON.stringify(schedule.repeat);
+  if (same) return sanitizeTask(base);
+
+  schedule.repeat = incoming;
+  schedule.series = incoming ? seriesAnchor(schedule.startDate, newSeriesId()) : null;
+  const next = Object.assign({}, base, {
+    schedule,
+    due: scheduleToDue(schedule),
+    updatedAt: new Date(isDateLike(today) ? today : new Date()).toISOString(),
+  });
+  return sanitizeTask(next);
+}
+
+/* Правка расписания существующей задачи из листа (Б4.10). Значение сначала
+   проверяется, потом нормализуется, и только затем пересобирается series по
+   правилу Б7.9. Экран вызывает это на копии и записывает одним commitTasks,
+   поэтому здесь нет ни DOM, ни откатов — только честный кандидат. */
+export function editSchedule(task, value, today) {
+  const base = plainObject(task) ? task : null;
+  if (!base || !plainObject(value)) return null;
+  if (validateSchedule(value).ok === false) return null;
+
+  const normalized = normalizeSchedule(value, {
+    legacyDue: typeof value.due === 'string' ? value.due : null,
+  }).schedule;
+  const previousRepeat = plainObject(base.schedule) ? base.schedule.repeat : null;
+  // Сменное правило — новая серия (Б7.9); преancor менять нельзя, поэтому
+  // series обнуляется и создаётся заново с index=1.
+  if (JSON.stringify(normalized.repeat) !== JSON.stringify(previousRepeat)) normalized.series = null;
+
+  const next = Object.assign({}, base, {
+    schedule: normalized,
+    due: scheduleToDue(normalized),
+    updatedAt: new Date(isDateLike(today) ? today : new Date()).toISOString(),
+  });
+  return startSeries(next, today);
+}
+
+/* Выполнение повторяющейся задачи = completed copy + ровно один следующий
+   активный экземпляр ОДНИМ списком (Б7.6). Повторной click по уже выполненному
+   экземпляру — no-op, а не «отменить выполнение»: отмена — отдельное
+   намерение (reopenOccurrence). */
+export function completeOccurrence(tasks, taskId, completionDate) {
+  const list = Array.isArray(tasks) ? tasks.filter(Boolean) : [];
+  const index = list.findIndex(t => t.id === taskId);
+  if (index < 0) return { ok: false, status: 'missing', tasks: list, completed: null, next: null };
+
+  const source = list[index];
+  if (source.done) return { ok: false, status: 'noop', tasks: list, completed: null, next: null };
+  if (source.archived) return { ok: false, status: 'archived', tasks: list, completed: null, next: null };
+  if (source.scheduleUnsupported) {
+    return { ok: false, status: 'unsupported', tasks: list, completed: null, next: null };
+  }
+
+  const when = isDateLike(completionDate) ? completionDate : new Date();
+  const completed = markDone(source, true);
+  completed.schedule = cloneSchedule(source.schedule);
+  const withoutSource = list.slice(0, index).concat(list.slice(index + 1));
+
+  const schedule = plainObject(source.schedule) ? source.schedule : emptySchedule();
+  if (!schedule.repeat) {
+    return { ok: true, status: 'done', tasks: [completed].concat(withoutSource), completed, next: null };
+  }
+
+  const result = nextOccurrence(Object.assign({}, schedule, {
+    series: schedule.series || seriesAnchor(schedule.startDate, newSeriesId()),
+  }), { completionDate: when });
+
+  if (result.status !== 'ok' || !result.occurrence) {
+    return {
+      ok: true,
+      status: result.status === 'invalid' ? 'invalid-rule' : 'series-end',
+      reason: result.reason,
+      tasks: [completed].concat(withoutSource),
+      completed,
+      next: null,
+    };
+  }
+
+  const seriesId = result.series.id || newSeriesId();
+  // Детерминированная защита от второго «next» той же пары series+index
+  const already = list.some(t => plainObject(t.schedule) && plainObject(t.schedule.series)
+    && t.schedule.series.id === seriesId && t.schedule.series.index === result.series.index);
+  if (already) {
+    return { ok: false, status: 'duplicate-occurrence', tasks: list, completed: null, next: null };
+  }
+
+  const nowIso = when.toISOString();
+  const nextSchedule = cloneSchedule(Object.assign({}, schedule, {
+    allDay: result.occurrence.allDay !== false ? schedule.allDay : false,
+    startDate: result.occurrence.startDate,
+    endDate: result.occurrence.endDate,
+    startTime: schedule.allDay ? null : result.occurrence.startTime,
+    endTime: schedule.allDay ? null : result.occurrence.endTime,
+    reminders: result.occurrence.reminders,
+    repeat: schedule.repeat,
+    series: Object.assign({}, result.series, { id: seriesId }),
+  }));
+
+  const nextTask = sanitizeTask({
+    id: newTaskId(),
+    title: source.title,
+    notes: source.notes,
+    due: scheduleToDue(nextSchedule),
+    doDate: source.doDate,
+    priority: source.priority,
+    order: source.order,
+    done: false,
+    createdAt: source.createdAt,
+    // Б7.6: generatedAt = initial updatedAt, иначе «не редактировали ли
+    // следующий» нельзя проверить однозначно.
+    updatedAt: nowIso,
+    generatedAt: nowIso,
+    previousOccurrenceId: source.id,
+    schedule: nextSchedule,
+  });
+  if (!nextTask) {
+    return { ok: true, status: 'done', tasks: [completed].concat(withoutSource), completed, next: null };
+  }
+  return {
+    ok: true,
+    status: 'recurring',
+    tasks: [completed, nextTask].concat(withoutSource),
+    completed,
+    next: nextTask,
+  };
+}
+
+/* «Вернуть в работу» последнего завершённого экземпляра (Б7.8): если
+   сгенерированный следующий ещё существует, не выполнен и не правился после
+   генерации — одним списком снимаем его и возвращаем текущий. Если он уже
+   изменён или завершён — удалять его молча нельзя, и экран обязан предложить
+   «Восстановить как отдельную задачу без повтора». */
+export function reopenOccurrence(tasks, taskId) {
+  const list = Array.isArray(tasks) ? tasks.filter(Boolean) : [];
+  const index = list.findIndex(t => t.id === taskId);
+  if (index < 0) return { ok: false, status: 'missing', tasks: list, removedId: null, needsNewTask: false };
+
+  const source = list[index];
+  const schedule = plainObject(source.schedule) ? source.schedule : null;
+  if (!schedule || !plainObject(schedule.series)) {
+    return { ok: false, status: 'no-series', tasks: list, removedId: null, needsNewTask: false };
+  }
+  const expectedIndex = (Number(schedule.series.index) || 1) + 1;
+
+  const nextTask = list.find(t => t.id !== taskId
+    && plainObject(t.schedule) && plainObject(t.schedule.series)
+    && t.schedule.series.id === schedule.series.id
+    && Number(t.schedule.series.index) === expectedIndex);
+
+  if (!nextTask) {
+    const back = markDone(source, false);
+    return { ok: true, status: 'reopened-no-generation', tasks: [back].concat(list.slice(0, index).concat(list.slice(index + 1))), removedId: null, needsNewTask: false };
+  }
+  const untouched = nextTask.generatedAt && nextTask.updatedAt === nextTask.generatedAt;
+  if (nextTask.done || !untouched) {
+    return {
+      ok: false,
+      status: nextTask.done ? 'next-completed' : 'next-edited',
+      tasks: list,
+      removedId: null,
+      needsNewTask: true,
+    };
+  }
+  const back = markDone(source, false);
+  const withoutBoth = list.filter(t => t.id !== taskId && t.id !== nextTask.id);
+  return {
+    ok: true,
+    status: 'reopened',
+    tasks: [back].concat(withoutBoth),
+    removedId: nextTask.id,
+    needsNewTask: false,
+  };
 }
 
 // Возврат из архива и удаление безвозвратное — два разных действия, и оба

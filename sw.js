@@ -1,8 +1,9 @@
-// v40: пересобран кэш после того, как в js/data/firebase-auth.js появился
-// вход владельца. Прежняя версия модуля в precache — это ровно та причина, по
-// которой вход падал с «ключ не вписан» при целом исходнике (правило README:
-// обновление ассетов вместе с бампом версии кэша).
-const CACHE = 'youplanner-v40';
+// v41: расписание Матрицы (ТЗ Воркера 2) принесло три новых runtime-модуля —
+// чистые функции интервала/повтора, локальный scheduler напоминаний и стек
+// самих уведомлений. Все три подключаются статически, поэтому офлайн-первый
+// запуск без них был бы белым экраном Матрицы. (v40 — вход владельца в
+// firebase-auth.js.)
+const CACHE = 'youplanner-v41';
 // Иконки — все из manifest.json: отсутствующая в кэше иконка ломала бы
 // офлайн-установку PWA (аудит 2026-10-31: icon-512.png не кэшировался)
 const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon-512.png', './icon.svg',
@@ -47,6 +48,10 @@ const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './ic
   './js/ui/constants.js',
   // Матрица Эйзенхауэра и спарклайны в статистике
   './js/data/matrix.js',
+  // Интервал, повтор и локальные напоминания Матрицы (ТЗ Воркера 2)
+  './js/data/matrix-schedule.js',
+  './js/core/matrix-reminders.js',
+  './js/ui/matrix-notices.js',
   './js/ui/matrix-view.js',
   './js/ui/sparkline.js',
   './js/sync/core.js', './js/sync/merge.js'];
