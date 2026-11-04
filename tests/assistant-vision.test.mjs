@@ -830,3 +830,104 @@ test('очередь протухла (сжатие висело дольше 35
   assert.ok(els.toast.textContent.indexOf('слишком долго') !== -1,
     'тост объясняет возврат: ' + els.toast.textContent);
 });
+
+// ── F4 (аудит GPT 2026-11-03): отказ головы очереди ─────────────────────────
+// В flush голова изымалась ДО решения: pendingSubmitQueue.shift() стоял
+// перед onAssistantSubmit(head.text). Когда отправка возвращала false
+// (нет API-ключа, модель без vision приняла фото), restorePendingToInput
+// склеивал уже БЕЗ снятой головы — первая реплика исчезала бесследно.
+// Путь проверки — как в production: реальный compressChatImages с колбэком
+// updateAssistantControls (так же его зовёт обработчик выбора фото,
+// assistant-view.js:418), отказ без ключа, возврат в поле.
+
+function makeDeferredCompress(sandbox) {
+  let release = null;
+  sandbox.compressImage = () => new Promise((resolve) => {
+    release = () => resolve({
+      blob: { type: 'image/jpeg', size: 1024, __dataUrl: 'data:image/jpeg;base64,RA==' },
+      width: 10, height: 10,
+    });
+  });
+  return () => release();
+}
+
+test('F4: отказ головы (нет ключа) — первая реплика не теряется, в поле возвращаются обе', async () => {
+  const bodies = [];
+  const app = loadApp({
+    fetchImpl: (url, opts) => { bodies.push(opts); return Promise.resolve(okReply('ответ')); },
+  });
+  const { els } = bindVisionDom(app.sandbox);
+  app.sandbox.FileReader = makeFileReader();
+  const releaseCompress = makeDeferredCompress(app.sandbox);
+  // Ключ НЕ сохранён: flush упрётся в отказ onAssistantSubmit
+
+  const compressing = app.context.compressChatImages(
+    [makeFile('a.jpg')], app.context.updateAssistantControls);
+  assert.equal(app.context.isImageCompressing(), true, 'окно очереди не открылось');
+  assert.equal(app.context.onAssistantSubmit('Первый отложенный'), true,
+    'реплика во время сжатия должна встать в очередь');
+  assert.equal(app.context.onAssistantSubmit('Второй отложенный'), true);
+
+  releaseCompress();
+  await compressing;   // finally → updateAssistantControls → flush → отказ
+  await settle();
+
+  assert.equal(bodies.length, 0, 'отклонённая очередь не должна уходить в сеть');
+  assert.ok(els.toast.textContent.indexOf('API-ключ') !== -1,
+    'тост объясняет причину отказа: «' + els.toast.textContent + '»');
+  assert.equal(els['assistant-input'].value, 'Первый отложенный\nВторой отложенный',
+    'снятая до отказа голова потеряна — в поле вернулась только хвостовая реплика: '
+    + JSON.stringify(els['assistant-input'].value));
+  assert.equal(app.run('pendingSubmitQueue.length'), 0,
+    'после возврата очередь обязана очиститься (без дублей при повторном flush)');
+});
+
+test('F4: возврат очереди не затирает текст, набранный в поле после отказа', async () => {
+  const app = loadApp({
+    fetchImpl: () => Promise.resolve(okReply('ответ')),
+  });
+  const { els } = bindVisionDom(app.sandbox);
+  app.sandbox.FileReader = makeFileReader();
+  const releaseCompress = makeDeferredCompress(app.sandbox);
+
+  const compressing = app.context.compressChatImages(
+    [makeFile('a.jpg')], app.context.updateAssistantControls);
+  assert.equal(app.context.onAssistantSubmit('Отложенный вопрос'), true);
+  // Пока сжатие идёт и очередь не ушла, пользователь набирает в поле новое:
+  // ввод во время сжатия НЕ блокируется (input гасится только на busy)
+  els['assistant-input'].value = 'Свежая правка';
+
+  releaseCompress();
+  await compressing;
+  await settle();
+
+  assert.equal(els['assistant-input'].value, 'Отложенный вопрос\nСвежая правка',
+    'restorePendingToInput перетёр то, что пользователь напечатал поверх отказа: '
+    + JSON.stringify(els['assistant-input'].value));
+});
+
+test('F4: успешный flush не дублирует голову и не трогает поле', async () => {
+  const bodies = [];
+  const app = loadApp({
+    fetchImpl: (url, opts) => { bodies.push(opts); return Promise.resolve(okReply('ответ')); },
+  });
+  const { els } = bindVisionDom(app.sandbox);
+  app.sandbox.FileReader = makeFileReader();
+  const releaseCompress = makeDeferredCompress(app.sandbox);
+  app.sandbox.localStorage.setItem('youplanner.api_key', 'test-key');
+
+  const compressing = app.context.compressChatImages(
+    [makeFile('a.jpg')], app.context.updateAssistantControls);
+  assert.equal(app.context.onAssistantSubmit('Ушедший вопрос'), true);
+  els['assistant-input'].value = 'черновик в поле';   // набрано поверх очереди
+
+  releaseCompress();
+  await compressing;
+  await settle();
+
+  assert.equal(bodies.length, 1, 'принятая голова должна уйти ровно один раз');
+  assert.equal(app.run('pendingSubmitQueue.length'), 0,
+    'принятая голова осталась в очереди — повторный flush удвоит реплику');
+  assert.equal(els['assistant-input'].value, 'черновик в поле',
+    'успешная отправка не имеет права трогать поле (возврат — только для отказа)');
+});

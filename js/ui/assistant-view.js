@@ -880,7 +880,14 @@ const PENDING_SUBMIT_LIMIT_MS = 35000;
 function restorePendingToInput() {
   const input = document.getElementById('assistant-input');
   if (input) {
-    input.value = pendingSubmitQueue.map(function (p) { return p.text; }).join('\n');
+    const queued = pendingSubmitQueue.map(function (p) { return p.text; }).join('\n');
+    // Поле во время сжатия НЕ блокируется (input гасится только на busy),
+    // поэтому к моменту возврата пользователь уже мог набрать новое.
+    // Присваивание в духе input.value = queued ЗАТИРАЛО бы эту работу
+    // (F4, аудит GPT 2026-11-03): склеиваем очередь с тем, что в поле,
+    // очередь — первой (она хронологически старше).
+    const typed = String(input.value || '');
+    input.value = queued && typed ? queued + '\n' + typed : (queued || typed);
     autosizeAssistantInput();   // многострочный текст — поле должно вырасти
   }
   pendingSubmitQueue = [];
@@ -899,6 +906,13 @@ function updateAssistantControls() {
   // Flush очереди: сжатие закончилось и запрос в полёте не идёт
   if (pendingSubmitQueue.length && !isImageCompressing() && !assistantBusy
       && !isPdfParsing()) {
+    // Голова изымается из очереди ТОЛЬКО после принятой отправки (F4):
+    // раньше shift стоял до onAssistantSubmit, и при отказе (нет ключа,
+    // модель без vision) снятая голова оставалась за спиной
+    // restorePendingToInput — первая реплика исчезала. Порядок FIFO не
+    // меняется, дубля при успехе нет: очередь на этом синхронном участке
+    // не пополняется (новых отправок быть не может), поэтому shift после
+    // accept снимает ровно ушедшую голову.
     const head = pendingSubmitQueue[0];
     if (Date.now() - head.at > PENDING_SUBMIT_LIMIT_MS) {
       // Зависшее сжатие: тексты возвращаем в поле, решение за владельцем
@@ -907,9 +921,11 @@ function updateAssistantControls() {
         + 'ещё раз');
       return;
     }
-    pendingSubmitQueue.shift();
-    if (!onAssistantSubmit(head.text)) {
-      // Не ушла (нет ключа и т.п.) — возвращаем всё накопленное, не теряем
+    if (onAssistantSubmit(head.text)) {
+      pendingSubmitQueue.shift();
+    } else {
+      // Не ушла (нет ключа и т.п.) — голова ещё в очереди, возврат вернёт
+      // всё накопленное, ничего не теряем
       restorePendingToInput();
     }
   }

@@ -229,6 +229,85 @@ test('современные браузеры: сигнал AbortSignal.timeout 
   assert.equal(created.length, 0, 'ручной таймер создан при живом AbortSignal.timeout');
 });
 
+// ── F5 (аудит GPT 2026-11-03): дедлайн должен накрывать чтение тела ────────
+// fetch разрешается на заголовках, а response.text()/json() читается ПОЗЖЕ.
+// Раньше guard.cancel() стоял в finally сразу после await fetch — на тела
+// таймера уже не было: зависший поток на старом Safari жил вечно. Теперь
+// один guard на всю операцию, и таймаут при чтении тела — с честным
+// диагнозом «не ответил», а не «не в формате JSON».
+
+test('F5 ручная ветка: зависшее тело под дедлайном — таймер жив при чтении, диагноз «не ответил за 60 секунд»', async () => {
+  let rejectBody = null;
+  const { sandbox, context } = loadApp({
+    fetchImpl: () => Promise.resolve({
+      ok: true,
+      status: 200,
+      // fetch отдал заголовки, тело «зависло». Тест держит handle reject:
+      // после выстрела таймера рвёт поток, как живой браузер при abort,
+      // — иначе висящий промис повесил бы и тест.
+      json: () => new Promise((_resolve, reject) => { rejectBody = reject; }),
+    }),
+  });
+  const active = new Map();
+  const created = [];
+  wrapTimers(sandbox, active, created);
+
+  const pending = assert.rejects(
+    () => context.postAssistantChat(PAYLOAD, 'ключ'),
+    /не ответил за 60 секунд/,
+  );
+  await new Promise((r) => setImmediate(r));
+  assert.equal(created.length, 1, 'guard не поставил таймер');
+  // Суть F5: таймер снимался сразу после fetch — на момент чтения тела
+  // он уже не активен, и зависшее тело читалось бы вечно
+  assert.equal(active.size, 1,
+    'guard снят сразу после заголовков — чтение тела осталось без дедлайна');
+
+  created[0].fn();   // «истекло 60 секунд»: abort + флаг timedOut
+  rejectBody(Object.assign(new Error('The operation was aborted'), { name: 'AbortError' }));
+  await pending;
+  assert.equal(active.size, 0, 'таймер не снят после таймаута на чтении тела');
+});
+
+test('F5 ручная ветка: HTTP-ошибка с зависшим телом тоже под дедлайном (text() читается до снятия guard)', async () => {
+  let rejectText = null;
+  const { sandbox, context } = loadApp({
+    fetchImpl: () => Promise.resolve({
+      ok: false,
+      status: 503,
+      text: () => new Promise((_resolve, reject) => { rejectText = reject; }),
+    }),
+  });
+  const active = new Map();
+  const created = [];
+  wrapTimers(sandbox, active, created);
+
+  // Статус важнее оборванного тела деталей: диагноз — про 5xx
+  const pending = assert.rejects(
+    () => context.postAssistantChat(PAYLOAD, 'ключ'),
+    /недоступен.*503/s,
+  );
+  await new Promise((r) => setImmediate(r));
+  assert.equal(active.size, 1, 'чтение тела ошибки осталось без дедлайна');
+  rejectText(Object.assign(new Error('The operation was aborted'), { name: 'AbortError' }));
+  await pending;
+  assert.equal(active.size, 0, 'таймер не снят после завершения операции');
+});
+
+test('F5 современная ветка: TimeoutError при чтении тела — «не ответил», а не «не в формате JSON»', async () => {
+  // Нативный AbortSignal.timeout обрывает чтение тела TimeoutError'ом
+  // (причина abort по спеке). До правки catch вокруг json() про него не
+  // знал и врал про «не в формате JSON»
+  await withFetchStub(() => Promise.resolve({
+    ok: true,
+    status: 200,
+    json: () => Promise.reject(Object.assign(
+      new Error('signal timeout'), { name: 'TimeoutError' })),
+  }), async () => {
+    await assert.rejects(() => postAssistantChat(PAYLOAD, 'ключ'), /не ответил за 60 секунд/);
+  });
+});
+
 // ── Аудит 2026-11-01: ключ с не-ISO-8859-1 символами (баг e2e №6) ───────────
 //
 // fetch принимает значения заголовков только в ISO-8859-1 (ByteString по

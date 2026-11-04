@@ -108,6 +108,10 @@ function stripUnsafeHeaderChars(apiKey) {
 // apiKey — сохранённый на устройстве ключ. Имя наружу не «requestAssistantReply»:
 // под этим именем в assistant-view.js осталась тонкая обёртка, собирающая
 // payload из состояния ассистента (её зовут тесты таймеров).
+// Текст диагноза дедлайна: один на fetch-сбой и на сбой чтения тела, чтобы
+// две ветки не разъезжались по формулировкам.
+const TIMEOUT_ERROR_TEXT = 'Сервис не ответил за 60 секунд. Попробуйте ещё раз.';
+
 export async function postAssistantChat(payload, apiKey) {
   // Уже сохранённый кривой ключ не должен ни ронять fetch до сети («Нет
   // связи» при исправной сети), ни блокировать запрос: не-ISO символы
@@ -120,75 +124,90 @@ export async function postAssistantChat(payload, apiKey) {
       + '— вырезаны перед отправкой. Вставьте ключ заново в настройках '
       + '(шестерёнка в шапке).');
   }
-  let response;
+  // Один guard на всю операцию: fetch разрешается на ЗАГОЛОВКАХ, а тело
+  // (text/json) читается ПОЗЖЕ. Снятие таймера сразу после await fetch
+  // оставляло зависшее тело без дедлайна на браузерах без AbortSignal.timeout
+  // (F5, аудит GPT 2026-11-03) — поэтому cancel() в finally, накрывающем и
+  // чтение тела.
   const guard = timeoutGuard(REQUEST_TIMEOUT_MS);
   try {
-    response = await fetch(ASSISTANT_API_URL, {
-      method: 'POST',
-      headers: {
-        'Authorization': 'Bearer ' + headerKey,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(payload),
-      signal: guard.signal,
-    });
-  } catch (e) {
-    // Реальная причина — в консоль (helper), текст — в ленту: TypeError
-    // (сеть/CORS/старый API) и TimeoutError/AbortError видны только так.
-    // timedOut() ловит ручную ветку: там abort даёт AbortError.
-    const timedOut = (e && e.name === 'TimeoutError') || guard.timedOut();
-    throw new Error(handleNetworkError(e, {
-      context: '[assistant]',
-      silent: true,
-      message: timedOut
-        ? 'Сервис не ответил за 60 секунд. Попробуйте ещё раз.'
-        : 'Нет связи с сервисом нейросети. Подробности — в консоли браузера (F12).',
-    }));
-  } finally {
-    // Таймер больше не нужен при любом исходе запроса
-    guard.cancel();
-  }
-
-  if (!response.ok) {
-    let detail = '';
+    let response;
     try {
-      detail = (await response.text()).slice(0, 500);
+      response = await fetch(ASSISTANT_API_URL, {
+        method: 'POST',
+        headers: {
+          'Authorization': 'Bearer ' + headerKey,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify(payload),
+        signal: guard.signal,
+      });
     } catch (e) {
-      // тело ошибки не прочиталось — статус уже показан ниже
-    }
-    console.error('[assistant] HTTP ' + response.status, ASSISTANT_API_URL, detail);
-    // Повреждённый ключ сервис отклоняет generic-401/403, а локальная
-    // проверка выше уже знает точный диагноз — текст для пользователя честнее
-    if (keyDamaged && (response.status === 401 || response.status === 403)) {
-      throw new Error('Ключ повреждён — откройте настройки и вставьте его '
-        + 'заново (шестерёнка в шапке).');
-    }
-    throw new Error(friendlyError(response.status));
-  }
-
-  let data;
-  try {
-    data = await response.json();
-  } catch (e) {
-    // Обрыв сети посреди чтения тела fetch роняет TypeError'ом (спека fetch:
-    // network error при прерывании потока), невалидный JSON — SyntaxError.
-    // Раньше оба случая маскировались под «не в формате JSON».
-    if (e && e.name === 'TypeError') {
+      // Реальная причина — в консоль (helper), текст — в ленту: TypeError
+      // (сеть/CORS/старый API) и TimeoutError/AbortError видны только так.
+      // timedOut() ловит ручную ветку: там abort даёт AbortError.
+      const timedOut = (e && e.name === 'TimeoutError') || guard.timedOut();
       throw new Error(handleNetworkError(e, {
         context: '[assistant]',
         silent: true,
-        message: 'Связь прервалась посреди ответа. Попробуйте ещё раз.',
+        message: timedOut
+          ? TIMEOUT_ERROR_TEXT
+          : 'Нет связи с сервисом нейросети. Подробности — в консоли браузера (F12).',
       }));
     }
-    throw new Error('Сервис вернул ответ не в формате JSON. Попробуйте позже.');
-  }
 
-  const reply = data && data.choices && data.choices[0]
-    && data.choices[0].message && data.choices[0].message.content;
-  if (typeof reply !== 'string' || !reply.trim()) {
-    throw new Error('Сервис ответил пустым сообщением. Попробуйте переформулировать вопрос.');
+    if (!response.ok) {
+      let detail = '';
+      try {
+        detail = (await response.text()).slice(0, 500);
+      } catch (e) {
+        // тело ошибки не прочиталось (в т.ч. оборванное дедлайном) — статус
+        // уже сам по себе диагноз, его и показываем ниже
+      }
+      console.error('[assistant] HTTP ' + response.status, ASSISTANT_API_URL, detail);
+      // Повреждённый ключ сервис отклоняет generic-401/403, а локальная
+      // проверка выше уже знает точный диагноз — текст для пользователя честнее
+      if (keyDamaged && (response.status === 401 || response.status === 403)) {
+        throw new Error('Ключ повреждён — откройте настройки и вставьте его '
+          + 'заново (шестерёнка в шапке).');
+      }
+      throw new Error(friendlyError(response.status));
+    }
+
+    let data;
+    try {
+      data = await response.json();
+    } catch (e) {
+      // Дедлайн мог прийтись именно на чтение тела: ручная ветка обрывает
+      // поток AbortError'ом (флаг timedOut() — единственный признак, имя
+      // ничего не говорит), нативная AbortSignal.timeout — TimeoutError'ом.
+      // Без этой ветки оборванный по таймауту поток врал бы «не в формате JSON».
+      if ((e && e.name === 'TimeoutError') || guard.timedOut()) {
+        throw new Error(TIMEOUT_ERROR_TEXT);
+      }
+      // Обрыв сети посреди чтения тела fetch роняет TypeError'ом (спека fetch:
+      // network error при прерывании потока), невалидный JSON — SyntaxError.
+      // Раньше оба случая маскировались под «не в формате JSON».
+      if (e && e.name === 'TypeError') {
+        throw new Error(handleNetworkError(e, {
+          context: '[assistant]',
+          silent: true,
+          message: 'Связь прервалась посреди ответа. Попробуйте ещё раз.',
+        }));
+      }
+      throw new Error('Сервис вернул ответ не в формате JSON. Попробуйте позже.');
+    }
+
+    const reply = data && data.choices && data.choices[0]
+      && data.choices[0].message && data.choices[0].message.content;
+    if (typeof reply !== 'string' || !reply.trim()) {
+      throw new Error('Сервис ответил пустым сообщением. Попробуйте переформулировать вопрос.');
+    }
+    return reply.trim();
+  } finally {
+    // Таймер больше не нужен при любом исходе — включая отказ на чтении тела
+    guard.cancel();
   }
-  return reply.trim();
 }
 
 // --- Фото в чате (Vision) ----------------------------------------------------
