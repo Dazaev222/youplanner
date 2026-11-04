@@ -1,6 +1,7 @@
 import { bus } from '../core/bus.js';
 import { safeSetItem } from '../core/storage.js';
 import { defaultHabit, loadHabits, saveHabits } from './habits.js';
+import { ensurePlannerEnvelope } from './matrix.js';
 import { PRESS_HABIT_ID } from './records.js';
 import { STORAGE_KEYS } from './storage.js';
 import { hasData, saveNormalized } from '../sync/core.js';
@@ -69,5 +70,18 @@ export function migratePressHabit() {
 }
 
 // plannerV1: повторяемая миграция локального списка Матрицы в envelope
-// (ТЗ §1.4.5). Заглушка RED — реализация следующим коммитом.
-export function migratePlanner() { return false; }
+// (ТЗ §1.4.5). Идемпотентна: существующий envelope НЕ перетирается и НЕ
+// удаляется — отсутствие новой области у старого клиента/бэкапа не означает
+// удаления. Старые id сохраняются; записи без id получают стабильный id
+// через таблицу соответствия, переживающую повтор (детерминированный hash
+// вместо часов). Привычки, их надгробия, историю и настройки миграция не
+// трогает вовсе — в отличие от прежней destructive drop-tasks, которая
+// сносит только снятый раздел youplanner.tasks и к plannerV1 не имеет
+// отношения. Пометка ставится после удачной записи (сбой повторит миграцию,
+// повтор безопасен). Возвращает true, когда envelope есть и цел.
+export function migratePlanner() {
+  const result = ensurePlannerEnvelope();
+  if (!result.saved) return false;
+  if (result.created) markMigration('planner-envelope');
+  return true;
+}

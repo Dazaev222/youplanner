@@ -390,7 +390,9 @@ test('saveTasks: пишет envelope plannerV1 поверх прежней за�
   assert.ok(firstOp.operation.entryId === 't1' || firstOp.operation.entryId === 't2',
     'opIds не связаны с записями');
 
-  assert.deepEqual(app.context.loadTasks().map(function (t) { return t.id; }), ['t1', 't2']);
+  // Array.from: массив создан в vm-контексте, deepStrictEqual сверял бы
+  // прототипы двух realm'ов (та же практика, что в sync.test.mjs)
+  assert.deepEqual(Array.from(app.context.loadTasks().map(function (t) { return t.id; })), ['t1', 't2']);
 });
 
 test('saveTasks: правка одного поля двигает версию только у него; повтор той же правки не плодит операций', () => {
