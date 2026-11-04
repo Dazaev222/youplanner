@@ -463,7 +463,11 @@ export function renderStatsHabitsView() {
   let markup = '';
   for (let i = 0; i < habits.length; i++) {
     const habit = habits[i];
-    const spark = sparklineSvg(sparkValues(sparkDates, d => calcProgress(habit, [d])), {
+    // calcProgress отдаёт ПРОЦЕНТ (строка справа печатает его как «N%»), а
+    // шкала спарклайна — доля (ceiling: 1). Без деления любой день хотя бы
+    // с одним процентом рисовался на потолке, и линия превращалась в
+    // «было / не было»: 2 страницы из 5 и 5 из 5 были неразличимы.
+    const spark = sparklineSvg(sparkValues(sparkDates, d => calcProgress(habit, [d]) / 100), {
       label: habit.name + ', тренд за ' + SPARK_DAYS + ' дней',
     });
     markup += '<li><button type="button" class="settings-row" data-habit-id="' +

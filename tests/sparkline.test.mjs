@@ -7,6 +7,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadApp } from './helpers/load-app.mjs';
+import { addDays, toISODate } from '../js/core/dates.js';
 
 function coords(svg) {
   const m = /points="([^"]+)"/.exec(svg || '');
@@ -84,4 +85,42 @@ test('sparkValues читает ряд через переданный счётч
   // prototypes и на «одинаковых» [] из разных реалмов падает на ровном месте.
   assert.deepEqual(JSON.parse(JSON.stringify(ctx.sparkValues(['a'], null))), [],
     'без счётчика ряда нет');
+});
+
+/* --- единицы измерения у ВЫЗЫВАЮЩЕГО кода (находка аудита 04.11) ---------- */
+
+/* Всё выше — про чистую функцию, и именно поэтому дефект жил молча:
+   calcProgress() отдаёт ПРОЦЕНТ (строка справа печатает его как «N%»), а
+   sparkValues() режет ряд по шкале 0…1. Строка статистики подставляла процент
+   прямо в спарклайн, поэтому любой день хотя бы с одним процентом рисовался
+   на потолке и линия отвечала только «было / не было»: 1 страница из 5 и 5 из
+   5 выглядели одинаково. Проверка идёт через настоящий renderStatsHabitsView,
+   а не через пересказ формулы, — иначе она бы и дальше молчала. */
+
+test('тренд строки статистики: 20% и 100% — разные высоты, а не один потолок', (t) => {
+  const app = loadApp();
+  const ctx = app.context;
+  ctx.localStorage.setItem('youplanner.habits', JSON.stringify([
+    { id: 'h-num', name: 'Страницы', type: 'number', goal: 5, unit: 'стр' },
+  ]));
+  const records = {};
+  for (let back = 13; back >= 0; back--) {
+    // Запись идёт штатным setRecord, а не прямым setItem: habitFirstRecordDate
+    // строит границу ведения по тем же мутациям, что и таблица, и вручную
+    // положенный ключ он не замечает — тест тогда падает на пустом тренде,
+    // а не на масштабе.
+    ctx.setRecord(toISODate(addDays(new Date(), -back)), 'h-num', back % 2 === 0 ? 5 : 1);
+  }
+
+  let html = '';
+  ctx.document.getElementById = (id) => (id === 'stats-habits-list'
+    ? { set innerHTML(v) { html = v; }, get innerHTML() { return html; } }
+    : null);
+
+  ctx.renderStatsHabitsView();
+
+  const ys = new Set(coords(html).map(pair => pair.split(',')[1]));
+  assert.ok(coords(html).length >= 2, 'строка без спарклайна: ' + html.slice(0, 160));
+  assert.ok(ys.size >= 2,
+    'линия плоская на потолке — проценты не переведены в доли (y: ' + [...ys].join(' ') + ')');
 });
