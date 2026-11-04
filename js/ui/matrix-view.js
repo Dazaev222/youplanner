@@ -63,6 +63,18 @@ const PRIORITY_LABEL = {
   3: 'высокий',
 };
 
+// Нулевой приоритет — не значение, а невыбранное состояние: кнопка остаётся
+// серой и подписывается как поле, а не как «без приоритета» (в списке выбора
+// 0 — такой же пункт, там текст другой). Поэтому помощники описывают именно
+// кнопку, а не подменяют PRIORITY_LABEL, и правило не живёт в разметке.
+function priorityClass(priority) {
+  return priority === PRIORITY_NONE ? '' : ' is-set p' + priority;
+}
+
+function priorityLabel(priority) {
+  return priority === PRIORITY_NONE ? 'Приоритет' : PRIORITY_LABEL[priority];
+}
+
 // Причина отказа записи называется вслух: «что-то не сохранилось» читают как
 // «авось потом», а «память браузера занята» — как «надо почистить». Текст один
 // на все правки, потому что важен не тип действия, а то, что правка до
@@ -470,11 +482,10 @@ function composerBar(quadrant) {
   due.setAttribute('aria-label', 'Срок исполнения');
   due.addEventListener('click', () => openDateSheet());
 
-  const flag = el('button', 'matrix-attr' + (draft.priority !== PRIORITY_NONE ? ' is-set p' + draft.priority : ''));
+  const flag = el('button', 'matrix-attr' + priorityClass(draft.priority));
   flag.type = 'button';
   flag.innerHTML = svgIcon('flag', 18);
-  flag.appendChild(el('span', 'matrix-attr-label',
-    draft.priority === PRIORITY_NONE ? 'Приоритет' : PRIORITY_LABEL[draft.priority]));
+  flag.appendChild(el('span', 'matrix-attr-label', priorityLabel(draft.priority)));
   flag.setAttribute('aria-label', 'Приоритет');
   flag.addEventListener('click', () => openPriorityMenu(flag));
 

@@ -36,7 +36,15 @@ const ASSISTANT_API_URL = 'https://api.neuraldeep.ru/v1/chat/completions';
 // не успевали в 30, и запрос рвался по таймауту на «Нет связи»
 const REQUEST_TIMEOUT_MS = 60000;
 
-function friendlyError(status) {  if (status === 401 || status === 403) {
+// 401 и 403 для этого эндпоинта значат одно: ключ не принят сервисом. Проверка
+// вынесена в предикат, потому что она нужна дважды — в тексте ошибки и в ветке
+// повреждённого ключа; продублированная, она разъехалась бы со временем.
+function isKeyRejected(status) {
+  return status === 401 || status === 403;
+}
+
+function friendlyError(status) {
+  if (isKeyRejected(status)) {
     return 'Ключ не принят сервисом (ошибка ' + status
       + '). Проверьте ключ через шестерёнку в шапке.';
   }
@@ -167,7 +175,7 @@ export async function postAssistantChat(payload, apiKey) {
       console.error('[assistant] HTTP ' + response.status, ASSISTANT_API_URL, detail);
       // Повреждённый ключ сервис отклоняет generic-401/403, а локальная
       // проверка выше уже знает точный диагноз — текст для пользователя честнее
-      if (keyDamaged && (response.status === 401 || response.status === 403)) {
+      if (keyDamaged && isKeyRejected(response.status)) {
         throw new Error('Ключ повреждён — откройте настройки и вставьте его '
           + 'заново (шестерёнка в шапке).');
       }

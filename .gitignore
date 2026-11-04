@@ -6,3 +6,4 @@ Thumbs.db
 .env
 .env.local
 .test_tmp/
+_tools/claude-ansar-local.bat
