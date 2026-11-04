@@ -6,7 +6,11 @@
 //     человеком, и через неделю не врёт;
 //   * перенос карточки меняет ПРИЧИНУ (срок/приоритет), а не метку;
 //   * санитайзер не пропускает ни мусор полей, ни переносы в заголовке;
-//   * раздел живёт на устройстве, ключ один, битый JSON не роняет экран.
+//   * раздел живёт на устройстве, ключ один, битый JSON не роняет экран;
+//   * отказ записи НЕ превращается в «Добавлено»: правка откатывается, черновик
+//     остаётся в поле, а причина отказа названа вслух (экран описывает судьбу
+//     данных честно — F3);
+//   * экран сетки словами говорит, что задачи не синхронизируются (F8).
 //
 // `today` везде передаётся аргументом: тест не зависит от часов машины.
 
@@ -354,4 +358,206 @@ test('задача из строки ввода долетает ровно до
   assert.ok(added, 'задача не добавилась');
   assert.equal(ctx.quadrantOf(added, new Date()), 'q2',
     'то, что обещает пилюля, и то, где карточка лежит, — одно и то же');
+});
+
+/* --- DOM-песочница экрана ------------------------------------------------- */
+
+// Остальные тесты проверяют модель, а «экран не соврал» — это уже DOM, которого
+// у песочницы loadApp нет. Узел ниже поддерживает ровно тот набор, который
+// matrix-view действительно зовёт (createElement, appendChild/append,
+// textContent, dataset, listeners), и не пытается повторить браузер — тот же
+// приём, что с фейковым деревом в tests/sync-render.test.mjs.
+function makeNode(tag) {
+  const node = {
+    tagName: tag,
+    className: '',
+    innerHTML: '',
+    hidden: false,
+    value: '',
+    style: {},
+    dataset: {},
+    children: [],
+    _events: {},
+    addEventListener(type, fn) {
+      (node._events[type] || (node._events[type] = [])).push(fn);
+    },
+    setAttribute(name, value) { node[name] = String(value); },
+    getAttribute(name) { return node[name] === undefined ? null : String(node[name]); },
+    appendChild(child) { node.children.push(child); return child; },
+    append(...list) { for (const child of list) if (child) node.children.push(child); },
+    getBoundingClientRect() {
+      return { top: 0, bottom: 40, left: 0, right: 100, width: 100, height: 40 };
+    },
+    // вызов слушателя так, как это сделал бы браузер: событие с preventDefault
+    fire(type, event) {
+      const detail = event || {};
+      if (typeof detail.preventDefault !== 'function') detail.preventDefault = () => {};
+      for (const fn of node._events[type] || []) fn(detail);
+    },
+  };
+  // children и childNodes — ОДНА и та же страница массива: экран читает
+  // meta.childNodes.length, решая нужна ли строка мета, и у фейка этот счёт
+  // обязан сходиться с appendChild.
+  node.childNodes = node.children;
+  // textContent со смыслом присваивания '', а не только со словом:
+  // renderMatrixView снимает дерево именно так, и фейк обязан сбрасывать детей,
+  // иначе узлы копились бы на каждой перерисовке и счёт плашек врал бы.
+  let text = '';
+  Object.defineProperty(node, 'textContent', {
+    get: () => text,
+    set: (value) => {
+      text = value === null || value === undefined ? '' : String(value);
+      if (text === '') node.children.length = 0;
+    },
+  });
+  return node;
+}
+
+function findByClass(root, className) {
+  const out = [];
+  const walk = (node) => {
+    for (const child of node.children || []) {
+      if (String(child.className).split(/\s+/).indexOf(className) >= 0) out.push(child);
+      walk(child);
+    }
+  };
+  walk(root);
+  return out;
+}
+
+function oneByClass(root, className) {
+  const found = findByClass(root, className);
+  assert.equal(found.length, 1, 'узел .' + className + ' должен быть ровно один');
+  return found[0];
+}
+
+// #matrix-view (экран) и #toast (единственный тост приложения) — всё, чего
+// экран просит по id.
+function installMatrixDom(app) {
+  const host = makeNode('section');
+  const toast = makeNode('div');
+  toast.hidden = true;
+  const byId = { 'matrix-view': host, toast: toast };
+  app.sandbox.document.getElementById = (id) => byId[id] || null;
+  app.sandbox.document.createElement = (tag) => makeNode(tag);
+  app.sandbox.document.querySelector = () => null;
+  app.sandbox.document.querySelectorAll = () => [];
+  return { host: host, toast: toast };
+}
+
+// Отказ хранилища моделируется НАСТОЯЩИМ броском setItem: тогда safeSetItem
+// проходит весь свой путь — ловит QuotaExceededError, эмитит storage:error и
+// возвращает false. Подменять safeSetItem заглушкой было бы слабее: экран
+// проверялся бы на выдуманном контракте, а не на том, что даёт хранилище.
+function breakStorage(app) {
+  app.sandbox.localStorage.setItem = () => {
+    const error = new Error('QuotaExceededError');
+    error.name = 'QuotaExceededError';
+    throw error;
+  };
+}
+
+// F3: ложь интерфейса — «Добавлено» при несостоявшейся записи. Черновик стёрт,
+// перечитывание при перерисовке вернёт старый список, человек потеряет ввод и
+// не узнает, что задача никуда не легла.
+test('отказ записи: матрица не рапортует «Добавлено» и не теряет набранный текст', (t) => {
+  const app = loadApp();
+  const dom = installMatrixDom(app);
+  app.context.openQuadrantView('q1', true);
+
+  const form = oneByClass(dom.host, 'matrix-composer');
+  const titleField = oneByClass(dom.host, 'matrix-composer-title');
+  titleField.value = 'Не терять мой текст';
+  titleField.fire('input');
+  breakStorage(app);
+  form.fire('submit');
+
+  // (а) задача НЕ считается добавленной — ни в памяти экрана, ни в хранилище
+  assert.equal(app.context.matrixDebugState().tasks.length, 0,
+    'несохранённая задача не должна остаться в списке экрана');
+  assert.equal(app.context.loadTasks().length, 0, 'и в хранилище её нет');
+  // (б) черновик НЕ очищен: набранный текст жив и в модели, и в поле
+  assert.equal(app.context.matrixDebugState().draft.title, 'Не терять мой текст');
+  assert.equal(oneByClass(dom.host, 'matrix-composer-title').value, 'Не терять мой текст',
+    'текст обязан остаться в поле ввода');
+  // (в) показана ошибка с явной причиной, а не «Добавлено»
+  assert.equal(dom.toast.hidden, false, 'тост обязан быть виден');
+  assert.match(dom.toast.textContent, /Не удалось сохранить/);
+  assert.match(dom.toast.textContent, /память браузера/,
+    'причина отказа должна быть названа самим экраном, а не только общим подписчиком');
+  assert.ok(!/Добавлено/.test(dom.toast.textContent), 'успех при неудаче рапортовать нельзя');
+});
+
+// Откат нужен каждой правке, а не только добавлению: без него экран врет
+// человеку до первой перерисовки, которая перечитает хранилище и список
+// «починится» сама — то есть ровно в тот момент, когда правка уже потеряна.
+test('отказ записи откатывает список: ни одна правка не остаётся в памяти экрана', (t) => {
+  const app = loadApp();
+  const dom = installMatrixDom(app);
+  app.context.saveTasks([task(app.context, { id: 'a', title: 'Была', priority: 3, due: iso(0) })]);
+  app.context.renderMatrixView();
+  const before = plain(app.context.matrixDebugState().tasks);
+  assert.equal(before.length, 1);
+
+  breakStorage(app);
+
+  assert.equal(app.context.toggleDone('a'), false, 'отметка не состоялась');
+  assert.deepEqual(plain(app.context.matrixDebugState().tasks), before, 'отметка откатана');
+  assert.match(dom.toast.textContent, /память браузера/, 'ошибка показана, а не проглочена');
+  assert.ok(!/Выполнено/.test(dom.toast.textContent), 'успех не рапортуется');
+
+  assert.equal(app.context.moveToQuadrant('a', 'q4'), null);
+  assert.equal(app.context.matrixDebugState().tasks[0].priority, 3, 'перенос откатан');
+
+  assert.equal(app.context.archiveTask('a'), false);
+  assert.equal(app.context.matrixDebugState().tasks[0].archived, false, 'архив откатан');
+
+  assert.equal(app.context.restoreFromArchive('a'), false);
+  assert.equal(app.context.purgeArchived('a'), false);
+  assert.equal(app.context.matrixDebugState().tasks.length, 1, 'удаление откатано');
+
+  assert.equal(app.context.addTask('q1', { title: 'Новая' }), null);
+  assert.equal(app.context.matrixDebugState().tasks.length, 1, 'новая задача не осталась в памяти');
+  assert.equal(app.context.loadTasks().length, 1, 'в хранилище ровно прежний список');
+  assert.equal(dom.toast.hidden, false);
+
+  // И обратный договор: пока запись проходит, правки доходят до экрана как
+  // раньше (иначе «честность» легко склеить из вечного отказа).
+  const okApp = loadApp();
+  const okDom = installMatrixDom(okApp);
+  okApp.context.saveTasks([task(okApp.context, { id: 'a', title: 'Была', priority: 3, due: iso(0) })]);
+  okApp.context.renderMatrixView();
+  assert.equal(okApp.context.toggleDone('a'), true);
+  assert.equal(okApp.context.matrixDebugState().tasks[0].done, true, 'отметка сохранена');
+  assert.match(okDom.toast.textContent, /Выполнено/);
+  assert.ok(!/память браузера/.test(okDom.toast.textContent),
+    'при успешной записи об ошибке говорить не с чего');
+});
+
+/* --- Плашка о локальности раздела ----------------------------------------- */
+
+// Матрица живёт только на устройстве (ключ не входит в снимок синхронизации).
+// Молчать об этом нельзя: потерянный на втором телефоне список человек
+// прочитает как потерю данных, а не как отсутствие функции.
+test('плашка про локальность матрицы: один раз в сетке и ни разу в квадранте', (t) => {
+  const app = loadApp();
+  const dom = installMatrixDom(app);
+  app.context.saveTasks([task(app.context, { id: 'a', priority: 3, due: iso(0) })]);
+  app.context.renderMatrixView();
+
+  const notes = findByClass(dom.host, 'matrix-sync-note');
+  assert.equal(notes.length, 1, 'плашка о хранении на устройстве — ровно одна');
+  assert.match(notes[0].textContent, /только на этом устройстве/);
+  assert.equal(findByClass(dom.host, 'matrix-card').length, 4, 'сетка 2×2 на месте');
+
+  // перерисовка не плодит копию
+  app.context.renderMatrixView();
+  assert.equal(findByClass(dom.host, 'matrix-sync-note').length, 1);
+
+  // полноэкранный вид квадранта — отдельный экран со своей шапкой: там
+  // плашки сетки быть не должно
+  app.context.openQuadrantView('q1');
+  assert.equal(findByClass(dom.host, 'matrix-detail').length, 1);
+  assert.equal(findByClass(dom.host, 'matrix-sync-note').length, 0,
+    'в полноэкранном виде квадранта плашка не появляется');
 });

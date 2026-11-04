@@ -24,10 +24,15 @@
 
    Пользовательский текст уходит через textContent, разметка собирается из
    константных строк: `<img onerror>` в заголовке задачи не должен становиться
-   разметкой. */
+   разметкой.
+
+   Правка матрицы считается сделанной ПОСЛЕ успешной записи, а не до неё
+   (см. commitTasks): при переполненной квоте или в приватном режиме хранилище
+   ничего не принимает, и «Добавлено» поверх несостоявшейся записи было бы
+   ложью интерфейса о сохранности данных — черновик терялся бы вместе с ней. */
 
 import { addDays, parseISODate, toISODate } from '../core/dates.js';
-import { showToast } from '../core/dom.js';
+import { showErrorToast, showToast } from '../core/dom.js';
 import {
   PRIORITY_HIGH,
   PRIORITY_LOW,
@@ -57,6 +62,13 @@ const PRIORITY_LABEL = {
   2: 'средний',
   3: 'высокий',
 };
+
+// Причина отказа записи называется вслух: «что-то не сохранилось» читают как
+// «авось потом», а «память браузера занята» — как «надо почистить». Текст один
+// на все правки, потому что важен не тип действия, а то, что правка до
+// хранилища не дошла. showErrorToast — тот же единственный #toast, что у
+// остальных экранов: второго слоя подсказок здесь нет.
+const SAVE_ERROR_TEXT = 'Не удалось сохранить: память браузера занята, изменения не сохранены';
 
 // Иконки — один набор, один штрих (1.6), одна сетка 24×24. Рисовать их «на
 // глаз» в разных местах нельзя: разъехавшаяся толщина штриха читается сразу.
@@ -268,6 +280,13 @@ function renderGrid(host, now) {
   if (overdue) {
     head.appendChild(el('p', 'matrix-alert', 'Просрочено задач: ' + overdue));
   }
+  // Раздел живёт на одном устройстве: ключ youplanner.matrix.tasks не входит в
+  // снимок синхронизации, и человек обязан читать это со спокойного слова
+  // заранее, а не узнавать о нём по потерянному списку на втором телефоне.
+  // Плашка стоит в шапке сетки и только в ней: полноэкранный вид квадранта —
+  // свой экран, а квадрант от хранилища ничего не скрывает.
+  head.appendChild(el('p', 'matrix-sync-note',
+    'Задачи матрицы хранятся только на этом устройстве и не синхронизируются'));
   host.appendChild(head);
 
   const grid = el('div', 'matrix-grid');
@@ -502,12 +521,18 @@ function submitDraft() {
     due: draft.due,
     priority: draft.priority,
   };
-  // Черновик сбрасывается ДО добавления: addTask перерисовывает экран, а
-  // строка ввода строится из черновика — после перерисовки сбрасывать уже
-  // нечего, набранный текст остался бы в поле.
+  // Черновик сбрасывается ДО записи — единственная перерисовка (внутри addTask)
+  // показывает уже пустую строку. Не состоялась запись — черновик возвращается
+  // на место и экран перерисовывается с ним: набранный текст обязан остаться в
+  // поле, а причину отказа уже назвал commitTasks.
+  const typed = draft;
   draft = newDraft(quadrant);
-  addTask(quadrant, fields);
-  showToast('Добавлено');
+  if (addTask(quadrant, fields)) {
+    showToast('Добавлено');
+    return;
+  }
+  draft = typed;
+  renderMatrixView();
 }
 
 /* --- Меню и листы --------------------------------------------------------- */
@@ -785,8 +810,28 @@ export function moveOptions(task, now) {
   return QUADRANTS.filter(q => q.id !== current);
 }
 
+// Результат записи наружу: отказ хранилища иначе превращается в «Добавлено»
+// поверх незаписанных данных.
 function persist() {
-  saveTasks(tasks);
+  return saveTasks(tasks);
+}
+
+// Единственное место, где правка матрицы встречается с хранилищем: новый
+// список сначала записывается, и только при успехе экран считает правку
+// состоявшейся и перерисовывается. При отказе переменная модуля возвращается к
+// прежнему значению — перечитывать хранилище незачем, в нём лежит ровно оно, а
+// неоткатанный список врал бы человеку до первой перерисовки, которая молча
+// вернула бы старый.
+function commitTasks(next) {
+  const previous = tasks;
+  tasks = next;
+  if (persist()) {
+    renderMatrixView();
+    return true;
+  }
+  tasks = previous;
+  showErrorToast(SAVE_ERROR_TEXT);
+  return false;
 }
 
 export function addTask(quadrantId, fields) {
@@ -801,59 +846,55 @@ export function addTask(quadrantId, fields) {
   // Квадрант — намерение, а не метка: превращаем его в причину тем же
   // move-правилом, что и перенос карточки.
   const shaped = applyQuadrantMove(task, quadrantId, today()) || task;
-  tasks = [shaped].concat(tasks);
-  persist();
-  renderMatrixView();
-  return shaped;
+  // null = «задачи нет ни в хранилище, ни на экране»: по этому ответу
+  // вызывающий код не имеет права рапортовать добавление.
+  return commitTasks([shaped].concat(tasks)) ? shaped : null;
 }
 
 export function toggleDone(taskId) {
   let doneNow = false;
-  tasks = tasks.map(t => {
+  const next = tasks.map(t => {
     if (t.id !== taskId) return t;
     doneNow = !t.done;
     return markDone(t, !t.done);
   });
-  persist();
-  renderMatrixView();
+  if (!commitTasks(next)) return false;
   if (doneNow && !showDone) showToast('Выполнено');
   else if (doneNow) showToast('Выполнено — осталось в списке');
+  return true;
 }
 
 export function moveToQuadrant(taskId, quadrantId) {
   let moved = null;
-  tasks = tasks.map(t => {
+  const next = tasks.map(t => {
     if (t.id !== taskId) return t;
     moved = applyQuadrantMove(t, quadrantId, today()) || t;
     return moved;
   });
   if (!moved) return null;
-  persist();
-  renderMatrixView();
-  return moved;
+  return commitTasks(next) ? moved : null;
 }
 
 export function archiveTask(taskId) {
-  tasks = tasks.map(t => (t.id === taskId
+  const next = tasks.map(t => (t.id === taskId
     ? Object.assign({}, t, { archived: true, updatedAt: new Date().toISOString() })
     : t));
-  persist();
-  renderMatrixView();
+  if (!commitTasks(next)) return false;
   showToast('Задача в архиве');
+  return true;
 }
 
 export function restoreFromArchive(taskId) {
-  tasks = tasks.map(t => (t.id === taskId ? restoreTask(t) : t));
-  persist();
-  renderMatrixView();
+  const next = tasks.map(t => (t.id === taskId ? restoreTask(t) : t));
+  if (!commitTasks(next)) return false;
   showToast('Вернули в матрицу');
+  return true;
 }
 
 export function purgeArchived(taskId) {
-  tasks = purgeTask(tasks, taskId);
-  persist();
-  renderMatrixView();
+  if (!commitTasks(purgeTask(tasks, taskId))) return false;
   showToast('Удалено безвозвратно');
+  return true;
 }
 
 export function openQuadrantView(quadrantId, withComposer) {
