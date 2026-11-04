@@ -372,6 +372,13 @@ async function main() {
           items: sheet ? sheet.querySelectorAll('.matrix-sheet-item').length : 0,
           bottomGap: r ? Math.round(window.innerHeight - r.bottom) : null,
           width: r ? Math.round(r.width) : 0,
+          // Фокус обязан уехать внутрь листа, а не остаться на чипе, который
+          // стал недоступным, и цель — текущий выбор, а не первая сверху.
+          focusInside: !!(sheet && sheet.contains(document.activeElement)),
+          focusOnCurrent: !!(document.activeElement
+            && document.activeElement.getAttribute('aria-current') === 'true'),
+          optionRoles: sheet
+            ? Array.from(sheet.querySelectorAll('[role="option"]')).length : 0,
           scrimAlpha: scrim
             ? Number((getComputedStyle(scrim).backgroundColor.match(/[\d.]+\)$/) || ['0)'])[0].slice(0, -1))
             : null,
@@ -381,6 +388,10 @@ async function main() {
       assert.equal(quad.composer, 1, 'лист создания остаётся под ним, а не закрывается');
       assert.equal(quad.floating, 0, 'плавающего меню по координатам якоря в разделе больше нет');
       assert.equal(quad.items, 4, 'в листе все четыре квадранта');
+      assert.equal(quad.optionRoles, 0,
+        'в dialog с кнопкой «Отмена» ролей option быть не должно — это ломает ARIA');
+      assert.equal(quad.focusInside, true, 'фокус переехал внутрь листа');
+      assert.equal(quad.focusOnCurrent, true, 'фокус встал на текущий квадрант');
       assert.ok(quad.bottomGap <= 1, 'лист лежит на нижней кромке, зазор ' + quad.bottomGap + ' px');
       assert.ok(quad.width >= 320, 'лист на всю ширину окна, ширина ' + quad.width);
       // Два scrim-а подряд (32% + 32%) превращают экран в серую кашу: вложенный

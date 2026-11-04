@@ -1162,11 +1162,18 @@ function choiceSheet({ id, title, options, parent, onDismiss }) {
     if (onDismiss) onDismiss();
   };
 
+  // Фокус обязан уехать внутрь листа: оставить его на чипе, который только
+  // что стал недоступным, — значит потерять и клавиатуру, и скринридер.
+  // Целевая строка — текущий выбор, а не первая сверху.
+  let entry = null;
+
   for (const opt of options) {
     const btn = el('button', 'matrix-sheet-item' + (opt.className ? ' ' + opt.className : ''));
     btn.type = 'button';
-    btn.setAttribute('role', 'option');
-    btn.setAttribute('aria-selected', opt.current ? 'true' : 'false');
+    // Роль — button, а не option: панель ниже это dialog с кнопкой «Отмена»,
+    // а option живёт только внутри listbox. Текущий выбор читается через
+    // aria-current, поэтому скринридер называет его, не ломая роль.
+    if (opt.current) btn.setAttribute('aria-current', 'true');
     if (opt.badge) btn.appendChild(badge(opt.badge));
     if (opt.dot) btn.appendChild(el('span', 'matrix-dot ' + opt.dot));
     btn.appendChild(el('span', 'matrix-sheet-name', opt.label));
@@ -1178,6 +1185,7 @@ function choiceSheet({ id, title, options, parent, onDismiss }) {
       opt.onPick();
       if (onDismiss) onDismiss();
     });
+    if (!entry || opt.current) entry = btn;
     panel.appendChild(btn);
   }
 
@@ -1192,7 +1200,8 @@ function choiceSheet({ id, title, options, parent, onDismiss }) {
   });
 
   const layer = pushOverlay({
-    id, kind: 'sheet', parent, node: backdrop, panel, onEscape: close,
+    id, kind: 'sheet', parent, node: backdrop, panel,
+    focusTarget: entry, onEscape: close,
   });
   if (!layer) return null;
   trapTab(panel);
