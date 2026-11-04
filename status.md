@@ -7,7 +7,7 @@
 - Папка: `C:\Users\Admin\Desktop\проекты\youplanner-new`
 - Код: `index.html` (разметка) + `styles/` (CSS по секциям) + `js/`
   (ES-модули: `core/`, `data/`, `sync/`, `ui/`, `vendor/`); сборки нет.
-- PWA: `manifest.json`, `sw.js` (кэш `youplanner-v44`), иконки.
+- PWA: `manifest.json`, `sw.js` (кэш `youplanner-v45`), иконки.
 - Документация: `README.md`, `Spec.md`, `status.md`.
 - Репозиторий: https://github.com/Dazaev222/youplanner
 - Сайт: https://dazaev222.github.io/youplanner/
@@ -118,13 +118,15 @@
      случаи — после слияния plannerV1 прежнее слово «не синхронизируются»
      стало ложью (`2f32d1d`).
   5. Service Worker: `v42` (пересобранная Матрица), `v43` (транспорт
-     plannerV1 из слияния), `v44` (восемь файлов аудита). Без смены имени
+     plannerV1 из слияния), `v44` (восемь файлов аудита), `v45` (четыре
+     файла следом: `styles/mobile.css`, `js/ui/main-table.js`,
+     `js/ui/habits-edit.js`, `js/ui/matrix-view.js`). Без смены имени
      кэша ни одна из этих правок до телефона бы не доехала.
   Чего не делал и почему — в `../FACTORY_REPORT.md`: `firebase deploy
   --only database` (публичный файл с заглушкой `OWNER_UID` = закрыть себе
   синхронизацию) и `git filter-repo` (переписывание уже опубликованной
   истории — ТЗ прямо запрещал этой ночью публикацию).
-  Тесты 372 → 682, файлов тестов 35 → 51; браузерные наборы — матричная
+  Тесты 372 → 685, файлов тестов 35 → 52; браузерные наборы — матричная
   геометрия 24 PASS, тап-цели, chaos-E2E 7/7.
 
 - 2026-11-04 (вторая половина) — Аудит GPT-6.1 Sol: закрыты F1, F3, F4, F5,
@@ -546,8 +548,8 @@
   рабочего узла: envelope с Lamport-версиями по полям, delete-wins по
   надгробиям, outbox операций, CAS через ETag/If-Match на корневом PUT и
   бэкап v12, который уносит `plannerV1` вместе с остальным (заход 2026-11-05).
-  Осталось одно окно, и оно не в коде: старый клиент (кэш ниже v42) ключа
-  `plannerV1` не знает и его PUT-ом узел с сервера стирается. Данные
+  Осталось одно окно, и оно не в коде: клиент на кэше ниже v43 ключа
+  `plannerV1` не знает, и его PUT стирает узел с сервера. Данные
   переживают это, пока лежат локально на устройстве-создателе, но после
   очистки хранилища восстанавливать будет нечем. Закрытие — перенести
   `plannerV1` на соседний корень по образцу `FIREBASE_BACKUPS_URL`
@@ -579,7 +581,7 @@ outbox операций, счётчики актёров — в облако у�
 
 ## Тесты
 
-Штатный прогон (без браузера): `npm test` → **682/682** в 51 файле
+Штатный прогон (без браузера): `npm test` → **685/685** в 52 файлах
 `tests/*.test.mjs`: smoke, bus, core, modules, debounce, timers, xss,
 archive, backup, migrations, tombstones, sync, sync-merge, sync-render,
 sync-render-audit, planner-sync, planner-backup, firebase-auth,
@@ -601,11 +603,14 @@ XSS-экранирование, fallback-таймеры fetch, PDF-чанкин�
 владелец-гейт), `planner-backup` (round-trip v12, отказ битого и будущего
 формата), `assistant-delete` (удаление отдельной реплики),
 `sparkline-menu` (тренды пунктов меню), `table-header`, `modal-focus`,
-`mobile-tap` (последние три — аудит 2026-11-05).
+`mobile-tap` и `qaza-undo` (отмена последнего выполнения: значение,
+перерисовка, сбой записи). Последнее — проверка уже работающего кода, а не
+правка: дефекта в undo каза аудит не нашёл.
 
 Браузерные наборы (вне glob `npm test`): `node tests/matrix-layout.browser.mjs`
 → 24 PASS (геометрия Матрицы, 44 px у «+», нижние листы вместо
-всплывающих меню, скоуп Escape), `node tests/matrix-calendar.browser.mjs`,
+всплывающих меню, скоуп Escape), `node tests/mobile-tap.browser.mjs` →
+33 PASS, `node tests/matrix-calendar.browser.mjs`,
 `node tests/mobile-tap.browser.mjs` (реальные `getBoundingClientRect`
 тап-целей на 320–390 px), chaos-E2E `node tests/e2e/chaos.e2e.mjs` → **7/7**
 (Playwright, внешняя сеть заблокирована, Firebase — заглушка): недоступный
@@ -621,7 +626,7 @@ Firebase, кнопка «Выполнено», 1000 кликов, офлайн, 
 
 1. Правки — в `index.html`, `styles/` или `js/`; сборки нет.
 2. При изменении любого файла из `ASSETS` (а это весь `js/` и весь `styles/`)
-   поднять `CACHE` в `sw.js` (сейчас `youplanner-v44`) и прогнать `sw-assets`
+   поднять `CACHE` в `sw.js` (сейчас `youplanner-v45`) и прогнать `sw-assets`
    вместе с `npm test`. Без смены имени кэша устройство продолжит запускать
    прежние модули — на этом прогорели уже три правки истории проекта.
 3. `npm test` и `node tests/e2e/chaos.e2e.mjs`.
