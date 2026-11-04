@@ -21,18 +21,55 @@ export function habitTypeLabel(type) {
   }
   return '';
 }
+// Узел, который открыл модалку. `hidden` выбрасывает фокус из скрытого
+// поддерева в <body>, и без возврата клавиатурному человеку пришлось бы
+// табусаться от начала документа.
+let modalOpener = null;
+// Подпись списка, реально нарисованного на экране «Привычки». Закрытие
+// модалки пересобирает его ТОЛЬКО если данные правда изменились: пересборка
+// на ровном месте стоила человеку раскрытой строки с несохранённым черновиком
+// (замеры в браузере: строка схлопывалась, прокрутка прыгала, фокус падал в
+// body).
+let renderedEditSignature = null;
+// Что рисует editHabitRow: id, название, тип, единица, цель и время. Любое
+// отличие этих полей — это другая разметка списка.
+function habitsSignature() {
+  let signature = '';
+  for (let i = 0; i < appState.habits.length; i++) {
+    const habit = appState.habits[i];
+    signature += habit.id + '|' + habit.name + '|' + habit.type + '|' +
+      (habit.unit || '') + '|' + (habit.goal === null || habit.goal === undefined ? '' : habit.goal) +
+      '|' + (habit.time || '') + ';';
+  }
+  return signature;
+}
 export function openModal() {
   appState.habits = loadHabits();
   renderHabitList();
   const modal = document.getElementById('habit-modal');
+  // Куда возвратится фокус — берём ДО того, как модалка станет видимой:
+  // активным в этот момент остаётся элемент, который её открыл
+  modalOpener = document.activeElement || null;
   if (modal) modal.hidden = false;
 }
 export function closeModal() {
   const modal = document.getElementById('habit-modal');
-  if (modal) modal.hidden = true;
+  // Уже скрыта — выходим молча: closeModal() вызывается и на каждом переходе
+  // между экранами (switchAppView), а пересборка списка из-за такого вызова
+  // и была та самая лишняя перерисовка
+  if (!modal || modal.hidden) return;
+
+  modal.hidden = true;
   setFormError('');
-  // После добавления привычки список на экране «Привычки» устарел
-  renderHabitsEditList();
+  // После добавления привычки список на экране «Привычки» устарел — но только
+  // если он действительно разошёлся с данными
+  if (renderedEditSignature !== habitsSignature()) renderHabitsEditList();
+
+  if (modalOpener && typeof modalOpener.focus === 'function') {
+    // preventScroll: возврат к кнопке не должен швырнуть страницу к её месту
+    modalOpener.focus({ preventScroll: true });
+  }
+  modalOpener = null;
 }
 // Общие для обоих списков вычисления строки: блокировка типа (каза — всегда,
 // остальные — когда по привычке уже есть записи), подсказка и строковое
@@ -224,6 +261,9 @@ export function onHabitListClick(event) {
 // Строки-аккордеоны: поля раскрываются тапом по заголовку
 export function renderHabitsEditList() {
   renderHabitRows('habits-edit-list', editHabitRow);
+  // Что именно нарисовано — по этой подписи closeModal() решает, нужна ли
+  // пересборка: список на экране может пережить закрытие модалки нетронутым
+  renderedEditSignature = habitsSignature();
 }
 // Ошибка показывается внутри раскрытой строки — форма модалки здесь не видна
 export function setRowError(item, message) {
