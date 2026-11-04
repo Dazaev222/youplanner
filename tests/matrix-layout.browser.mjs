@@ -354,6 +354,90 @@ async function main() {
       await context.close();
     });
 
+    /* --- Меню квадранта и приоритета: нижний лист ------------------------ */
+    await step('квадрант и приоритет выбираются нижним листом, а не плавающим меню', async () => {
+      ({ context, page } = await openMatrix(browser, VIEWPORTS[0], 'one'));
+      await page.click('.matrix-card[data-quadrant="q3"] .matrix-card-add');
+      await page.waitForSelector('.matrix-sheet.is-composer', { timeout: 10000 });
+
+      await page.click('.matrix-quad-pill');
+      const quad = await page.evaluate(() => {
+        const sheet = document.querySelector('.matrix-sheet.is-quadpick');
+        const scrim = document.querySelector('.matrix-sheet-backdrop.is-quadpick');
+        const r = sheet && sheet.getBoundingClientRect();
+        return {
+          sheets: document.querySelectorAll('.matrix-sheet.is-quadpick').length,
+          composer: document.querySelectorAll('.matrix-sheet.is-composer').length,
+          floating: document.querySelectorAll('.matrix-pop').length,
+          items: sheet ? sheet.querySelectorAll('.matrix-sheet-item').length : 0,
+          bottomGap: r ? Math.round(window.innerHeight - r.bottom) : null,
+          width: r ? Math.round(r.width) : 0,
+          scrimAlpha: scrim
+            ? Number((getComputedStyle(scrim).backgroundColor.match(/[\d.]+\)$/) || ['0)'])[0].slice(0, -1))
+            : null,
+        };
+      });
+      assert.equal(quad.sheets, 1, 'квадрант открывается нижним листом');
+      assert.equal(quad.composer, 1, 'лист создания остаётся под ним, а не закрывается');
+      assert.equal(quad.floating, 0, 'плавающего меню по координатам якоря в разделе больше нет');
+      assert.equal(quad.items, 4, 'в листе все четыре квадранта');
+      assert.ok(quad.bottomGap <= 1, 'лист лежит на нижней кромке, зазор ' + quad.bottomGap + ' px');
+      assert.ok(quad.width >= 320, 'лист на всю ширину окна, ширина ' + quad.width);
+      // Два scrim-а подряд (32% + 32%) превращают экран в серую кашу: вложенный
+      // лист обязан брать светлый слой, как подтверждение.
+      assert.ok(quad.scrimAlpha !== null && quad.scrimAlpha <= 0.2,
+        'подложка вложенного листа светлее основной, alpha=' + quad.scrimAlpha);
+      await shoot(page, 'quadpick-390x844');
+
+      await page.locator('.matrix-sheet.is-quadpick .matrix-sheet-item').first().click();
+      const picked = await page.evaluate(() => ({
+        pill: (document.querySelector('.matrix-quad-pill') || {}).className,
+        sheets: document.querySelectorAll('.matrix-sheet.is-quadpick').length,
+        composer: document.querySelectorAll('.matrix-sheet.is-composer').length,
+        focus: document.activeElement && document.activeElement.className,
+      }));
+      assert.match(picked.pill || '', /q-q1/, 'выбор квадранта перекладывает чип листа');
+      assert.equal(picked.sheets, 0, 'лист выбора закрывается после выбора');
+      assert.equal(picked.composer, 1, 'и возвращает в незакрытый лист создания');
+      assert.match(picked.focus || '', /matrix-composer-title/, 'фокус возвращается в поле заголовка');
+
+      await page.click('.matrix-attr[aria-label="Приоритет"]');
+      const pr = await page.evaluate(() => {
+        const sheet = document.querySelector('.matrix-sheet.is-pickpriority');
+        return {
+          sheets: document.querySelectorAll('.matrix-sheet.is-pickpriority').length,
+          items: sheet ? sheet.querySelectorAll('.matrix-sheet-item').length : 0,
+          dots: sheet ? sheet.querySelectorAll('.matrix-sheet-item .matrix-dot').length : 0,
+          bottom: sheet ? Math.round(window.innerHeight - sheet.getBoundingClientRect().bottom) : null,
+        };
+      });
+      assert.equal(pr.sheets, 1, 'приоритет открывается нижним листом');
+      assert.equal(pr.items, 4, 'три приоритета и «без приоритета»');
+      assert.equal(pr.dots, 4, 'у каждой строки есть цветная метка');
+      assert.ok(pr.bottom <= 1, 'и он тоже лежит на нижней кромке');
+      await shoot(page, 'priority-390x844');
+
+      await page.locator('.matrix-sheet.is-pickpriority .matrix-sheet-item').first().click();
+      const flag = await page.evaluate(() => ({
+        attr: (document.querySelector('.matrix-attr[aria-label="Приоритет"]') || {}).className,
+        sheets: document.querySelectorAll('.matrix-sheet').length,
+      }));
+      assert.match(flag.attr || '', /is-set/, 'выбранный приоритет виден на чипе');
+      assert.equal(flag.sheets, 1, 'вложенный лист снят, остался только лист создания');
+
+      // Отмена по Escape не имеет права уносить человека из листа создания.
+      await page.click('.matrix-quad-pill');
+      await page.keyboard.press('Escape');
+      const escaped = await page.evaluate(() => ({
+        sheets: document.querySelectorAll('.matrix-sheet').length,
+        composer: document.querySelectorAll('.matrix-sheet.is-composer').length,
+      }));
+      assert.equal(escaped.sheets, 1, 'Escape снимает только вложенный лист');
+      assert.equal(escaped.composer, 1, 'лист создания жив');
+      assert.deepEqual(page.errorsCollected, [], 'pageerror: ' + page.errorsCollected.join(' | '));
+      await context.close();
+    });
+
     /* --- Список внутри карточки: последний элемент достижим --------------- */
     await step('длинный список: последний элемент достижим прокруткой внутри карточки', async () => {
       ({ context, page } = await openMatrix(browser, VIEWPORTS[0], 'hundred'));

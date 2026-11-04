@@ -487,22 +487,25 @@ function quadrantCard(quadrant, list, now) {
   card.dataset.quadrant = quadrant.id;
   card.setAttribute('aria-label', quadrant.title);
 
-  // Заголовок-пилюля и «+» — СОСЕДИ в div-контейнере, а не кнопка в кнопке:
-  // вложенный button и разметку ломает, и тап по «+» всплывает в обработчик
-  // заголовка, который открыл бы полноэкранный список вместо листа создания.
+  // Заголовок и «+» — СОСЕДИ в одной строке, а не кнопка в кнопке: вложенный
+  // button и разметку ломает, и тап по «+» всплывает в обработчик заголовка,
+  // который открыл бы полноэкранный список вместо листа создания.
+  // Плашка-пилюля с римской цифрой внутри выглядела инородным элементом, а
+  // перенос «+» на вторую строку на 390 px вешал его в воздухе: строка больше
+  // не переносится, при нехватке ширины переносится только название.
   const header = el('div', 'matrix-card-header');
 
   const head = el('button', 'matrix-card-head');
   head.type = 'button';
   head.setAttribute('aria-label', 'Открыть квадрант: ' + quadrant.title);
-  head.appendChild(badge(quadrant));
+  head.appendChild(el('span', 'matrix-card-dot'));
   head.appendChild(el('span', 'matrix-card-title', quadrant.title));
   head.addEventListener('click', () => openQuadrantView(quadrant.id));
 
   const add = el('button', 'matrix-card-add');
   add.type = 'button';
   add.setAttribute('aria-label', 'Добавить задачу: ' + quadrant.title);
-  add.innerHTML = svgIcon('plus', 20);
+  add.innerHTML = svgIcon('plus', 18);
   add.addEventListener('click', () => openTaskComposer({
     quadrantId: quadrant.id,
     opener: add,
@@ -966,12 +969,15 @@ function refreshComposerLine(layer) {
   layer.line.textContent = '';
   const picked = quadrantById(draft.quadrant) || QUADRANTS[0];
 
+  // Квадрант в строке атрибутов — такой же текстовый чип, как срок и
+  // приоритет: залитая пастелью пилюля рядом с двумя прозрачными кнопками
+  // выглядела вставкой из другой системы.
   const pill = el('button', 'matrix-quad-pill q-' + draft.quadrant);
   pill.type = 'button';
   pill.setAttribute('aria-label', 'Квадрант: ' + picked.title);
-  pill.appendChild(badge(picked));
+  pill.appendChild(el('span', 'matrix-card-dot'));
   pill.appendChild(el('span', null, picked.title));
-  pill.addEventListener('click', () => openQuadrantMenu(pill));
+  pill.addEventListener('click', () => openQuadrantMenu());
   layer.line.appendChild(pill);
 
   const due = el('button', 'matrix-attr' + (draft.due ? ' is-set' : ''));
@@ -991,7 +997,7 @@ function refreshComposerLine(layer) {
   flag.innerHTML = svgIcon('flag', 18);
   flag.appendChild(el('span', 'matrix-attr-label', priorityLabel(draft.priority)));
   flag.setAttribute('aria-label', 'Приоритет');
-  flag.addEventListener('click', () => openPriorityMenu(flag));
+  flag.addEventListener('click', () => openPriorityMenu());
   layer.line.appendChild(flag);
 
   const send = el('button', 'matrix-send');
@@ -1134,70 +1140,97 @@ export function applyDraftSchedule(value) {
 
 /* --- Меню и листы --------------------------------------------------------- */
 
-function popover(anchor, items) {
-  removeOverlay('pop');
-  const pop = el('div', 'matrix-pop');
-  pop.setAttribute('role', 'menu');
-  for (const item of items) {
-    const btn = el('button', 'matrix-pop-item' + (item.className ? ' ' + item.className : ''));
+/* --- Вложенный нижний лист выбора ---------------------------------------- */
+
+/* Квадрант и приоритет выбираются нижним листом — тем же каркасом, что лист
+   перемещения и лист срока. Прежнее плавающее меню считало координаты по
+   якорю и повисало над листом создания инородным телом, в которое ещё и
+   надо было попасть пальцем. */
+function choiceSheet({ id, title, options, parent, onDismiss }) {
+  removeOverlay(id);
+
+  const backdrop = el('div', 'matrix-sheet-backdrop is-' + id);
+  const panel = el('div', 'matrix-sheet is-' + id);
+  panel.setAttribute('role', 'dialog');
+  panel.setAttribute('aria-modal', 'true');
+  panel.setAttribute('aria-label', title);
+  panel.appendChild(el('div', 'matrix-sheet-grabber'));
+  panel.appendChild(el('p', 'matrix-sheet-title', title));
+
+  const close = () => {
+    removeOverlay(id);
+    if (onDismiss) onDismiss();
+  };
+
+  for (const opt of options) {
+    const btn = el('button', 'matrix-sheet-item' + (opt.className ? ' ' + opt.className : ''));
     btn.type = 'button';
-    btn.setAttribute('role', 'menuitem');
-    if (item.badge) btn.appendChild(badge(item.badge));
-    if (item.dot) btn.appendChild(el('span', 'matrix-dot ' + item.dot));
-    if (item.icon) {
-      const mark = el('span', 'matrix-pop-icon');
-      mark.innerHTML = svgIcon(item.icon, 18);
-      btn.appendChild(mark);
-    }
-    btn.appendChild(el('span', 'matrix-pop-label', item.label));
-    if (item.trailing) btn.appendChild(el('span', 'matrix-pop-trailing', item.trailing));
+    btn.setAttribute('role', 'option');
+    btn.setAttribute('aria-selected', opt.current ? 'true' : 'false');
+    if (opt.badge) btn.appendChild(badge(opt.badge));
+    if (opt.dot) btn.appendChild(el('span', 'matrix-dot ' + opt.dot));
+    btn.appendChild(el('span', 'matrix-sheet-name', opt.label));
+    if (opt.hint) btn.appendChild(el('span', 'matrix-sheet-hint', opt.hint));
     btn.addEventListener('click', () => {
-      removeOverlay('pop');
-      item.onPick();
+      // Снятие слоя до onPick: pick может открыть свой слой, и два одинаковых
+      // id в стеке оставили бы висящую подложку.
+      removeOverlay(id);
+      opt.onPick();
+      if (onDismiss) onDismiss();
     });
-    pop.appendChild(btn);
+    panel.appendChild(btn);
   }
+
+  const cancel = el('button', 'matrix-sheet-cancel', 'Отмена');
+  cancel.type = 'button';
+  cancel.addEventListener('click', close);
+  panel.appendChild(cancel);
+
+  backdrop.appendChild(panel);
+  backdrop.addEventListener('click', event => {
+    if (event.target === backdrop) close();
+  });
+
   const layer = pushOverlay({
-    id: 'pop', kind: 'pop', node: pop, panel: pop,
-    onEscape: () => removeOverlay('pop'),
+    id, kind: 'sheet', parent, node: backdrop, panel, onEscape: close,
   });
   if (!layer) return null;
-  // Позиция считается по прямоугольнику якоря, а не задана на глаз: меню
-  // открывается и над пилюлей в листе, и в полноэкранном виде, а координаты
-  // там разные.
-  const box = pop.getBoundingClientRect();
-  const at = anchor.getBoundingClientRect();
-  let top = at.top - box.height - 8;
-  if (top < 8) top = Math.min(at.bottom + 8, window.innerHeight - box.height - 8);
-  let left = at.left;
-  if (left + box.width > window.innerWidth - 12) {
-    left = Math.max(12, window.innerWidth - box.width - 12);
-  }
-  pop.style.left = Math.round(left) + 'px';
-  pop.style.top = Math.round(top) + 'px';
-  return pop;
+  trapTab(panel);
+  return layer;
 }
 
-function openQuadrantMenu(anchor) {
-  popover(anchor, QUADRANTS.map(q => ({
-    label: q.title,
-    badge: q,
-    className: 'q-' + q.id + (q.id === draft.quadrant ? ' is-current' : ''),
-    onPick: () => {
-      pickDraftQuadrant(q.id);
-      focusComposer();
-    },
-  })));
+function openQuadrantMenu() {
+  choiceSheet({
+    id: 'quadpick',
+    title: 'Квадрант',
+    parent: 'composer',
+    options: QUADRANTS.map(q => ({
+      label: q.title,
+      hint: q.hint,
+      badge: q,
+      className: 'q-' + q.id + (q.id === draft.quadrant ? ' is-current' : ''),
+      current: q.id === draft.quadrant,
+      onPick: () => pickDraftQuadrant(q.id),
+    })),
+    onDismiss: focusComposer,
+  });
 }
 
-function openPriorityMenu(anchor) {
+function openPriorityMenu() {
   const order = [PRIORITY_HIGH, PRIORITY_MEDIUM, PRIORITY_LOW, PRIORITY_NONE];
-  popover(anchor, order.map(value => ({
-    label: PRIORITY_LABEL[value],
-    dot: 'p' + value,
-    className: value === draft.priority ? ' is-current' : '',
-    onPick: () => { draft.priority = value; refreshComposer(); },
-  })));
+  choiceSheet({
+    id: 'pickpriority',
+    title: 'Приоритет',
+    parent: 'composer',
+    options: order.map(value => ({
+      label: PRIORITY_LABEL[value],
+      dot: 'p' + value,
+      className: value === draft.priority ? ' is-current' : '',
+      current: value === draft.priority,
+      onPick: () => { draft.priority = value; refreshComposer(); },
+    })),
+    onDismiss: focusComposer,
+  });
 }
 
 /* --- Лист «Дата и длительность» (ТЗ Б4) ----------------------------------- */
