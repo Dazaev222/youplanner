@@ -311,8 +311,17 @@ function realIso(offsetDays) {
     + '-' + String(d.getDate()).padStart(2, '0');
 }
 
-test('выбор квадранта в строке ввода переставляет причину и ведёт за собой экран', (t) => {
-  const { context: ctx } = loadApp();
+// Прежний тест требовал, чтобы выбор плашки ПЕРЕКИДЫВАЛ экран в выбранный
+// квадрант: строка ввода жила внутри полноэкранного вида. Теперь создание —
+// нижний лист поверх любого экрана (ТЗ А1/А2.5), и требование стало другим:
+// плашка меняет НАМЕРЕНИЕ черновика, но не навигацию, а набранный текст
+// обязАН пережить смену квадранта. Остальные регрессии отсюда не ослаблены:
+// правило причины по-прежнему quadrantShape, и черновик обязан долетать до
+// обещанного квадранта.
+test('выбор квадранта в листе меняет причину, но не экран и не ввод', (t) => {
+  const app = loadApp();
+  installMatrixDom(app);
+  const ctx = app.context;
 
   ctx.openQuadrantView('q1', true);
   let st = ctx.matrixDebugState();
@@ -321,8 +330,8 @@ test('выбор квадранта в строке ввода перестав�
 
   assert.equal(ctx.pickDraftQuadrant('q2'), true);
   st = ctx.matrixDebugState();
-  assert.equal(st.openQuadrant, 'q2',
-    'экран переезжает вместе с выбором: иначе добавленная карточка уходит из вида');
+  assert.equal(st.openQuadrant, 'q1',
+    'лист лежит поверх экрана: смена намерения не имеет права вести человека туда-обратно');
   assert.equal(st.draft.quadrant, 'q2');
   assert.equal(st.draft.due, null, 'q2 — без срока');
   assert.ok(st.draft.priority >= 2, 'q2 — важно');
@@ -338,17 +347,39 @@ test('выбор квадранта в строке ввода перестав�
     assert.equal(ctx.pickDraftQuadrant(id), true);
     const d = ctx.matrixDebugState().draft;
     assert.equal(d.quadrant, id);
-    assert.equal(ctx.matrixDebugState().openQuadrant, id, id + ': экран идёт за выбором');
+    assert.equal(ctx.matrixDebugState().openQuadrant, 'q1', id + ': экран за плашкой не идёт');
     assert.equal(ctx.quadrantOf({ due: d.due, priority: d.priority }, new Date()), id,
       id + ': черновик долетает до обещанного квадранта');
   }
 
   assert.equal(ctx.pickDraftQuadrant('q9'), false, 'несуществующего квадранта нет');
-  assert.equal(ctx.matrixDebugState().openQuadrant, 'q1', 'неудачный выбор ничего не меняет');
+  assert.equal(ctx.matrixDebugState().draft.quadrant, 'q1', 'неудачный выбор ничего не меняет');
+});
+
+// Новый черновик обязан брать причину из quadrantShape, а не выставлять
+// средний приоритет всем четверым: с ним «срочно, но не важно» считалось
+// важным и уезжало в q1 ещё до сохранения.
+test('новый черновик каждого квадранта согласован с quadrantShape', (t) => {
+  const app = loadApp();
+  installMatrixDom(app);
+  const ctx = app.context;
+  const now = new Date();
+  for (const id of ['q1', 'q2', 'q3', 'q4']) {
+    assert.equal(ctx.openTaskComposer({ quadrantId: id }), true, id + ': лист открылся');
+    const draft = ctx.matrixDebugState().draft;
+    const shape = ctx.quadrantShape(id, {}, now);
+    assert.equal(draft.priority, shape.priority, id + ': приоритет берётся из правила');
+    assert.equal(draft.due, shape.due, id + ': срок берётся из правила');
+    assert.equal(ctx.quadrantOf({ due: draft.due, priority: draft.priority }, now), id,
+      id + ': черновик сам считается своим квадрантом');
+    ctx.requestCloseTaskComposer('test');
+  }
 });
 
 test('задача из строки ввода долетает ровно до выбранного квадранта', (t) => {
-  const { context: ctx } = loadApp();
+  const app = loadApp();
+  installMatrixDom(app);
+  const ctx = app.context;
   ctx.openQuadrantView('q1', true);
   ctx.pickDraftQuadrant('q2');
   const draft = ctx.matrixDebugState().draft;
@@ -364,27 +395,62 @@ test('задача из строки ввода долетает ровно до
 
 // Остальные тесты проверяют модель, а «экран не соврал» — это уже DOM, которого
 // у песочницы loadApp нет. Узел ниже поддерживает ровно тот набор, который
-// matrix-view действительно зовёт (createElement, appendChild/append,
-// textContent, dataset, listeners), и не пытается повторить браузер — тот же
-// приём, что с фейковым деревом в tests/sync-render.test.mjs.
-function makeNode(tag) {
+// matrix-view зовёт сейчас (createElement, appendChild/append, textContent,
+// dataset, listeners, снятие узла с родителя, фокус и aria-атрибуты), и не
+// пытается повторить браузер — тот же приём, что с фейковым деревом в
+// tests/sync-render.test.mjs.
+//
+// `remove`, отслеживание родителя и `focus` появились вместе с нижним листом
+// создания: экран больше не стирает весь холст, а листы живут отдельным слоем,
+// который умеет сниматься поштучно.
+function makeNode(tag, doc) {
   const node = {
     tagName: tag,
     className: '',
     innerHTML: '',
     hidden: false,
     value: '',
+    disabled: false,
     style: {},
     dataset: {},
     children: [],
     _events: {},
+    _parent: null,
+    _doc: doc || null,
     addEventListener(type, fn) {
       (node._events[type] || (node._events[type] = [])).push(fn);
     },
+    removeEventListener(type, fn) {
+      const list = node._events[type];
+      if (!list) return;
+      const at = list.indexOf(fn);
+      if (at >= 0) list.splice(at, 1);
+    },
     setAttribute(name, value) { node[name] = String(value); },
     getAttribute(name) { return node[name] === undefined ? null : String(node[name]); },
-    appendChild(child) { node.children.push(child); return child; },
-    append(...list) { for (const child of list) if (child) node.children.push(child); },
+    hasAttribute(name) { return node[name] !== undefined; },
+    removeAttribute(name) { delete node[name]; },
+    appendChild(child) {
+      if (!child) return child;
+      child._parent = node;
+      node.children.push(child);
+      return child;
+    },
+    append(...list) { for (const child of list) if (child) node.appendChild(child); },
+    removeChild(child) {
+      const at = node.children.indexOf(child);
+      if (at >= 0) {
+        node.children.splice(at, 1);
+        child._parent = null;
+      }
+      return child;
+    },
+    remove() { if (node._parent) node._parent.removeChild(node); },
+    contains(other) {
+      for (let cur = other; cur; cur = cur._parent) if (cur === node) return true;
+      return false;
+    },
+    focus() { if (node._doc) node._doc.activeElement = node; },
     getBoundingClientRect() {
       return { top: 0, bottom: 40, left: 0, right: 100, width: 100, height: 40 };
     },
@@ -392,6 +458,7 @@ function makeNode(tag) {
     fire(type, event) {
       const detail = event || {};
       if (typeof detail.preventDefault !== 'function') detail.preventDefault = () => {};
+      if (detail.target === undefined) detail.target = node;
       for (const fn of node._events[type] || []) fn(detail);
     },
   };
@@ -399,15 +466,41 @@ function makeNode(tag) {
   // meta.childNodes.length, решая нужна ли строка мета, и у фейка этот счёт
   // обязан сходиться с appendChild.
   node.childNodes = node.children;
+  const classes = () => String(node.className).split(/\s+/).filter(Boolean);
+  node.classList = {
+    add(...names) {
+      const list = classes();
+      for (const name of names) if (list.indexOf(name) < 0) list.push(name);
+      node.className = list.join(' ');
+    },
+    remove(...names) { node.className = classes().filter(i => names.indexOf(i) < 0).join(' '); },
+    toggle(name, force) {
+      const list = classes();
+      const has = list.indexOf(name) >= 0;
+      const want = force === undefined ? !has : !!force;
+      if (want && !has) list.push(name);
+      if (!want && has) list.splice(list.indexOf(name), 1);
+      node.className = list.join(' ');
+      return want;
+    },
+    contains: (name) => classes().indexOf(name) >= 0,
+  };
   // textContent со смыслом присваивания '', а не только со словом:
   // renderMatrixView снимает дерево именно так, и фейк обязан сбрасывать детей,
   // иначе узлы копились бы на каждой перерисовке и счёт плашек врал бы.
+  // Геттер агрегирует потомков — как в настоящем DOM, иначе текст кнопок с
+  // иконками читался бы пустым.
   let text = '';
   Object.defineProperty(node, 'textContent', {
-    get: () => text,
+    get: () => (node.children.length
+      ? node.children.map(child => child.textContent).join('')
+      : text),
     set: (value) => {
       text = value === null || value === undefined ? '' : String(value);
-      if (text === '') node.children.length = 0;
+      if (text === '') {
+        for (const child of node.children) child._parent = null;
+        node.children.length = 0;
+      }
     },
   });
   return node;
@@ -431,18 +524,24 @@ function oneByClass(root, className) {
   return found[0];
 }
 
-// #matrix-view (экран) и #toast (единственный тост приложения) — всё, чего
-// экран просит по id.
+// #matrix-view (холст), #matrix-screen (слой экрана) и #toast (единственный
+// тост приложения) — всё, чего экран просит по id. Два слоя, а не один:
+// перерисовка сетки обязана оставлять открытые листы живыми узлами (ТЗ А5).
 function installMatrixDom(app) {
-  const host = makeNode('section');
-  const toast = makeNode('div');
+  const doc = app.sandbox.document;
+  const host = makeNode('section', doc);
+  const screen = makeNode('div', doc);
+  screen.className = 'matrix-screen';
+  host.appendChild(screen);
+  const toast = makeNode('div', doc);
   toast.hidden = true;
-  const byId = { 'matrix-view': host, toast: toast };
-  app.sandbox.document.getElementById = (id) => byId[id] || null;
-  app.sandbox.document.createElement = (tag) => makeNode(tag);
-  app.sandbox.document.querySelector = () => null;
-  app.sandbox.document.querySelectorAll = () => [];
-  return { host: host, toast: toast };
+  const byId = { 'matrix-view': host, 'matrix-screen': screen, toast: toast };
+  doc.getElementById = (id) => byId[id] || null;
+  doc.createElement = (tag) => makeNode(tag, doc);
+  doc.querySelector = () => null;
+  doc.querySelectorAll = () => [];
+  doc.activeElement = null;
+  return { host: host, screen: screen, toast: toast, doc: doc };
 }
 
 // Отказ хранилища моделируется НАСТОЯЩИМ броском setItem: тогда safeSetItem

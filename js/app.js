@@ -34,7 +34,7 @@ import { ensureQazaState, getQazaState, onQazaAddPick, onQazaAddSubmit, onQazaDo
 import { applyScreen, SCREENS } from './ui/router.js';
 import { onScheduleAddSubmit, onScheduleEditListClick, renderScheduleEditView, renderScheduleView } from './ui/schedule-view.js';
 import { flushPendingSleepSave, onSleepFieldChange, renderSleepView } from './ui/sleep-view.js';
-import { renderMatrixView } from './ui/matrix-view.js';
+import { handleMatrixEscape, handleMatrixNavigation, renderMatrixView } from './ui/matrix-view.js';
 import { appState, isMainDayView, isMobileView, ui } from './ui/state.js';
 import { closeStatsMenu, isStatsMenuOpen, isStatsView, openStatsMenu, renderStatsCategory, renderStatsFastView, renderStatsHabitView, renderStatsHabitsView, renderStatsQazaView, renderStatsSleepView, renderStatsView, setStatsHabitId } from './ui/stats-view.js';
 /* YouPlanner — точка сборки интерфейса (app.js).
@@ -899,6 +899,12 @@ export function bindEvents() {
   document.addEventListener('keydown', function (event) {
     if (event.key !== 'Escape') return;
 
+    // Листы Матрицы — модальные слои своего экрана и верхние по определению:
+    // подтверждение, затем лист создания, затем меню. handleMatrixEscape гасит
+    // ровно один слой и одним нажатием, поэтому проверять его надо раньше
+    // остального — иначе Escape снял бы и лист, и панель под ним разом.
+    if (handleMatrixEscape()) return;
+
     // Панель статистики — верхний слой и в цепочке проверяется первой:
     // она висит поверх таб-бара, и Escape обязан снять сначала её
     if (isStatsMenuOpen()) {
@@ -1097,6 +1103,12 @@ export function switchAppView(name) {
     }
     name = 'main';
   }
+
+  // Лист создания задачи в Матрице — не расходник переключения вкладок:
+  // непустой черновик требует явного «Продолжить редактирование»/«Отбросить»,
+  // и переход ждёт ответа. false означает «вопрос уже показан» — остаёмся там,
+  // где человек пишет, и ничего не закрываем.
+  if (!handleMatrixNavigation(name)) return;
 
   // Панель статистики принадлежит главной: любой переход её закрывает.
   // Попап уровня — тоже: программный переход (из консоли, теста или будущего
