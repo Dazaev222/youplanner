@@ -300,12 +300,14 @@ export function renderTable() {
     dates.push(new Date(day.getFullYear(), day.getMonth(), day.getDate()));
   }
 
-  let thead = '<tr><th class="habit-col">Привычка</th>';
+  // scope обязателен: таблица — данные (строки — привычки, столбцы — дни),
+  // и без него скринридер читает ячейку как «12.09 5», а не «Коран, 12.09 — 5»
+  let thead = '<tr><th scope="col" class="habit-col">Привычка</th>';
   for (let i = 0; i < dates.length; i++) {
-    thead += '<th class="day-col">' + pad2(dates[i].getDate()) + '.' +
+    thead += '<th scope="col" class="day-col">' + pad2(dates[i].getDate()) + '.' +
       pad2(dates[i].getMonth() + 1) + '</th>';
   }
-  thead += '<th class="progress-col">Прогресс</th></tr>';
+  thead += '<th scope="col" class="progress-col">Прогресс</th></tr>';
 
   // В круге — прогресс за неделю, второй строкой — за месяц
   let tbody = '';
