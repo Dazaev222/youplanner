@@ -3,22 +3,29 @@ import { ARCHIVE_KEY, loadArchive } from './archive.js';
 import { FAST_KEY, loadFast, validFastHistory } from './fast.js';
 import { loadHabits, pruneResolvedTombstones } from './habits.js';
 import { PRAYER_KEY, loadPrayer } from './prayer.js';
+import { MATRIX_STORAGE_KEY } from './matrix.js';
 import { QAZA_LOG_KEY, QAZA_STORAGE_KEY, loadQaza, loadQazaLog, validQazaLogDate, validQazaLogEntries } from './qaza.js';
 import { invalidateRecordsCache, loadRecords } from './records.js';
 import { loadSchedule } from './schedule.js';
 import { SLEEP_KEY, SLEEP_MAX_MINUTES, loadSleep, sleepDurationMinutes, sleepTimeMinutes, validSleepHistory } from './sleep.js';
-import { STORAGE_KEYS } from './storage.js';
+import { STORAGE_KEYS, loadPlannerEnvelope } from './storage.js';
+import { normalizePlannerV1 } from '../sync/merge.js';
+import { planPlannerApply } from '../sync/sync.js';
+import { hasData, validCloudArchive, validCloudSchedule } from '../sync/core.js';
 import { rollbackStagedKeys } from '../core/storage.js';
-import { validCloudArchive, validCloudSchedule } from '../sync/core.js';
 // Версия формата резервной копии. Растёт, если меняется состав полей файла:
 // версия 2 добавила раздел tasks, версия 3 — раздел prayer, версия 4 —
 // время у привычки и уровень у записи (§8), версия 5 — раздел fast (§11x),
 // версия 6 — раздел qazaLog (§5), 7 — раздел sleep, 8 — история сна (§11ab),
-// 10 — раздел tasks снят, 11 — раздел schedule (§11ac).
-// Разбор принимает файлы ровно этой версии: расписание ходит разделом целиком,
-// и старые копии (до 11) расписание за собой не тянут — их отвергаем, чтобы
-// не соединять два поколения формата.
-export const BACKUP_VERSION = 11;
+// 10 — раздел tasks снят, 11 — раздел schedule (§11ac),
+// 12 — аддитивный узел plannerV1 (Матрица: entries/settings/tombstones с
+// Lamport-версиями; outbox и привязка владельца в файл не пишутся).
+// Разбор принимает два поколения: ровно текущую версию и ПРЕДЫДУЩУЮ (11) —
+// импорт старой копии это миграция+merge, а не отказ: в v11 узла plannerV1
+// нет, и отсутствующий узел не очищает текущий (ТЗ §1.4.6). Файлы будущих
+// версий и все прочие отвергаются целиком.
+export const BACKUP_VERSION = 12;
+export const BACKUP_LEGACY_VERSION = 11;
 
 // Что попадает в файл. Метка синхронизации и режим главного экрана — состояние
 // устройства, а не данные, поэтому в копию не входят. Координат может не быть;
@@ -57,9 +64,22 @@ export function buildBackup() {
   // Архив — месячные сводки старше года (js/data/archive.js). Раздел
   // необязательный, как fast/qazaLog/sleep: архива нет — и раздела в файле
   // нет, читатели старых копий его просто пропустят. Формат файла от этого
-  // не ломается, версия остаётся 11.
+  // не ломается, версия остаётся текущей.
   const archive = loadArchive();
   if (archive) backup.archive = archive;
+
+  // plannerV1 (ТЗ §1.4.6): снимок области планирования вместе с его
+  // tombstones. В файл уходит ТОЛЬКО snapshot: outbox — незавершённая
+  // локальная очередь (её экспорт переносил бы чужие неподтверждённые
+  // операции на другое устройство), actorId/ownerUid/lamport — состояние
+  // и привязка устройства. Пустого снимка в файле не бывает: узел
+  // добавляется только при наличии содержимого — «копия без plannerV1»
+  // читается как «узла нет», а не как «всё удалено».
+  const env = loadPlannerEnvelope();
+  if (env && env.snapshot && (hasData(env.snapshot.entries) ||
+      hasData(env.snapshot.settings) || hasData(env.snapshot.tombstones))) {
+    backup.plannerV1 = env.snapshot;
+  }
 
   return backup;
 }
@@ -69,11 +89,13 @@ export function parseBackup(text) {
   let data;
   try {
     data = JSON.parse(text);
-    // Копии прошлых версий (например, v10-файлы) и файлы вообще без поля
-    // version отвергаются так же, как битые: раздел schedule у них может
-    // отсутствовать целиком, и соединять поколения формата нельзя — файл
-    // обязан быть ровно BACKUP_VERSION
-    if (data.version !== BACKUP_VERSION) return null;
+    // Копии старше предыдущего поколения (например, v10-файлы) и файлы
+    // вообще без поля version отвергаются так же, как битые: раздел
+    // schedule у них может отсутствовать целиком, и соединять поколения
+    // формата нельзя. Версия 11 принимается как legacy: узла plannerV1 у
+    // неё нет по определению, импорт такой копии не трогает планирование.
+    // Файлы будущих версий — отказ: их содержимое текущий разбор не знает.
+    if (data.version !== BACKUP_VERSION && data.version !== BACKUP_LEGACY_VERSION) return null;
   } catch (e) {
     return null;
   }
@@ -173,6 +195,24 @@ export function parseBackup(text) {
   // попадать в хранилище и подменять рабочий.
   if (data.archive !== undefined && !validCloudArchive(data.archive)) return null;
 
+  // plannerV1 (ТЗ §1.4.6): необязательный узел — в v11 его нет по
+  // определению. Сначала СТРУКТУРНАЯ проверка карт: битая форма карты
+  // (не объект) — это битый файл, он отвергается целиком; нормализация же
+  // чистит отдельные битые записи (и отбрасывает неизвестную версию).
+  // Импорт работает с каноническим отсортированным снимком.
+  if (data.plannerV1 !== undefined) {
+    const node = data.plannerV1;
+    if (!node || typeof node !== 'object' || Array.isArray(node)) return null;
+    const maps = ['entries', 'settings', 'tombstones'];
+    for (let i = 0; i < maps.length; i++) {
+      const map = node[maps[i]];
+      if (map !== undefined && (!map || typeof map !== 'object' || Array.isArray(map))) return null;
+    }
+    const normalized = normalizePlannerV1(node);
+    if (!normalized.ok) return null;
+    data.plannerV1 = normalized.snapshot;
+  }
+
   return data;
 }
 // Замена локальных данных копией. Пишем в localStorage напрямую: saveHabits и
@@ -226,6 +266,16 @@ export function applyBackup(data) {
   // в файле нет — текущий архив остаётся: импорт его не стирает.
   if (data.archive && validCloudArchive(data.archive)) {
     stage.push({ key: ARCHIVE_KEY, value: JSON.stringify(data.archive) });
+  }
+  // plannerV1 импортируется СЛИЯНИЕМ, а не заменой (ТЗ §1.4.6): merge
+  // с текущим envelope (delete-wins проверяет mergePlannerV1 — старая
+  // копия не воскрешает удалённые id), затем материализация списка
+  // Матрицы. Оба ключа — часть одного stage: сбой записи откатывает и
+  // их, и прежние разделы побайтно. Узла в файле нет — envelope цел.
+  const plannerStage = planPlannerApply(data.plannerV1);
+  if (plannerStage) {
+    stage.push({ key: STORAGE_KEYS.plannerEnvelope, value: plannerStage.envValue });
+    stage.push({ key: MATRIX_STORAGE_KEY, value: plannerStage.tasksValue });
   }
 
   // ── Фаза 2: снимок предыдущего состояния каждого ключа stage ──

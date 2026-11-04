@@ -112,7 +112,7 @@ export let cloudReachable = false;
 //   * envelope привязан к другому подтверждённому владельцу — блок в обе
 //     стороны, межустройственное смешивание решает владелец (ТЗ §1.4.4).
 // Возвращает пару значений для stage (envelope + список) или null.
-function planPlannerApply(cloudRaw) {
+export function planPlannerApply(cloudRaw) {
   if (cloudRaw === undefined || cloudRaw === null) return null;
   const normalized = normalizePlannerV1(cloudRaw);
   if (!normalized.ok) {

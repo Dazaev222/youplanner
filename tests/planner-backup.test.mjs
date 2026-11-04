@@ -13,6 +13,10 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { loadApp } from './helpers/load-app.mjs';
 import { defaultBackup } from './helpers/fixtures.mjs';
+// BACKUP_VERSION читаем из модуля: в vm-песочнице const-экспорты не ложятся
+// на globalThis (только function-объявления), а ESM-импорт бэкапа side-effect
+// на загрузке не имеет
+import { BACKUP_VERSION, BACKUP_LEGACY_VERSION } from '../js/data/backup.js';
 
 const MATRIX_KEY = 'youplanner.matrix.tasks';
 const ENVELOPE_KEY = 'youplanner.planner.v1';
@@ -96,7 +100,8 @@ function failOnNthSetItem(storage, n) {
 
 test('BACKUP_VERSION повышена от реально найденной 11 до 12; v11-файл продолжает разбираться (миграция, а не отказ)', () => {
   const app = loadApp();
-  assert.equal(app.context.BACKUP_VERSION, 12);
+  assert.equal(BACKUP_VERSION, 12);
+  assert.equal(BACKUP_LEGACY_VERSION, 11);
   const legacy = app.context.parseBackup(JSON.stringify(defaultBackup()));
   assert.ok(legacy, 'копия версии 11 отвергнута — импорт старой копии сломан');
   assert.equal(legacy.version, 11);
@@ -122,8 +127,8 @@ test('buildBackup включает plannerV1 с tombstones и НЕ включа�
   assert.equal(backup.plannerV1.outbox, undefined, 'outbox уехал в файл копии');
   assert.equal(backup.plannerV1.ownerUid, undefined, 'привязка владельца уехала в файл');
   assert.equal(JSON.stringify(backup).includes('uid-A'), false, 'uid владельца протёк в planner-узел');
-  // прежние разделы на месте (контракт привычек сохранён)
-  assert.ok(Array.isArray(backup.habits) && backup.habits.length > 0);
+  // прежние разделы на месте (контракт привычек сохранён: раздел есть всегда)
+  assert.ok(Array.isArray(backup.habits), 'раздел habits пропал из экспорта');
   assert.equal(backup.tasks, undefined);
 });
 

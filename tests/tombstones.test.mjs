@@ -348,7 +348,9 @@ test('buildBackup не включает tombstones — версия формат
 
   const backup = app.context.buildBackup();
 
-  assert.equal(backup.version, 11);
+  // 11 → 12: версия поднята узлом plannerV1 (ТЗ §1.4.6), а НЕ надгробиями
+  // привычек — они по-прежнему не попадают в файловую копию
+  assert.equal(backup.version, 12);
   assert.equal('tombstones' in backup, false,
     'надгробия попали в файловую копию — разбор старых версий сломается');
 });
