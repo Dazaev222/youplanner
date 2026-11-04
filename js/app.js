@@ -5,6 +5,7 @@ import { compressBgImage, loadBgBlob, loadBgDim, resetBg, saveBgBlob, saveBgDim 
 import { applyBackup, buildBackup, parseBackup } from './data/backup.js';
 import { archiveHistories } from './data/archive.js';
 import { loadFast } from './data/fast.js';
+import { getOwnerAccount, ownerSignIn, ownerSignOut } from './data/firebase-auth.js';
 import { loadHabits } from './data/habits.js';
 import { migrateDropTasks } from './data/migrations.js';
 import { QAZA_HABIT_ID, kazaDayFor, loadQaza } from './data/qaza.js';
@@ -15,7 +16,7 @@ import { STATS_PERIOD_BOXES, saveStatsPeriod } from './data/stats.js';
 import { STORAGE_KEYS } from './data/storage.js';
 import { APP_BUILD, APP_VERSION } from './ui/constants.js';
 import { SYNC_STATUS_MS, clearSyncPending, syncPending } from './sync/core.js';
-import { flushPendingSync, markCloudReady, scheduleSync, settleHabitsAfterSync, syncFromCloud, syncToCloud } from './sync/sync.js';
+import { deniedStatus, flushPendingSync, markCloudReady, scheduleSync, settleHabitsAfterSync, syncFromCloud, syncToCloud } from './sync/sync.js';
 import {
   closeAssistantKeyModal, onAssistantChipClick, onAssistantClear,
   onAssistantFormSubmit, onAssistantImageClear, onAssistantImagePick,
@@ -63,6 +64,47 @@ export function showSyncStatus(message) {
     status.textContent = '';
   }, SYNC_STATUS_MS);
 }
+
+/* ---------- Аккаунт владельца в Настройках -------------------------------- */
+
+// Правила базы (database.rules.json) пускают в узел ровно один auth.uid, а
+// анонимный uid Firebase выдаёт отдельный для каждого устройства: обмен
+// данными работает, только когда все устройства входят в один постоянный
+// аккаунт. До входа приложение живёт локально — вход расходник, а не условие
+// запуска. UID показывается наружу нарочно: это то, что владелец переносит в
+// правила, и второго способа его узнать в этом проекте нет.
+export function renderOwnerSettings() {
+  const status = document.getElementById('settings-owner-status');
+  const email = document.getElementById('settings-owner-email');
+  const password = document.getElementById('settings-owner-password');
+  const signIn = document.getElementById('settings-owner-signin');
+  const signOut = document.getElementById('settings-owner-signout');
+  if (!status || !email || !password || !signIn || !signOut) return;
+  const account = getOwnerAccount();
+  // Под полями входа владельца нет смысла: пароль уже не нужен, а email
+  // показан в строке состояния. Скрытые поля ещё и не автозаполнятся чужим
+  // аккаунтом при следующем входе на этом устройстве.
+  email.hidden = Boolean(account);
+  password.hidden = Boolean(account);
+  signIn.hidden = Boolean(account);
+  signOut.hidden = !account;
+  if (account) {
+    // UID отдельной строкой: его нужно выделять мышкой и переносить в
+    // Console — в середине предложения это неудобно (перенос CSS-свойством
+    // white-space: pre-line, см. styles/settings.css)
+    status.textContent = 'Владелец: ' + account.email +
+      '\nUID: ' + account.uid + ' — его вписывать в database.rules.json';
+    return;
+  }
+  status.textContent = deniedStatus
+    ? 'Сервер ответил ' + deniedStatus + ': правила пускают только аккаунт владельца — войдите'
+    : 'Анонимный режим: правила базы синхронизацию не пустят, войдите в аккаунт владельца';
+}
+
+// Тост про отказ по правам — один раз за сессию. Обмен идёт на каждой правке,
+// и повторный тост перекрывал бы интерфейс бесконечно; строка Настроек
+// (renderOwnerSettings) остаётся видимой всегда.
+let deniedToastShown = false;
 
 /* ---------- Экспорт и импорт данных -------------------------------------- */
 
@@ -476,7 +518,14 @@ export function bindEvents() {
         appState.habits = loadHabits();
         renderMainView();
         if (!result.reachable) {
-          // Сервер не ответил: «Обновлено» здесь было бы неправдой
+          // «Обновлено» здесь было бы неправдой — но и «нет связи» тоже:
+          // 401/403 значит «нас сюда не пускают», и искать сеть в этом случае
+          // бесполезно. Различает их последний статус отказа (js/sync/sync.js).
+          if (deniedStatus) {
+            showSyncStatus('Доступ запрещён (' + deniedStatus + '): нужен вход владельца');
+            renderOwnerSettings();
+            return;
+          }
           handleNetworkError(null, { context: '[sync]', display: showSyncStatus });
           return;
         }
@@ -486,7 +535,6 @@ export function bindEvents() {
       });
     });
   }
-
   // Ручная отправка. syncToCloud разрешается Response при успешном PUT и
   // undefined при сетевом сбое: «Отправлено» без ответа сервера — ложь,
   // поэтому сбой виден как error-тост, а не как ложная удача
@@ -499,10 +547,57 @@ export function bindEvents() {
           showSyncStatus('Отправлено');
           return;
         }
+        if (deniedStatus) {
+          showSyncStatus('Не отправлено: доступ запрещён (' + deniedStatus +
+            '), нужен вход владельца');
+          renderOwnerSettings();
+          return;
+        }
         showErrorToast('Не отправлено: нет связи с сервером');
       }).finally(function () {
         syncPush.disabled = false;
       });
+    });
+  }
+
+  // Вход в постоянный аккаунт владельца. uid из ответа показывается в строке
+  // состояния: именно его владелец переносит в database.rules.json.
+  const ownerSignInBtn = document.getElementById('settings-owner-signin');
+  if (ownerSignInBtn) {
+    ownerSignInBtn.addEventListener('click', function () {
+      const email = document.getElementById('settings-owner-email');
+      const password = document.getElementById('settings-owner-password');
+      ownerSignInBtn.disabled = true;
+      // Пароль передаётся один раз и сразу стирается из поля: в памяти
+      // страницы он живёт до перезаписи, в localStorage не попадает вовсе
+      // (js/data/firebase-auth.js), а поле с набранным паролем осталось бы
+      // видимым даже после успешного входа.
+      ownerSignIn(String(email && email.value || ''), String(password && password.value || ''))
+        .then(function (account) {
+          if (password) password.value = '';
+          renderOwnerSettings();
+          showSyncStatus('Вход выполнен. UID: ' + account.uid);
+        })
+        .catch(function (e) {
+          // Причина — со стены Firebase (INVALID_PASSWORD, EMAIL_NOT_FOUND):
+          // её и показываем, свой текст ничего бы не объяснил. Пароль в текст
+          // ошибки не попадает — там только message сервера.
+          if (password) password.value = '';
+          showErrorToast('Вход не удался: ' + ((e && e.message) || e));
+          renderOwnerSettings();
+        })
+        .finally(function () {
+          ownerSignInBtn.disabled = false;
+        });
+    });
+  }
+
+  const ownerSignOutBtn = document.getElementById('settings-owner-signout');
+  if (ownerSignOutBtn) {
+    ownerSignOutBtn.addEventListener('click', function () {
+      ownerSignOut();
+      renderOwnerSettings();
+      showSyncStatus('Вы вышли: приложение работает локально, без токена');
     });
   }
 
@@ -1042,6 +1137,7 @@ export function renderSettingsView() {
   const version = document.getElementById('settings-version');
   if (version) version.textContent = 'Версия: ' + APP_VERSION + ' · сборка ' + APP_BUILD;
   renderBackgroundSettings();
+  renderOwnerSettings();
 }
 
 /* ---------- Фон приложения ------------------------------------------------ */
@@ -1349,6 +1445,18 @@ bus.on('sync:applied', function () {
 });
 bus.on('storage:error', function () {
   showToast('Не удалось сохранить: хранилище переполнено');
+});
+bus.on('sync:denied', function (payload) {
+  // Отказ по правам (правила по auth.uid) молчит в данных — приложение
+  // продолжает работать локально, и без этой надписи человек искал бы сетевую
+  // ошибку там, где её нет. Строка Настроек обновляется всегда, тост — один
+  // раз за сессию (deniedToastShown выше).
+  renderOwnerSettings();
+  if (!deniedToastShown) {
+    deniedToastShown = true;
+    showToast('Синхронизация запрещена правилами: нужен вход владельца' +
+      ((payload && payload.status) ? ' (код ' + payload.status + ')' : ''));
+  }
 });
 
 document.addEventListener('DOMContentLoaded', init);

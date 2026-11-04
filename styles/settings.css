@@ -99,3 +99,36 @@
   cursor: default;
 }
 
+/* Панель аккаунта владельца (§Настройки). Заголовок — не пункт меню, а подпись
+   над полями: составной селектор, как у версии, иначе .settings-row:hover
+   красил бы его в акцент. */
+.settings-row.settings-owner-title {
+  color: var(--text-tertiary);
+  font-size: 13px;
+  cursor: default;
+}
+
+.settings-owner-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-bottom: 8px;
+  padding: 4px 16px 14px;
+}
+
+/* UID выдаётся длинной строкой без пробелов: без переноса панель растянула бы
+   список настроек шире экрана. pre-line — потому что UID и подпись к нему
+   пишутся отдельными строками (разделитель \n ставит js/app.js). */
+.settings-owner-status {
+  margin: 0;
+  color: var(--text-tertiary);
+  font-size: 13px;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.settings-owner-actions {
+  display: flex;
+  gap: 8px;
+}
+

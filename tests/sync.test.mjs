@@ -2,7 +2,7 @@
 //
 // Аудит 2026-10-23: флаг syncing защищал только синхронные участки, но не
 // держался во время await fetch. Два параллельных обмена (debounce-таймер +
-// уход со вкладки) konkурирующе делали GET→PUT узла бэкапов — терялись
+// уход со вкладки) конкурирующе делали GET→PUT узла бэкапов — терялись
 // записи истории, SYNC_TS мог уехать назад. Ожидание: обмены строго
 // последовательны, правка во время обмена доезжает повторным обменом.
 
@@ -348,4 +348,71 @@ test('syncFromCloud при отвергнутом снимке: сервер п�
     'после отката не все ключи равны прежним побитово');
   assert.equal(app.run('globalThis.__applied'), 0,
     'sync:applied эмитился на отвергнутом снимке');
+});
+
+// database.rules.json привязан к auth.uid владельца. Пока устройство не вошло
+// в постоянный аккаунт (или сессия потеряна), сервер отвечает 401/403
+// PERMISSION_DENIED — а для интерфейса это неотличимо от «нет сети»: человек
+// видел бы «нет связи» вечно и искал бы её там, где её нет.
+// fetchWithTimeout — единственная обёртка всех запросов данных, поэтому
+// событие снимает недоумение с любого из них: и GET, и PUT, и бэкапы.
+test('сервер ответил 403: событие sync:denied со статусом', async () => {
+  const fetchImpl = () => Promise.resolve({
+    ok: false, status: 403,
+    json: () => Promise.resolve({ error: 'PERMISSION_DENIED' }),
+  });
+  const app = loadApp({ fetchImpl });
+  app.run("globalThis.__denied = [];");
+  app.run("bus.on('sync:denied', (p) => { globalThis.__denied.push(p && p.status); })");
+
+  await app.context.syncFromCloud();
+  // Array.from: массив создан в vm-контексте, и deepStrictEqual сверял бы
+  // прототипы двух realm'ов
+  assert.deepEqual(Array.from(app.run('globalThis.__denied')), [403],
+    'отказ по правам не отличим от сетевой ошибки — подписчик не уведомлён');
+  assert.equal(app.run('deniedStatus'), 403,
+    'deniedStatus не выставлен: интерфейс не отличит 403 от «нет связи»');
+
+  app.run('globalThis.__denied = []');
+  await app.context.syncToCloud();
+  assert.ok(app.run('globalThis.__denied').length >= 1,
+    'PUT под правилами тоже обязан сообщать о отказе по правам');
+});
+
+// Успешный обмен обязан снимать отказ: залипший deniedStatus заставил бы
+// интерфейс вечно советовать «войдите в аккаунт владельца» там, где всё
+// уже работает.
+test('после успешного обмена отказ по правам снимается', async () => {
+  let response = { ok: false, status: 403, json: () => Promise.resolve({}) };
+  const app = loadApp({ fetchImpl: () => Promise.resolve(response) });
+  await app.context.syncFromCloud();
+  assert.equal(app.run('deniedStatus'), 403);
+
+  response = { ok: true, status: 200, json: () => Promise.resolve(null) };
+  await app.context.syncFromCloud();
+  assert.equal(app.run('deniedStatus'), 0, 'успех не снял прежний отказ');
+});
+
+// 401 (токен не подписан этим проектом / просрочен) — то же «нас не пускают».
+// 500 и сетевой сбой — нет: совет «проверьте вход» при них вводил бы в
+// заблуждение. syncFromCloud при этих статусах уже ведёт себя как при ошибке
+// сети, поэтому считается только число событий.
+async function countDenied(response) {
+  const failing = response instanceof Error;
+  const app = loadApp({
+    fetchImpl: () => (failing ? Promise.reject(response) : Promise.resolve(response)),
+  });
+  app.run("globalThis.__denied = 0;");
+  app.run("bus.on('sync:denied', () => { globalThis.__denied++; })");
+  await app.context.syncFromCloud();
+  return app.run('globalThis.__denied');
+}
+
+test('401 — тоже отказ по правам; 500 и сетевой сбой — нет', async () => {
+  assert.equal(await countDenied({ ok: false, status: 401, json: () => Promise.resolve({}) }), 1,
+    '401 не признан отказом по правам');
+  assert.equal(await countDenied({ ok: false, status: 500, json: () => Promise.resolve({}) }), 0,
+    '500 — сбой сервера, а не отказ по правам: «проверьте вход» здесь обманет');
+  assert.equal(await countDenied(new Error('нет сети')), 0,
+    'сетевой сбой притворяется отказом по правам');
 });

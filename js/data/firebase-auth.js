@@ -1,17 +1,28 @@
-// Анонимная аутентификация Firebase через REST identitytoolkit.
+// Аутентификация Firebase через REST identitytoolkit: двух режимов.
 // Firebase SDK в проекте запрещён (ни одной сторонней библиотеки), поэтому
-// протокол говорим напрямую двумя POST-запросами: знакомому устройству —
-// обмен refresh-токена на свежий idToken, новому — signUp (анонимный
-// аккаунт). Токен прикладывается к запросам синхронизации параметром ?auth=
-// централизованно, в единственной обёртке fetchWithTimeout (js/sync/sync.js):
-// правило базы auth != null закрывает все узлы сразу (database.rules.json).
+// протокол говорим напрямую POST-запросами.
+//
+// 1. Анонимный (режим по умолчанию): знакомому устройству — обмен
+//    refresh-токена на свежий idToken, новому — signUp, который заводит
+//    анонимный аккаунт. У анонимного аккаунта UID свой на каждое устройство,
+//    поэтому он годится только пока база публична.
+// 2. Постоянный аккаунт владельца: вход по email/паролю
+//    (accounts:signInWithPassword). Все устройства хозяина входят в один и
+//    тот же аккаунт, его uid — единственный, который database.rules.json
+//    пишет в .read/.write. С этого момента анонимный signUp запрещён:
+//    молча заведённый анонимный аккаунт дал бы токен с чужим uid, правила
+//    ответили бы PERMISSION_DENIED, и синхронизация пропала бы без причины.
+//
+// Токен прикладывается к запросам синхронизации параметром ?auth=
+// централизованно, в единственной обёртке fetchWithTimeout (js/sync/sync.js).
 //
 // Контракт: getAuthToken() разрешается строкой idToken либо null. null —
-// «аутентификация недоступна, работаем как раньше»: синк обязан продолжаться
-// без токена (до публикации правил база публична — это рабочий режим).
-// Любая причина — пустой ключ, офлайн, отказ сервера, битый ответ — даёт
-// null и не бросает исключений: auth здесь расходник, а не условие работы
-// приложения.
+// «аутентификации нет, работаем локально»: синк обязан продолжаться без
+// токена и владеть умением различить 403 (см. sync:denied там же).
+// Любая причина — пустой ключ, офлайн, отказ сервера, битый ответ, нет
+// сессии владельца — даёт null и не бросает исключений: auth здесь расходник,
+// а не условие работы приложения. ownerSignIn() — единственное место, где
+// неудача бросается наружу: её показывает человек, нажавший «Войти».
 
 // Web API Key web-приложения Firebase. Владелец вписывает ключ из Firebase
 // Console (Project settings → General): ключ web-приложений не секрет —
@@ -25,6 +36,13 @@ export let FIREBASE_WEB_API_KEY = 'AIzaSyDux6B8kQ7jmZ_txjxlb2KRHhURawuivTk';
 // как api_key ассистента, это локальная механика устройства, а не данные
 // пользователя — в синхронизацию, копии и экспорт он не входит.
 export const AUTH_REFRESH_KEY = 'youplanner.fb.refresh';
+
+// Запись постоянного аккаунта владельца: {"email":"…","uid":"…"}. По ней
+// приложение узнаёт режим владельца, и по ней же человек читает UID, который
+// нужно вшить в database.rules.json (uid выдаёт Firebase, в коде его нет).
+// Пароль тут не хранится намеренно: только refresh-токен, как у анонимного
+// режима. Ключ также НЕ в STORAGE_KEYS — по тем же причинам.
+export const AUTH_OWNER_KEY = 'youplanner.fb.owner';
 
 // Пауза после неудачи аутентификации. Синк зовёт getAuthToken() перед каждым
 // обменом (до пяти раз за отправку): офлайн не должен платить сетевой
@@ -41,6 +59,10 @@ const AUTH_TIMEOUT_MS = 5000;
 // в localStorage переживает её без повторного signUp'а.
 let authCache = null;
 let authPausedUntil = 0;
+// Копия записи владельца. Нужна на случай недоступного хранилища (приватный
+// режим Safari, квота): сессия, введённая в этой вкладке, не должна
+// соскальзывать в анонимный режим — он запрещён ровно тем фактом входа.
+let ownerAccount = null;
 
 // Точка конфигурации и тестов: владелец правит константу выше в файле,
 // песочница и тесты подставляют ключ этой функцией, исходник не трогая.
@@ -53,6 +75,7 @@ export function setFirebaseApiKey(key) {
 export function resetAuthForTests() {
   authCache = null;
   authPausedUntil = 0;
+  ownerAccount = null;
 }
 
 // Тот же маленький guard, что timeoutGuard в js/ui/assistant-view.js и
@@ -113,10 +136,114 @@ function saveRefreshToken(refreshToken) {
   }
 }
 
+/* ---------- Постоянный аккаунт владельца ---------------------------------- */
+
+// Запись владельца: сначала память модуля, потом localStorage. битый JSON или
+// запись без uid — то же самое, что «владельца нет»: молчаливый возврат к
+// анонимному режиму здесь безопаснее, чем падение каждого обмена.
+function readOwnerRecord() {
+  if (ownerAccount) return ownerAccount;
+  let raw = null;
+  try {
+    raw = localStorage.getItem(AUTH_OWNER_KEY);
+  } catch (e) {
+    return null;
+  }
+  if (!raw) return null;
+  let parsed = null;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    return null;
+  }
+  if (!parsed || typeof parsed !== 'object' || !parsed.uid) return null;
+  ownerAccount = { email: String(parsed.email || ''), uid: String(parsed.uid) };
+  return ownerAccount;
+}
+
+// Кому показывать UID: Настройки пишут эту строку после входа, чтобы владелец
+// мог перенести её в database.rules.json. null = приложение работает анонимно.
+export function getOwnerAccount() {
+  return readOwnerRecord();
+}
+
+// Вход постоянного аккаунта. Бросает Error с причиной — единственный вызов
+// модуля, где неудача уходит наружу: её зовёт человек, нажавший «Войти».
+// Пароль живёт только время этого вызова: ни в localStorage, ни в текст
+// ошибки, ни в console.log он не попадает.
+export async function ownerSignIn(email, password) {
+  const login = String(email || '').trim();
+  const secret = String(password || '');
+  if (!login) throw new Error('Нужен email аккаунта владельца');
+  if (!secret) throw new Error('Нужен пароль аккаунта владельца');
+  if (!FIREBASE_WEB_API_KEY) throw new Error('Ключ Firebase-проекта не вписан в js/data/firebase-auth.js');
+
+  const response = await authPost(
+    'https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=' + encodeURIComponent(FIREBASE_WEB_API_KEY),
+    { email: login, password: secret, returnSecureToken: true },
+  );
+
+  let data = null;
+  try {
+    data = await response.json();
+  } catch (e) {
+    data = null;
+  }
+  const parsed = parseAuthResponse(data);
+  // localId — UID аккаунта, он же то, что вшивается в правила. Ответ
+  // signInWithPassword обязан его содержать: без него нечего сказать
+  // владельцу про database.rules.json, поэтому битый ответ — отказ входа,
+  // а не половина настроенной сессии.
+  //
+  // refreshToken обязателен по той же причине, но хитрее: без него в
+  // AUTH_REFRESH_KEY остался бы СТАРЫЙ анонимный ключ, обмен ходил бы по нему,
+  // а правила по uid отвечали бы 403 вечно — при видимом «входе выполнен».
+  const uid = data && data.localId ? String(data.localId) : '';
+  if (!response.ok || !parsed || !parsed.idToken || !parsed.refreshToken ||
+      parsed.expiresIn <= 0 || !uid) {
+    const reason = (data && data.error && data.error.message)
+      ? data.error.message
+      : 'ответ без idToken, refresh-токена или uid (HTTP ' + response.status + ')';
+    throw new Error('Вход не принят: ' + reason);
+  }
+
+  ownerAccount = { email: login, uid: uid };
+  try {
+    localStorage.setItem(AUTH_OWNER_KEY, JSON.stringify(ownerAccount));
+  } catch (e) {
+    // Хранилище недоступно: до перезагрузки страницы запись живёт в памяти
+    // модуля, после — приложение станет анонимным, и вход нужно повторить.
+  }
+  // Refresh-токен владельца приходит в ответе входа: с этой минуты устройство
+  // перезаписывает анонимный ключ в AUTH_REFRESH_KEY и живёт по новому.
+  saveRefreshToken(parsed.refreshToken);
+  authCache = {
+    token: parsed.idToken,
+    expiresAt: Date.now() + (parsed.expiresIn - 300) * 1000,
+  };
+  // Пауза после прошлой неудачи не должна глушить только что купленный токен
+  authPausedUntil = 0;
+  return ownerAccount;
+}
+
+// Выход: снимается и запись владельца, и refresh-токен. Оставить токен —
+// значит оставить устройство ходить в базу чужим (владельческим) uid после
+// того, как человек нажал «Выйти».
+export function ownerSignOut() {
+  ownerAccount = null;
+  authCache = null;
+  authPausedUntil = 0;
+  try {
+    localStorage.removeItem(AUTH_OWNER_KEY);
+    localStorage.removeItem(AUTH_REFRESH_KEY);
+  } catch (e) {
+    // глотаем: недоступное хранилище — то же самое, что стёртое
+  }
+}
+
 // Знакомому устройству — обмен refresh-токена, новому — signUp. Отдельная
 // функция: повтор после отказа обмена зовёт её же, URL не дублируется.
-function signUpPost() {
-  return authPost(
+function signUpPost() {  return authPost(
     'https://identitytoolkit.googleapis.com/v1/accounts:signUp?key=' + encodeURIComponent(FIREBASE_WEB_API_KEY),
     { returnSecureToken: true },
   );
@@ -126,6 +253,7 @@ function signUpPost() {
 // анонимного аккаунта signUp'ом. Бросает при любой неудаче — глотает
 // getAuthToken() ниже.
 async function requestFreshToken() {
+  const owner = readOwnerRecord();
   let refreshToken = null;
   try {
     refreshToken = localStorage.getItem(AUTH_REFRESH_KEY);
@@ -158,9 +286,18 @@ async function requestFreshToken() {
       } catch (e) {
         // глотаем: недоступное хранилище не мешает signUp-повтору
       }
+      // В режиме владельца повторный signUp запрещён: новый анонимный uid
+      // правила по auth.uid отвергли бы, и синхронизация пропала бы с видом
+      // «работает, но пусто». Человек узнаёт о потере сессии из Настроек.
+      if (owner) {
+        throw new Error('Сессия владельца потеряна — нужно войти заново');
+      }
       response = await signUpPost();
     }
   } else {
+    if (owner) {
+      throw new Error('Нет сессии владельца — нужно войти в Настройках');
+    }
     response = await signUpPost();
   }
   if (!response.ok) throw new Error('auth-сервер ответил ' + response.status);

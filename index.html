@@ -538,6 +538,28 @@
       <li>
         <input type="file" id="settings-import-file" accept=".json,application/json" hidden>
       </li>
+      <!-- Аккаунт владельца. Правила базы (database.rules.json) пускают в узел
+           только один auth.uid, а анонимный uid Firebase выдаёт отдельный для
+           каждого устройства — поэтому все устройства хозяина входят в один постоянный
+           аккаунт. Email и UID живут в localStorage этого устройства, пароль
+           не хранится вовсе: только refresh-токен, как в анонимном режиме. -->
+      <li id="settings-owner-item">
+        <p class="settings-row settings-owner-title">Аккаунт владельца</p>
+        <div class="settings-owner-panel">
+          <p id="settings-owner-status" class="settings-owner-status">
+            Анонимный режим: правила базы пустят только аккаунт владельца</p>
+          <input type="email" id="settings-owner-email" class="input"
+                 placeholder="Email аккаунта владельца" autocomplete="username"
+                 aria-label="Email аккаунта владельца">
+          <input type="password" id="settings-owner-password" class="input"
+                 placeholder="Пароль" autocomplete="current-password"
+                 aria-label="Пароль аккаунта владельца">
+          <div class="settings-owner-actions">
+            <button type="button" id="settings-owner-signin" class="btn btn-primary">Войти</button>
+            <button type="button" id="settings-owner-signout" class="btn btn-secondary" hidden>Выйти</button>
+          </div>
+        </div>
+      </li>
       <li>
         <button type="button" id="settings-sync-now" class="settings-row">
           <span>Обновить с сервера</span><span class="settings-chevron">›</span>
