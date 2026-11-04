@@ -826,3 +826,251 @@ test('syncToCloudNow без ETag на ответе сервера: PUT идёт 
   assert.ok(put);
   assert.equal(put.headers['If-Match'], undefined, 'If-Match без известного ETag');
 });
+
+// ── Unit 5: изолированная модель правил database.rules.json (ТЗ §1.4.7) ──────
+// НЕ живой Firebase и не эмулятор с продакшн-данными: локальный движок,
+// который читает текст правил проекта и проверяет семантику на синтетике —
+// права чужого UID, PUT-null по родителю и валидация нового узла. Публикация
+// правил — ручной шаг владельца, здесь проверяется только проект файла.
+
+import { readFileSync } from 'node:fs';
+import { dirname, join, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import vmLib from 'node:vm';
+
+const ROOT_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '..');
+
+function rulesTree() {
+  return JSON.parse(readFileSync(join(ROOT_DIR, 'database.rules.json'), 'utf8')).rules;
+}
+
+function ownerNodeName() {
+  return Object.keys(rulesTree()).filter(function (k) { return !k.startsWith('.') && !k.endsWith('-backups'); })[0];
+}
+
+// data → DataSnapshot-обёртка: child/val/isX/hasChild(s)/key — подмножество
+// RTDB Rules API, ровно то, что используют выражения проекта
+function snapshotOf(value, key) {
+  const isObj = value !== null && typeof value === 'object' && !Array.isArray(value);
+  return {
+    key: key === undefined ? null : key,
+    val: function () { return value; },
+    isNull: function () { return value === null || value === undefined; },
+    isBoolean: function () { return typeof value === 'boolean'; },
+    isNumber: function () { return typeof value === 'number'; },
+    isString: function () { return typeof value === 'string'; },
+    isOther: function () { return isObj || Array.isArray(value); },
+    hasChild: function (path) {
+      return !snapshotResolve(value, path).isNull();
+    },
+    hasChildren: function (names) {
+      const list = names || [];
+      for (let i = 0; i < list.length; i++) {
+        if (!snapshotResolve(value, list[i]).isNull()) return true;
+      }
+      return false;
+    },
+    child: function (path) { return snapshotResolve(value, path, path); },
+  };
+}
+
+function snapshotResolve(rootValue, path, keyForLeaf) {
+  const parts = String(path).split('/').filter(Boolean);
+  let cursor = rootValue;
+  for (let i = 0; i < parts.length; i++) {
+    if (cursor === null || cursor === undefined || typeof cursor !== 'object') return snapshotOf(null, null);
+    cursor = cursor[parts[i]];
+  }
+  if (cursor === undefined) cursor = null;
+  return snapshotOf(cursor, keyForLeaf || (parts.length ? parts[parts.length - 1] : null));
+}
+
+function evalRule(expression, ctx) {
+  // Изолированный контекст без глобалов: только auth/data/newRoot/`$`-дики
+  const sandbox = Object.assign(Object.create(null), ctx);
+  return vmLib.runInNewContext(String(expression), sandbox, { timeout: 100 });
+}
+
+// Разрешение (наследование .read/.write): любая метка по пути-предку.
+// false на родителе — «нет разрешения здесь», потомок всё равно может дать
+// (на этом держится deny-by-default корень + рабочие узлы владельца).
+function markerGrants(marker, ctx) {
+  if (marker === true) return true;
+  if (typeof marker === 'string') return evalRule(marker, ctx);
+  return false;
+}
+
+function permitted(rules, segments, effect, auth, newDataValue, rootValue) {
+  let node = rules;
+  const wildcards = {};
+  const ctx = function () {
+    return Object.assign({
+      auth: auth,
+      data: snapshotOf(rootValue, null),
+      newData: snapshotOf(newDataValue === undefined ? null : newDataValue, null),
+      root: snapshotOf(rootValue, null),
+    }, wildcards);
+  };
+  if (markerGrants(node[effect], ctx())) return true;
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    if (node[seg] !== undefined && typeof node[seg] === 'object') {
+      node = node[seg];
+    } else {
+      const wildcard = firstWildcardChildName(node);
+      if (wildcard === undefined || typeof node[wildcard] !== 'object') return false;
+      wildcards[wildcard] = seg;
+      node = node[wildcard];
+    }
+    if (markerGrants(node[effect], ctx())) return true;
+  }
+  return false;
+}
+
+function descendRule(rules, segments) {
+  let node = rules;
+  for (let i = 0; i < segments.length; i++) {
+    if (node === undefined || node === null) return undefined;
+    const seg = segments[i];
+    if (node[seg] !== undefined) node = node[seg];
+    else {
+      const wildcard = firstWildcardChildName(node);
+      if (wildcard === undefined) return undefined;
+      node = node[wildcard];
+    }
+  }
+  return node;
+}
+
+function firstWildcardChildName(node) {
+  return Object.keys(node).find(function (k) { return k.startsWith('$'); });
+}
+
+// .validate: проверяется В КАЖДОМ узле записанного поддерева (newData есть,
+// удаление — null — валидаторы не triggers, это семантика RTDB)
+function validateSubtree(ruleNode, dataValue, bindings, auth, rootValue) {
+  if (ruleNode === null || ruleNode === undefined || typeof ruleNode !== 'object') return true;
+  if (dataValue !== null && dataValue !== undefined && Object.prototype.hasOwnProperty.call(ruleNode, '.validate')) {
+    if (typeof ruleNode['.validate'] === 'string') {
+      const ok = evalRule(ruleNode['.validate'], Object.assign({
+        auth: auth, newData: snapshotOf(dataValue, bindings.key || null),
+        root: snapshotOf(rootValue, null),
+      }, bindings.vars || {}));
+      if (!ok) return false;
+    }
+  }
+  if (dataValue === null || dataValue === undefined || typeof dataValue !== 'object') return true;
+  const keys = Object.keys(dataValue);
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i];
+    let childRule;
+    const childVars = Object.assign({}, bindings.vars || {});
+    if (ruleNode[key] !== undefined) {
+      childRule = ruleNode[key];
+    } else {
+      const wildcard = firstWildcardChildName(ruleNode);
+      if (wildcard === undefined) continue; // правил для ветки нет — и проверять нечем
+      childRule = ruleNode[wildcard];
+      childVars[wildcard] = key;
+    }
+    if (childRule === undefined || typeof childRule !== 'object') continue;
+    if (!validateSubtree(childRule, dataValue[key], { vars: childVars, key: key }, auth, rootValue)) return false;
+  }
+  return true;
+}
+
+function modelRequest(auth, method, path, newData, rootState) {
+  // path: массив сегментов от корена базы; rootState — текущие данные всей базы
+  const rules = rulesTree();
+  const effect = method === 'GET' ? '.read' : '.write';
+  const rootValue = method === 'GET' ? rootState : mergeAtPath(rootState, path, newData);
+  if (!permitted(rules, path, effect, auth, newData === undefined ? null : newData, rootState)) {
+    return { allowed: false, status: 401 };
+  }
+  if (effect === '.write' && newData !== null && newData !== undefined) {
+    const ruleAt = descendRule(rules, path);
+    if (ruleAt && typeof ruleAt === 'object') {
+      // валидаторы по всему записанному поддереву начиная с этой точки
+      if (!validateSubtree(ruleAt, newData, { vars: {}, key: null }, auth, rootValue)) {
+        return { allowed: false, status: 403 };
+      }
+    }
+  }
+  return { allowed: true, status: method === 'GET' ? 200 : 204 };
+}
+
+function mergeAtPath(state, path, newData) {
+  if (path.length === 0) return newData;
+  const copy = Object.assign({}, state);
+  let cursor = copy;
+  for (let i = 0; i < path.length - 1; i++) {
+    cursor[path[i]] = cursor[path[i]] ? Object.assign({}, cursor[path[i]]) : {};
+    cursor = cursor[path[i]];
+  }
+  cursor[path[path.length - 1]] = newData;
+  return copy;
+}
+
+const OWNER = ownerNodeName();
+const OWNER_UID = 'OWNER_UID'; // заглушка публичного файла: владелец-посредник подставляет живой uid
+
+function ownerAuth() { return { uid: OWNER_UID }; }
+
+test('модель правил: чужой UID не читает и не пишет рабочий узел (изоляция владельца не ослаблена)', () => {
+  const intruder = { uid: 'someone-else' };
+  assert.equal(modelRequest(intruder, 'GET', [OWNER], undefined, {}).allowed, false);
+  assert.equal(modelRequest(intruder, 'PUT', [OWNER], { habits: [] }, {}).allowed, false);
+  assert.equal(modelRequest(intruder, 'PUT', [OWNER, 'plannerV1'], snap(), {}).allowed, false);
+  assert.equal(modelRequest(intruder, 'GET', [OWNER + '-backups'], undefined, {}).allowed, false);
+  // владелец — пускается
+  assert.equal(modelRequest(ownerAuth(), 'GET', [OWNER], undefined, {}).allowed, true);
+});
+
+test('модель правил: PUT-null по родителю рабочего узла чужой сессией отвергнут; корень базы по-прежнему deny-by-default', () => {
+  // PUT null (стереть весь узел владельца) без авторизации владельца — отказ
+  assert.equal(modelRequest(null, 'PUT', [OWNER], null, { [OWNER]: { habits: [{}] } }).allowed, false);
+  assert.equal(modelRequest({ uid: 'someone-else' }, 'PUT', [OWNER], null, { [OWNER]: {} }).allowed, false);
+  // PUT-null по корню базы — отказ даже владельцу: прав на '/', там .write:false
+  assert.equal(modelRequest(ownerAuth(), 'PUT', [], null, {}).allowed, false);
+});
+
+test('модель правил: валидация узла plannerV1 — схема принимается, мусор и будущая версия отвергаются', () => {
+  const good = snap({ t1: entry('t1', { title: fld('Есть', 1, 'a') }) }, {},
+    { gone: { version: v(2, 'a'), deletedAt: '2026-11-04T12:00:00Z' } });
+  assert.equal(modelRequest(ownerAuth(), 'PUT', [OWNER, 'plannerV1'], good, {}).allowed, true,
+    'валидный plannerV1 отвергнут — правила ломают собственную запись');
+  assert.equal(modelRequest(ownerAuth(), 'PUT', [OWNER, 'plannerV1'],
+    { schemaVersion: 2, entries: {}, settings: {}, tombstones: {} }, {}).allowed, false,
+    'plannerV1 будущей версии проходит валидатор');
+  assert.equal(modelRequest(ownerAuth(), 'PUT', [OWNER, 'plannerV1'],
+    { schemaVersion: 1, entries: { t1: { id: 'другой', fields: {} } }, settings: {}, tombstones: {} }, {}).allowed, false,
+    'entry без совпадения id с ключом проходит');
+  assert.equal(modelRequest(ownerAuth(), 'PUT', [OWNER, 'plannerV1'],
+    { schemaVersion: 1, entries: {}, settings: {}, tombstones: { g: { version: { counter: 'не число', actorId: 'a' }, deletedAt: 'x' } } }, {}).allowed, false,
+    'tombstone без числового counter проходит');
+});
+
+test('модель правил: валидация срабатывает и при корневом PUT всего снимка (каскад на subtree)', () => {
+  const badNode = { schemaVersion: 99, entries: {}, settings: {}, tombstones: {} };
+  assert.equal(modelRequest(ownerAuth(), 'PUT', [OWNER],
+    { habits: [], plannerV1: badNode }, {}).allowed, false,
+    'битый plannerV1 прошёл через каскадную валидацию корневого PUT');
+  assert.equal(modelRequest(ownerAuth(), 'PUT', [OWNER],
+    { habits: [], plannerV1: snap({ t: entry('t', { title: fld('x', 1, 'a') }) }) }, {}).allowed, true);
+});
+
+test('модель правил (зафиксированный РИСК, выпуск остановлен по §1.4.2): старый клиент затирает plannerV1 безусловным PUT, правила это не блокируют', () => {
+  // .validate не вызывается при УДАЛЕНИИ (newData=null), а child-.write не
+  // может отнять разрешение, унаследованное от узла. Единственный способ
+  // запретить «PUT без plannerV1, если он уже есть» — условие на .write
+  // самого узла по newData, но оно сломает и чтение (newData при GET пуст),
+  // а identical read/write требует тест firebase-rules. Правки вне whitelist
+  // (раздельные read/write) здесь невозможны → риск задокументирован,
+  // защита осталась на клиенте: syncBody всегда несёт слитый снимок.
+  const state = { [OWNER]: { plannerV1: snap({ t: entry('t', { title: fld('x', 1, 'a') }) }) } };
+  const oldClientPut = { habits: [], updatedAt: 5 };
+  assert.equal(modelRequest(ownerAuth(), 'PUT', [OWNER], oldClientPut, state).allowed, true,
+    'модель должна честно показать: правило НЕ блокирует стирание узла старым writers');
+  const after = mergeAtPath(state, [OWNER], oldClientPut);
+  assert.equal(after[OWNER].plannerV1, undefined);
+});
