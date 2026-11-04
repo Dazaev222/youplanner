@@ -72,8 +72,9 @@ self.addEventListener('fetch', function (e) {
   // HTML, JS и CSS — network-first: свежий index.html + свежие модули важнее
   // кэша. До Фазы 3.2 не-HTML отдавался cache-first, и обновление деплоя
   // давало version-skew: новый HTML подключал старые скрипты из кэша.
-  // Успешный ответ кладётся в кэш и работает офлайн; при офлайне или ошибке
-  // 404/500 в кэш мусор не кладём — отдаётся прежняя рабочая версия.
+  // Успешный ответ кладётся в кэш и работает офлайн; при офлайне ИЛИ битом
+  // HTTP-ответе (404 неатомарного деплоя, 500 на бэкенде) в кэш мусор не
+  // кладём — отдаётся прежняя рабочая версия из кэша, а не сломанный ответ.
   if (url.endsWith('.html') || url.endsWith('/') ||
       url.endsWith('.js') || url.endsWith('.css')) {
     e.respondWith(
@@ -83,8 +84,14 @@ self.addEventListener('fetch', function (e) {
           // Запись в кэш — побочный эффект мимо respondWith: без waitUntil
           // SW может уснуть до её завершения, и офлайн-копия не обновится
           e.waitUntil(caches.open(CACHE).then(function (c) { c.put(e.request, copy); }));
+          return resp;
         }
-        return resp;
+        // Битый HTTP-ответ — НЕ ответ пользователю: в кэше лежит целая версия,
+        // и именно её просит браузер. Проверка resp.ok, а не отклонения
+        // промиса: fetch разрешается и на 500, поэтому прежний .catch() такую
+        // ошибку вообще не видел. Копии в кэше нет — отдаём как есть:
+        // выдуманная заглушка притворялась бы целой страницей.
+        return caches.match(e.request).then(function (cached) { return cached || resp; });
       }).catch(function () { return caches.match(e.request); })
     );
   } else {
