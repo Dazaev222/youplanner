@@ -6,6 +6,10 @@ Thumbs.db
 .env
 .env.local
 .test_tmp/
+# диагностические дампы: вычищены из истории 05.11 и не должны возвращаться
+# (set-owner-uid.mjs остаётся отслеживаемым — его читает тест)
+_tools/analyze-data.html
+_tools/dump-localstorage.html
 _tools/claude-ansar-local.bat
 # собранные правила с живым uid владельца (публичный файл — только с заглушкой)
 database.rules.local.json
