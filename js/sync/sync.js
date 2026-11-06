@@ -12,7 +12,7 @@ import { STORAGE_KEYS, loadPlannerEnvelope, savePlannerEnvelope, plannerObserveV
 import {
   MATRIX_STORAGE_KEY, materializePlannerTasks, plannerLoadOrBuildEnvelope, plannerOwnerUid,
 } from '../data/matrix.js';
-import { rollbackStagedKeys } from '../core/storage.js';
+import { rollbackStagedKeys, safeSetItem } from '../core/storage.js';
 // Ядро sync-слоя: константы Firebase, флаги состояния и валидаторы снимка
 // (слито из data/sync.js, sync/state.js и sync/validators.js, этап Y2)
 import { BACKUP_LIMIT, FIREBASE_BACKUPS_URL, FIREBASE_URL, SYNC_DEBOUNCE_MS, SYNC_TS_KEY, clearSyncPending, hasData, markSyncPending, normalizing, saveNormalized, syncPending, syncTs, validCloudArchive, validCloudFast, validCloudHabits, validCloudPrayer, validCloudQaza, validCloudQazaLog, validCloudRecords, validCloudSchedule, validCloudSleep, validCloudTombstones } from './core.js';
@@ -551,7 +551,10 @@ export async function syncToCloudNow() {
       // неподтверждённой попытки остаются в outbox до удачного CAS
     }
     if (response && response.ok) {
-      localStorage.setItem(SYNC_TS_KEY, String(ts));
+      // Метка времени — та же safe-запись, что и весь проект: сырой setItem
+      // внутри этого try бросок квоты превращал бы успешный PUT в мнимый
+      // сетевой сбой (catch ниже считает сетью любой бросок).
+      safeSetItem(SYNC_TS_KEY, String(ts));
       if (!syncTimer) clearSyncPending();
       ackPlannerPublish(publishInfo);
     }

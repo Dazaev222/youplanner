@@ -925,7 +925,10 @@ function ruleDatesAfter(schedule, afterIso, limit, context) {
   if (ends.type === 'count') {
     const total = intIn(ends.count, SCHEDULE_LIMITS.countMin, SCHEDULE_LIMITS.countMax);
     if (total === null) return { status: 'invalid', reason: 'invalid-count', dates: [] };
-    limit = Math.min(limit, total - 1);        // count включает текущий экземпляр
+    // count включает текущий экземпляр: после экземпляра с номером N остаются
+    // total - N продолжений, а не total - 1, — иначе серия «после N» плодила
+    // бы следующий экземпляр на каждом выполнении бесконечно.
+    limit = Math.min(limit, total - context.seriesIndex);
     if (limit <= 0) return { status: 'none', reason: 'count-exhausted', dates: [] };
   }
   if (ends.type === 'until' && !isoDateOrNull(ends.until)) {
@@ -998,7 +1001,12 @@ function ruleDatesAfter(schedule, afterIso, limit, context) {
     if (repeat.unit === 'day' || repeat.unit === 'week') {
       iso = addCalendarDays(base, p * interval * dayStep);
     } else {
-      iso = occurrenceAtMonthDay(base, anchorDayOf(base), p * interval * perYear);
+      /* День «по числу» — от якоря серии (Б7.2): ряд «31-го числа» обязан
+         вернуть 31 после короткого месяца, а не застрять в обрезанном 28.
+         От выполнения число следует дате завершения (контракт Б7.3). */
+      const day = context.basis === 'completion' || context.anchorDay === null
+        ? anchorDayOf(base) : context.anchorDay;
+      iso = occurrenceAtMonthDay(base, day, p * interval * perYear);
     }
 
     if (context.basis === 'completion') {
@@ -1102,6 +1110,14 @@ function completionContext(schedule, options) {
     basis: repeat.basis === 'completion' && given ? 'completion' : repeat.basis,
     completionIso: given ? toISODate(given) : null,
     completionInstant: given ? given.getTime() : null,
+    // Номер текущего экземпляра в серии (Б7.5): ряд enumerateOccurrences
+    // всегда начинается с первого экземпляра, поэтому по умолчанию 1.
+    // nextOccurrence подставляет настоящий номер из series.index — иначе
+    // «после N» считал потолок от начала правила и серия не заканчивалась.
+    seriesIndex: 1,
+    // Якорный день серии для месячного/годового «по числу» (Б7.2): по
+    // умолчанию день base — для ряда enumerate base и есть якорь.
+    anchorDay: null,
   };
 }
 
@@ -1143,14 +1159,21 @@ export function enumerateOccurrences(schedule, options) {
 // Следующий экземпляр после текущего (index+1) или диагностируемый 'none'.
 export function nextOccurrence(schedule, options) {
   const s = isRecord(schedule) ? normalizeSchedule(schedule).schedule : emptySchedule();
-  const currentIndex = isRecord(s.series) && intOrNull(s.series.index) !== null
-    ? Math.max(1, s.series.index) : 1;
+  const series = isRecord(s.series) ? s.series : null;
+  const currentIndex = series && intOrNull(series.index) !== null
+    ? Math.max(1, series.index) : 1;
 
   if (!s.repeat || !s.startDate) {
     return { status: 'none', reason: s.repeat ? 'no-start-date' : 'no-repeat', occurrence: null, series: null };
   }
 
-  const result = ruleDatesAfter(s, s.startDate, 1, completionContext(s, options || {}));
+  // Настоящий номер экземпляра и якорный день серии: потолок «после N» и
+  // день «по числу» считаются от них, а не от начала правила (Б7.5, Б7.2).
+  const context = Object.assign(completionContext(s, options || {}), {
+    seriesIndex: currentIndex,
+    anchorDay: series && series.anchorDay ? series.anchorDay : anchorDayOf(s.startDate),
+  });
+  const result = ruleDatesAfter(s, s.startDate, 1, context);
   if (result.status === 'invalid') {
     return { status: 'invalid', reason: result.reason, occurrence: null, series: null };
   }
@@ -1159,7 +1182,6 @@ export function nextOccurrence(schedule, options) {
   }
 
   const occurrence = occurrenceView(s, buildOccurrence(s, result.dates[0], currentIndex + 1));
-  const series = isRecord(s.series) ? s.series : null;
   return {
     status: 'ok',
     reason: null,

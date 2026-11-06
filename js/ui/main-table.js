@@ -2,9 +2,8 @@ import { addDays, getMonthDatesToToday, getWeekStart, toISODate } from '../core/
 import { QAZA_HABIT_ID } from '../data/qaza.js';
 import { cloudReachable, cloudReady } from '../sync/sync.js';
 import { qazaCellMarkup } from './qaza-view.js';
-import { appState, isMainDayView, isMobileView, ui } from './state.js';
+import { CIRCLE_CENTER, CIRCLE_LENGTH, CIRCLE_RADIUS, CIRCLE_SIZE, MONTHS_GENITIVE, MONTHS_NOMINATIVE, MONTHS_SHORT, appState, isMainDayView, isMobileView, ui } from './state.js';
 import { openLevelSheet } from './level-sheet.js';
-import { CIRCLE_CENTER, CIRCLE_LENGTH, CIRCLE_RADIUS, CIRCLE_SIZE, MONTHS_GENITIVE, MONTHS_NOMINATIVE, MONTHS_SHORT } from './constants.js';
 import { LEVEL_LATE, LEVEL_ON_TIME, LEVEL_TWO_MIN, QURAN_HABIT_ID, SPORT_VALUES, SPORT_VALUE_LABELS, calcProgress, defaultLevel, getEntry, getRecord, habitMarkDate, hasLevelPopup, isChoiceLevelHabit, isLevelHabit, writeHabitEntry } from '../data/records.js';
 import { cssEscape, escapeHtml, pad2, setHidden } from '../core/dom.js';
 import { CHOICE_OPTIONS, loadHabits } from '../data/habits.js';
@@ -29,11 +28,14 @@ export function weekPercent(habit) {
   if (!weekStart) return 0;
   return calcProgress(habit, getWeekDates(weekStart));
 }
-// Прогресс привычки за месяц: с 1-го числа по сегодня включительно
+// Прогресс привычки за месяц: с 1-го числа по сегодня включительно — тот же
+// текущий месяц, что показывает «Статистика → Месяц» (stats.js), а не месяц
+// отображаемой недели: неделями навигируют стрелками, и в дни, когда
+// понедельник недели выпадает в прошлый месяц, круг и статистика обязаны
+// называть одно число, а не два разных процента.
 export function monthPercent(habit) {
-  const weekStart = appState.weekStart;
-  if (!weekStart) return 0;
-  const dates = getMonthDatesToToday(weekStart.getFullYear(), weekStart.getMonth());
+  const now = new Date();
+  const dates = getMonthDatesToToday(now.getFullYear(), now.getMonth());
   return calcProgress(habit, dates);
 }
 // Класс границы поля отметки по уровню записи (§1.5). Уровня нет — класс
@@ -634,13 +636,13 @@ export function captureMainSnapshot() {
     // теперь — две, дальше тёплые попадания в кэш calcProgress.
     const weekStart = appState.weekStart;
     const weekPeriod = weekStart ? getWeekDates(weekStart) : [];
-    const monthPeriod = weekStart
-      ? getMonthDatesToToday(weekStart.getFullYear(), weekStart.getMonth())
-      : [];
+    // Месяц — текущий, тем же окном, что monthPercent и «Статистика → Месяц»
+    const now = new Date();
+    const monthPeriod = getMonthDatesToToday(now.getFullYear(), now.getMonth());
     for (let h = 0; h < appState.habits.length; h++) {
       const habit = appState.habits[h];
       // Значения те же, что дают weekPercent/monthPercent: тот же
-      // calcProgress на тех же датах того же appState.weekStart
+      // calcProgress на тех же датах
       circles[habit.id] = weekStart
         ? [calcProgress(habit, weekPeriod), calcProgress(habit, monthPeriod)]
         : [0, 0];

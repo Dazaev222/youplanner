@@ -14,7 +14,6 @@ import { invalidateRecordsCache } from './data/records.js';
 import { loadSchedule, SCHEDULE_TYPES } from './data/schedule.js';
 import { STATS_PERIOD_BOXES, saveStatsPeriod } from './data/stats.js';
 import { STORAGE_KEYS } from './data/storage.js';
-import { APP_BUILD, APP_VERSION } from './ui/constants.js';
 import { SYNC_STATUS_MS, clearSyncPending, syncPending } from './sync/core.js';
 import { deniedStatus, flushPendingSync, markCloudReady, scheduleSync, settleHabitsAfterSync, syncFromCloud, syncToCloud } from './sync/sync.js';
 import {
@@ -39,7 +38,7 @@ import { handleMatrixEscape, handleMatrixNavigation, renderMatrixView } from './
 import { createNoticeCenter } from './ui/matrix-notices.js';
 import { createReminderController } from './core/matrix-reminders.js';
 import { loadTasks } from './data/matrix.js';
-import { appState, isMainDayView, isMobileView, ui } from './ui/state.js';
+import { APP_BUILD, APP_VERSION, appState, isMainDayView, isMobileView, ui } from './ui/state.js';
 import { closeStatsMenu, isStatsMenuOpen, isStatsView, openStatsMenu, renderStatsCategory, renderStatsFastView, renderStatsHabitView, renderStatsHabitsView, renderStatsQazaView, renderStatsSleepView, renderStatsView, setStatsHabitId } from './ui/stats-view.js';
 /* YouPlanner — точка сборки интерфейса (app.js).
    Модульная сборка восстановлена (фазы 3.2–3.4): домены данных — js/data,

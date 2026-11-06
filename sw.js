@@ -1,20 +1,28 @@
-// v46: правка текстовая (в комментарии js/data/matrix.js:771 перепутались
-// алфавиты), но правило про побайтовое соответствие, а не про важность:
-// любой изменившийся в main файл из ASSETS обязан уйти в новое имя кэша,
-// иначе устройство крутит старые байты.
-// (v45 — четыре файла после v44, v44 — восемь файлов аудита,
+// v48: чистка мёртвого кода — четыре микро-CSS-файла слиты в соседние по
+// смыслу (buttons.css → layout.css, cells.css и progress-circle.css →
+// table.css, sparkline.css → stats.css, background.css → settings.css),
+// ui/constants.js слит в ui/state.js; правила перенесены дословно, порядок
+// каскада сохранён. Правило прежнее: любой изменившийся в main файл из
+// ASSETS обязан уйти в новое имя кэша, иначе устройство крутит старые байты.
+// (v47: эмодзи вместо SVG-трендов в пунктах меню статистики (index.html,
+// js/ui/stats-view.js, styles/mobile.css, стили спарклайнов — теперь в
+// styles/stats.css) и стили календаря/матрицы по замеру TickTick — серые
+// поля вместо синих рамок, iOS-тумблер «Весь день», радиусы/зазоры/паддинги,
+// без грипа листов (js/ui/matrix-view.js, styles/matrix.css).)
+// (v46 — правка текстовая (в комментарии js/data/matrix.js:771 перепутались
+// алфавиты), v45 — четыре файла после v44, v44 — восемь файлов аудита,
 // v43 — транспорт plannerV1, v42 — пересобранная вёрстка Матрицы.)
-const CACHE = 'youplanner-v46';
+const CACHE = 'youplanner-v48';
 // Иконки — все из manifest.json: отсутствующая в кэше иконка ломала бы
 // офлайн-установку PWA (аудит 2026-10-31: icon-512.png не кэшировался)
 const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon-512.png', './icon.svg',
-  './styles/tokens.css', './styles/layout.css', './styles/buttons.css',
-  './styles/table.css', './styles/cells.css', './styles/progress-circle.css',
+  './styles/tokens.css', './styles/layout.css',
+  './styles/table.css',
   './styles/modal.css', './styles/qaza.css', './styles/day-view.css',
   './styles/schedule.css', './styles/sheets.css', './styles/prayer.css',
   './styles/toast.css', './styles/settings.css', './styles/stats.css',
-  './styles/habits-edit.css', './styles/assistant.css', './styles/background.css',
-  './styles/mobile.css', './styles/matrix.css', './styles/sparkline.css',
+  './styles/habits-edit.css', './styles/assistant.css',
+  './styles/mobile.css', './styles/matrix.css',
   // pdf.js для чтения PDF в ассистенте: локальные копии вместо CDN —
   // офлайн-PWA разбирает файлы без сети
   './js/vendor/pdf.min.mjs', './js/vendor/pdf.worker.min.mjs',
@@ -46,7 +54,6 @@ const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './ic
   './js/data/prayer.js', './js/data/fast.js', './js/data/sleep.js',
   './js/data/stats.js', './js/data/backup.js', './js/data/background.js',
   './js/data/archive.js', './js/data/image.js',
-  './js/ui/constants.js',
   // Матрица Эйзенхауэра и спарклайны в статистике
   './js/data/matrix.js',
   // Интервал, повтор и локальные напоминания Матрицы (ТЗ Воркера 2)

@@ -589,6 +589,128 @@ test('Б7.9 история выполненных экземпляров не п
 });
 
 /* ========================================================================= */
+/* Б7.5 — «после N» считает потраченные экземпляры по номеру серии            */
+/* ========================================================================= */
+
+test('Б7.5 nextOccurrence у экземпляра с index=count отдаёт none', (t) => {
+  // Третий (последний) экземпляр серии «3 раза»: продолжений быть не должно.
+  const last = sched({
+    startDate: '2026-11-03', endDate: '2026-11-03',
+    repeat: { unit: 'day', interval: 1, ends: { type: 'count', count: 3 } },
+    series: { id: 's1', index: 3, anchorDate: '2026-11-01', anchorDay: 1, anchorMonth: 11 },
+  });
+  const out = nextOccurrence(last, {});
+  assert.equal(out.status, 'none');
+  assert.equal(out.reason, 'count-exhausted', 'после третьего из трёх продолжений нет');
+});
+
+test('Б7.5 «после N» заканчивает серию в цепочке выполнений: count=3 — ровно три', (t) => {
+  const { context: ctx } = loadApp();
+  const first = ctx.startSeries(ctx.createTask({
+    title: 'Три раза',
+    priority: 2,
+    schedule: {
+      allDay: true, startDate: '2026-11-01', endDate: '2026-11-01',
+      repeat: { unit: 'day', interval: 1, ends: { type: 'count', count: 3 } },
+    },
+  }), new Date(2026, 10, 1));
+
+  const step1 = ctx.completeOccurrence([first], first.id, new Date(2026, 10, 1, 12, 0));
+  assert.equal(step1.status, 'recurring');
+  assert.equal(step1.next.schedule.series.index, 2);
+  assert.equal(step1.next.schedule.startDate, '2026-11-02');
+
+  const step2 = ctx.completeOccurrence(step1.tasks, step1.next.id, new Date(2026, 10, 2, 12, 0));
+  assert.equal(step2.status, 'recurring');
+  assert.equal(step2.next.schedule.series.index, 3);
+  assert.equal(step2.next.schedule.startDate, '2026-11-03');
+
+  const step3 = ctx.completeOccurrence(step2.tasks, step2.next.id, new Date(2026, 10, 3, 12, 0));
+  assert.equal(step3.status, 'series-end', 'выполнен последний из трёх — продолжения нет');
+  assert.equal(step3.next, null);
+  assert.equal(step3.tasks.filter(task => task.done).length, 3, 'выполненных ровно три');
+  assert.equal(step3.tasks.filter(task => !task.done).length, 0, 'активных не осталось');
+});
+
+/* ========================================================================= */
+/* Б7.2 — месячный/годовой «по числу» держит якорный день серии               */
+/* ========================================================================= */
+
+test('Б7.2 monthly next после обрезанного экземпляра возвращается к якорному дню', (t) => {
+  // Второй экземпляр серии «31-го числа» — обрезанный 28.02; следующий обязан
+  // вернуть 31 (контракт 31.01 +2 → 31.03), а не застрять в 28 навсегда.
+  const february = sched({
+    startDate: '2026-02-28', endDate: '2026-02-28',
+    repeat: { unit: 'month', interval: 1, monthMode: 'dayOfMonth' },
+    series: { id: 's1', index: 2, anchorDate: '2026-01-31', anchorDay: 31, anchorMonth: 1 },
+  });
+  const out = nextOccurrence(february, {});
+  assert.equal(out.status, 'ok');
+  assert.equal(out.occurrence.startDate, '2026-03-31', 'число возвращается к якорю серии');
+  assert.equal(out.series.anchorDay, 31, 'якорный день серии не пересчитывается');
+});
+
+test('Б7.2 yearly next из не-високосного ряда снова даёт 29.02 в високосный', (t) => {
+  // Четвёртый экземпляр серии «29 февраля»: 2025–2027 обрезаны до 28,
+  // следующий високосный 2028 обязан вернуть 29.
+  const beforeLeap = sched({
+    startDate: '2027-02-28', endDate: '2027-02-28',
+    repeat: { unit: 'year', interval: 1 },
+    series: { id: 's1', index: 4, anchorDate: '2024-02-29', anchorDay: 29, anchorMonth: 2 },
+  });
+  const out = nextOccurrence(beforeLeap, {});
+  assert.equal(out.occurrence.startDate, '2028-02-29', '29.02 не исчезает из серии');
+});
+
+test('Б7.2 цепочка месячного «по числу» живёт по якорю: 31.01 → 28.02 → 31.03 → 30.04', (t) => {
+  const { context: ctx } = loadApp();
+  const first = ctx.startSeries(ctx.createTask({
+    title: '31-го числа',
+    priority: 2,
+    schedule: {
+      allDay: true, startDate: '2026-01-31', endDate: '2026-01-31',
+      repeat: { unit: 'month', interval: 1, monthMode: 'dayOfMonth' },
+    },
+  }), new Date(2026, 0, 31));
+
+  const step1 = ctx.completeOccurrence([first], first.id, new Date(2026, 0, 31, 12, 0));
+  assert.equal(step1.status, 'recurring');
+  assert.equal(step1.next.schedule.startDate, '2026-02-28', 'февраль обрезает 31-е до 28-го');
+
+  const step2 = ctx.completeOccurrence(step1.tasks, step1.next.id, new Date(2026, 1, 28, 12, 0));
+  assert.equal(step2.next.schedule.startDate, '2026-03-31',
+    'после февраля число 31 возвращается, а не застревает в 28');
+
+  const step3 = ctx.completeOccurrence(step2.tasks, step2.next.id, new Date(2026, 2, 31, 12, 0));
+  assert.equal(step3.next.schedule.startDate, '2026-04-30', 'апрель обрезает 31-е до 30-го');
+});
+
+test('Б7.2 цепочка годового «29 февраля» снова наступает в високосный', (t) => {
+  const { context: ctx } = loadApp();
+  const first = ctx.startSeries(ctx.createTask({
+    title: 'Раз в год',
+    priority: 2,
+    schedule: {
+      allDay: true, startDate: '2024-02-29', endDate: '2024-02-29',
+      repeat: { unit: 'year', interval: 1 },
+    },
+  }), new Date(2024, 1, 29));
+
+  const step1 = ctx.completeOccurrence([first], first.id, new Date(2024, 1, 29, 12, 0));
+  assert.equal(step1.next.schedule.startDate, '2025-02-28');
+
+  const step2 = ctx.completeOccurrence(step1.tasks, step1.next.id, new Date(2025, 1, 28, 12, 0));
+  assert.equal(step2.next.schedule.startDate, '2026-02-28');
+
+  const step3 = ctx.completeOccurrence(step2.tasks, step2.next.id, new Date(2026, 1, 28, 12, 0));
+  assert.equal(step3.next.schedule.startDate, '2027-02-28');
+
+  const step4 = ctx.completeOccurrence(step3.tasks, step3.next.id, new Date(2027, 1, 28, 12, 0));
+  assert.equal(step4.next.schedule.startDate, '2028-02-29',
+    'следующий високосный снова 29, а не навсегда 28');
+});
+
+/* ========================================================================= */
 /* Б3 — копия schedule не разделяется с оригиналом                            */
 /* ========================================================================= */
 

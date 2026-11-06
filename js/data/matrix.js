@@ -680,9 +680,14 @@ export function applyQuadrantMove(task, quadrant, today) {
     next.due = scheduleToDue(next.schedule);
   } else if (plainObject(base.schedule) || base.schedule === undefined || base.schedule === null) {
     // Legacy-путь: даты следуют за сроком, расписание не хранит вторую истину.
+    // Настроенные напоминания при этом НЕ стираются: относительные следуют
+    // за новой датой, абсолютные остаются на своём моменте (Б5) — иначе
+    // перенос молча снимал бы «За 1 день» вместе со сменой квадранта.
+    const previous = plainObject(base.schedule) ? base.schedule : emptySchedule();
+    const reminders = Array.isArray(previous.reminders) ? previous.reminders : [];
     next.schedule = shape.due
-      ? Object.assign({}, emptySchedule(), { startDate: shape.due, endDate: shape.due })
-      : emptySchedule();
+      ? Object.assign({}, emptySchedule(), { startDate: shape.due, endDate: shape.due, reminders })
+      : Object.assign({}, emptySchedule(), { reminders });
   }
   return sanitizeTask(next);
 }

@@ -416,3 +416,41 @@ test('401 — тоже отказ по правам; 500 и сетевой сб�
   assert.equal(await countDenied(new Error('нет сети')), 0,
     'сетевой сбой притворяется отказом по правам');
 });
+
+// ── Квота на запись метки времени после успешного PUT ───────────────────────
+// syncExchange писал SYNC_TS_KEY сырым localStorage.setItem внутри того же
+// try, чей catch считает ЛЮБОЙ бросок «сетью отвалилась»: отказ квоты именно
+// на метке задним числом превращал успешную отправку в мнимый сетевой сбой
+// (cloudReachable=false, вызывающий видел undefined при ушедших данных).
+// Весь проект пишет через safeSetItem именно чтобы квота не бросала.
+
+test('квота на SYNC_TS_KEY не превращает успешный PUT в сетевой сбой', async () => {
+  const fetchImpl = makeAuthAwareFetch();
+  const app = loadApp({ fetchImpl });
+
+  // Флаг доступности поднимает только успешная сверка: ниже проверяем, что
+  // обмен его НЕ уронит — при баге catch на записи метки ронял флаг задним
+  // числом, и данные считались «не отправленными» при ушедшем PUT.
+  await app.context.syncFromCloud();
+  assert.equal(app.run('cloudReachable'), true, 'успешная сверка: сервер доступен');
+
+  const original = app.sandbox.localStorage.setItem;
+  let tsWriteAttempts = 0;
+  app.sandbox.localStorage.setItem = function (key, value) {
+    if (key === 'youplanner.sync.ts') {
+      tsWriteAttempts += 1;
+      const error = new Error('QuotaExceededError');
+      error.name = 'QuotaExceededError';
+      throw error;
+    }
+    return original(key, value);
+  };
+
+  const response = await app.context.syncToCloud();
+
+  assert.ok(tsWriteAttempts >= 1, 'инъекция не сработала — тест ничего не проверяет');
+  assert.ok(response && response.ok === true,
+    'успешный ответ сервера доходит до вызывающего, а не глотается catch');
+  assert.equal(app.run('cloudReachable'), true,
+    'сервер остаётся доступным: сетевого сбоя не было');
+});

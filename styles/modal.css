@@ -181,7 +181,7 @@
 }
 
 /* Фокус полей форм — акцентный. Ячейки таблицы привычек здесь не участвуют:
-   у них нейтральный серый фокус по решению владельца (cells.css) */
+   у них нейтральный серый фокус по решению владельца (styles/table.css) */
 .form-fields input:focus,
 .form-fields select:focus,
 #habit-list input:focus,
@@ -262,7 +262,7 @@
 }
 
 /* Строки слайдеров: «подпись — слайдер — значение», образец — ползунок
-   затемнения фона (.settings-bg-dim в styles/background.css) */
+   затемнения фона (.settings-bg-dim в styles/settings.css) */
 .assistant-setting {
   display: flex;
   align-items: center;

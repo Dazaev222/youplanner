@@ -991,3 +991,80 @@ test('Б3.7 matrixDebugState отдаёт глубокую копию распи
   assert.equal(second.schedule.startDate, iso(1), 'правка копии не протыкает живой черновик');
   assert.equal(second.schedule.reminders.length, 0);
 });
+
+/* ========================================================================= */
+/* Б6.3 — смена квадранта черновика не стирает напоминания                    */
+/* ========================================================================= */
+
+test('Б6.3 смена квадранта черновика не стирает напоминание из листа даты', (t) => {
+  const app = loadApp();
+  const dom = installMatrixDom(app);
+  openComposer(app, dom, 'q2');
+  openCalendar(app, dom);
+  clickDay(dom, iso(0));
+  oneByClass(dom.host, 'matrix-reminder-row').fire('click');
+  const perDay = findByClass(dom.host, 'matrix-reminder-option')
+    .filter(c => c.dataset.offset === '1440')[0];
+  assert.ok(perDay, 'в all-day меню есть «За 1 день»');
+  perDay.fire('click');
+  ready(dom);
+
+  assert.equal(draft(app).schedule.reminders.length, 1, 'напоминание записано в черновик');
+
+  assert.equal(app.context.pickDraftQuadrant('q1'), true, 'квадрант переключился');
+  assert.equal(draft(app).due, iso(0), 'срок в q1 — сегодня, как и раньше');
+  assert.equal(draft(app).schedule.reminders.length, 1,
+    'смена квадранта стёрла напоминание — а должна сохранить');
+  assert.equal(draft(app).schedule.reminders[0].offsetMinutes, 1440);
+});
+
+/* ========================================================================= */
+/* Б7 — подсветка текущего пресета повтора                                    */
+/* ========================================================================= */
+
+// Пресет «Каждый месяц» строит «по числу» (dayOfMonth), и правило «N-й день
+// недели месяца» обязано отличаться: иначе пресет горел как текущий для чужого
+// правила, а клик по нему молча переписывал правило на «по числу».
+test('Б7 «Каждый месяц» не подсвечен для правила «N-й день недели»', (t) => {
+  const app = loadApp();
+  const dom = installMatrixDom(app);
+  openComposer(app, dom, 'q2');
+  openCalendar(app, dom);
+  clickDay(dom, iso(0));
+
+  // Настраиваем «последний понедельник месяца» через блок «Настроить»
+  oneByClass(dom.host, 'matrix-repeat-row').fire('click');
+  oneByClass(dom.host, 'matrix-repeat-unit').value = 'month';
+  oneByClass(dom.host, 'matrix-repeat-unit').fire('change');
+  oneByClass(dom.host, 'matrix-repeat-month-mode').value = 'nthWeekday';
+  oneByClass(dom.host, 'matrix-repeat-month-mode').fire('change');
+  oneByClass(dom.host, 'matrix-repeat-nth').value = '-1';
+  oneByClass(dom.host, 'matrix-repeat-nth').fire('change');
+  oneByClass(dom.host, 'matrix-repeat-weekday-pick').value = '1';
+  oneByClass(dom.host, 'matrix-repeat-weekday-pick').fire('change');
+  oneByClass(dom.host, 'matrix-repeat-apply').fire('click');
+  ready(dom);
+
+  assert.equal(draft(app).schedule.repeat.monthMode, 'nthWeekday',
+    'правило «N-й день недели» дошло до черновика');
+
+  openCalendar(app, dom);
+  oneByClass(dom.host, 'matrix-repeat-row').fire('click');
+  const monthPreset = findByClass(dom.host, 'matrix-repeat-option')
+    .filter(o => o.dataset.unit === 'month')[0];
+  assert.ok(monthPreset, 'пресет «Каждый месяц» на месте');
+  assert.equal(hasClass(monthPreset, 'is-current'), false,
+    '«Каждый месяц» (по числу) — не текущее правило');
+
+  monthPreset.fire('click');
+  ready(dom);
+  assert.equal(draft(app).schedule.repeat.monthMode, 'dayOfMonth',
+    'клик по пресету честно ставит «по числу»');
+
+  openCalendar(app, dom);
+  oneByClass(dom.host, 'matrix-repeat-row').fire('click');
+  const monthPresetAgain = findByClass(dom.host, 'matrix-repeat-option')
+    .filter(o => o.dataset.unit === 'month')[0];
+  assert.equal(hasClass(monthPresetAgain, 'is-current'), true,
+    'для правила «по числу» пресет «Каждый месяц» — текущий');
+});

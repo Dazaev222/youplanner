@@ -687,3 +687,37 @@ test('плашка про хранение следует за режимом: �
   assert.ok(!/только на этом устройстве/.test(text),
     'слова про одно устройство остались при подтверждённом владельце: ' + text);
 });
+
+// Б6.3 меняет даты однодневной all-day задачи намеренно (legacy-путь), но
+// стирать вместе с датами НАСТРОЕННЫЕ напоминания никто не объявлял: перенос
+// молча снимал «За 1 день», и человек узнавал об этом по пропущенному напоминанию.
+test('перенос однодневной all-day задачи не стирает настроенные напоминания', (t) => {
+  const { context: ctx } = loadApp();
+  const source = ctx.sanitizeTask(task(ctx, {
+    due: '2026-11-10',
+    schedule: {
+      version: 1, allDay: true,
+      startDate: '2026-11-10', endDate: '2026-11-10',
+      startTime: null, endTime: null, timeZoneMode: 'device',
+      reminders: [{ id: 'r1', anchor: 'start', offsetMinutes: 1440, date: null, time: null }],
+      repeat: null, series: null,
+    },
+  }));
+  // Канонический вид all-day напоминания после нормализации: время — дефолт
+  assert.deepEqual(plain(source.schedule.reminders),
+    [{ id: 'r1', anchor: 'start', offsetMinutes: 1440, date: null, time: '09:00' }]);
+  assert.equal(ctx.isAppointedSchedule(source.schedule), false,
+    'однодневная all-day задача идёт по legacy-ветке переноса');
+
+  const toQ1 = ctx.applyQuadrantMove(source, 'q1', TODAY);
+  assert.equal(toQ1.due, iso(0), 'даты переносятся по правилу Б6.3, как раньше');
+  assert.deepEqual(plain(toQ1.schedule.reminders),
+    [{ id: 'r1', anchor: 'start', offsetMinutes: 1440, date: null, time: '09:00' }],
+    'относительное напоминание следует за новой датой, а не стирается');
+
+  const toQ2 = ctx.applyQuadrantMove(source, 'q2', TODAY);
+  assert.equal(toQ2.schedule.startDate, null, 'срок в q2 снимается, как и раньше (Б6.3)');
+  assert.deepEqual(plain(toQ2.schedule.reminders),
+    [{ id: 'r1', anchor: 'start', offsetMinutes: 1440, date: null, time: '09:00' }],
+    'снятие срока тоже не стирает настроенное напоминание');
+});

@@ -788,7 +788,6 @@ function confirmLayer(options) {
   panel.setAttribute('role', 'alertdialog');
   panel.setAttribute('aria-modal', 'true');
   panel.setAttribute('aria-labelledby', headingId);
-  panel.appendChild(el('div', 'matrix-sheet-grabber'));
   const heading = el('p', 'matrix-confirm-heading', options.heading);
   heading.id = headingId;
   panel.appendChild(heading);
@@ -897,7 +896,6 @@ function buildComposerOverlay() {
     if (event.target === backdrop) requestCloseTaskComposer('backdrop');
   });
 
-  panel.appendChild(el('div', 'matrix-sheet-grabber'));
 
   const head = el('div', 'matrix-sheet-head');
   const close = iconButton('close', 'matrix-sheet-x matrix-composer-close', 'Закрыть');
@@ -1105,7 +1103,13 @@ export function pickDraftQuadrant(quadrantId) {
     draft.schedule = moved ? moved.schedule : draft.schedule;
     draft.due = moved ? moved.due : draft.due;
   } else {
-    draft.schedule = scheduleFromDue(draft.due);
+    // Даты следуют за сроком (Б6.3), но настроенные напоминания не стираются:
+    // относительные следуют за новой датой, как и у назначенного интервала.
+    const reminders = draft.schedule && Array.isArray(draft.schedule.reminders)
+      ? draft.schedule.reminders : [];
+    const rebuilt = scheduleFromDue(draft.due);
+    if (rebuilt && reminders.length) rebuilt.reminders = reminders;
+    draft.schedule = rebuilt;
   }
   draft.quadrantResolved = false;
   refreshComposer();
@@ -1161,7 +1165,6 @@ function choiceSheet({ id, title, options, parent, onDismiss }) {
   panel.setAttribute('role', 'dialog');
   panel.setAttribute('aria-modal', 'true');
   panel.setAttribute('aria-label', title);
-  panel.appendChild(el('div', 'matrix-sheet-grabber'));
   panel.appendChild(el('p', 'matrix-sheet-title', title));
 
   const close = () => {
@@ -1516,7 +1519,6 @@ function redrawDateSheet() {
   const panel = layer.panel;
   panel.textContent = '';
 
-  panel.appendChild(el('div', 'matrix-sheet-grabber'));
 
   const head = el('div', 'matrix-sheet-head');
   const close = iconButton('close', 'matrix-sheet-x', 'Закрыть');
@@ -1692,7 +1694,8 @@ function calModeRow() {
   box.id = CAL_ALLDAY_ID;
   box.checked = calendarDraft.allDay;
   box.addEventListener('change', () => calSetMode(box.checked));
-  label.append(box, el('span', 'matrix-all-day-text', 'Весь день'));
+  // Тумблер СПРАВА от текста: сперва подпись, потом переключатель
+  label.append(el('span', 'matrix-all-day-text', 'Весь день'), box);
   row.appendChild(label);
 
   const seg = el('div', 'matrix-mode-segment');
@@ -1939,7 +1942,6 @@ function calSheetLayer(id, title, role) {
   panel.setAttribute('role', role || 'dialog');
   panel.setAttribute('aria-modal', 'true');
   panel.setAttribute('aria-label', title);
-  panel.appendChild(el('div', 'matrix-sheet-grabber'));
   panel.appendChild(el('p', 'matrix-sheet-title', title));
   backdrop.appendChild(panel);
   backdrop.addEventListener('click', event => {
@@ -2482,6 +2484,10 @@ function calRepeatCurrent(preset) {
   const built = preset.build(calendarDraft);
   if (!current || current.unit !== built.unit) return false;
   if (Number(current.interval) !== Number(built.interval)) return false;
+  // Пресет месяца строит «по числу» (dayOfMonth): правило «N-й день недели
+  // месяца» — другое правило при тех же unit и interval, подсвечиваться не
+  // должно, иначе клик по пресету молча переписывал бы режим месяца.
+  if (built.unit === 'month' && current.monthMode !== built.monthMode) return false;
   return JSON.stringify((current.weekdays || []).slice().sort())
     === JSON.stringify((built.weekdays || []).slice().sort());
 }
@@ -2531,7 +2537,6 @@ function openMoveSheet(taskId) {
   panel.setAttribute('role', 'dialog');
   panel.setAttribute('aria-modal', 'true');
   panel.setAttribute('aria-label', 'Перенести задачу');
-  panel.appendChild(el('div', 'matrix-sheet-grabber'));
   panel.appendChild(el('p', 'matrix-sheet-title', task.title.length > 44
     ? task.title.slice(0, 44) + '…' : task.title));
   panel.appendChild(el('p', 'matrix-sheet-sub',
@@ -2755,7 +2760,6 @@ function openMovePreview(task, quadrantId, plan, closeMove) {
   panel.setAttribute('role', 'alertdialog');
   panel.setAttribute('aria-modal', 'true');
   panel.setAttribute('aria-labelledby', headingId);
-  panel.appendChild(el('div', 'matrix-sheet-grabber'));
   const heading = el('p', 'matrix-confirm-heading', 'Перенос изменит расписание');
   heading.id = headingId;
   panel.appendChild(heading);

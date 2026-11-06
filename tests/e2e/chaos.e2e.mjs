@@ -142,7 +142,7 @@ async function main() {
         throw new Error('после клика план не перерисовался: курсор не сдвинулся');
       });
 
-    // Фокус с клавиатуры: Tab до кнопки даёт видимый outline (buttons.css)
+    // Фокус с клавиатуры: Tab до кнопки даёт видимый outline (styles/layout.css)
     await page.reload({ waitUntil: 'domcontentloaded' });
     await page.click('#qaza-btn');
     await page.waitForSelector('#qaza-done');

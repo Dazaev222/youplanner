@@ -4,8 +4,7 @@ import { sparkValues, sparklineSvg } from './sparkline.js';
 import { fastHistorySince } from '../data/archive.js';
 import { FAST_HISTORY_MIN, fastPeriodStats, loadFast } from '../data/fast.js';
 import { loadHabits } from '../data/habits.js';
-import { loadTasks } from '../data/matrix.js';
-import { QAZA_DAILY_GOAL, loadQazaLog, qazaDayCounts, qazaTotalRemaining } from '../data/qaza.js';
+import { loadQazaLog, qazaDayCounts, qazaTotalRemaining } from '../data/qaza.js';
 import { calcProgress, loadRecords } from '../data/records.js';
 import { loadSleep, sleepAverageDurationMin, sleepAverageMinutes, sleepEntriesInPeriod, sleepFormatDuration, sleepMinutesByDay, sleepTimeLabel, sleepTimeMinutes, sleepWakeMinutes } from '../data/sleep.js';
 import { STATS_PERIOD_BOXES, habitBestStreak, habitCurrentStreak, habitMarked, habitMarkedDays, habitsAveragePercent, loadStatsPeriod, qazaStreak, statsPeriodDates } from '../data/stats.js';
@@ -31,11 +30,6 @@ export function openStatsMenu() {
   const menu = document.getElementById('stats-menu');
   const backdrop = document.getElementById('stats-menu-backdrop');
   if (!menu || !backdrop) return;
-  // Тренды пунктов рисуются на открытии: панель живёт между тапами, и
-  // синхронизировать линию с каждой записью означало бы перерисовку на
-  // каждый чейнж. Сбой расчёта не имеет права закрыть меню — пункты с
-  // текстом работают и без линии, поэтому ряд рисуется в своей try/catch
-  renderStatsMenuSparks();
   menu.classList.add('is-open');
   backdrop.hidden = false;
 }
@@ -58,175 +52,6 @@ export function closeStatsMenu() {
 export function isStatsMenuOpen() {
   const menu = document.getElementById('stats-menu');
   return !!menu && menu.classList.contains('is-open');
-}
-// ── Микро-тренды в пунктах панели --------------------------------──────
-// Меню читается как дашборд, а не как список ссылок: у каждого пункта —
-// линия тренда СВОЕГО раздела. Источник ряда — те же функции data-слоя, что
-// рисуют цифры самого раздела (см. renderStatsView/renderStatsQazaView/...),
-// ничего не пересчитывается по-своему и не хранится: localStorage только
-// читается, sync-контракт не затрагивается.
-//
-// Окно — те же две недели, что у строки списка привычек, и оно НЕ зависит от
-// выбранного периода: пункт меню не имеет своего переключателя периода, а
-// линия за тот же период, что и цифра на экране, повторила бы её.
-const MENU_SPARK_DAYS = SPARK_DAYS;
-// Сколько разделов сводит «Общая статистика» — её же четыре строки (каза,
-// сон, ураза, привычки). Тренд хаба отвечает на «насколько день заполнен», а
-// не повторяет линию какого-то одного раздела
-const MENU_SPARK_SECTIONS = 4;
-
-function maxOf(values, floor) {
-  let max = floor;
-  for (let i = 0; i < values.length; i++) if (values[i] > max) max = values[i];
-  return max;
-}
-// Ключ тренда выводится из атрибутов пункта: новых атрибутов в разметку не
-// заводим — экран раздела уже лежит в data-stats-view, у «Цикла сна» и
-// «Матрицы» свои атрибуты (тот же набор, по которому app.js делегирует
-// клики). Неизвестный пункт даёт null: слот остаётся пустым, а не рисует
-// чужой тренд
-export function statsMenuSparkKey(item) {
-  if (!item || typeof item.getAttribute !== 'function') return null;
-  if (item.hasAttribute && item.hasAttribute('data-sleep-view')) return 'sleep-cycle';
-  if (item.hasAttribute && item.hasAttribute('data-matrix-view')) return 'matrix';
-  const view = item.getAttribute('data-stats-view');
-  if (view === 'stats') return 'hub';
-  if (view === 'stats-qaza') return 'qaza';
-  if (view === 'stats-sleep') return 'sleep';
-  if (view === 'stats-fast') return 'fast';
-  if (view === 'stats-habits') return 'habits';
-  return null;
-}
-// Данные для всех рядов снимаются ОДИН раз на открытие панели: семь пунктов
-// по чтению хранилища на каждый — ровно тот шум, из-за которого первый тап
-// по «меню» начал бы тормозить
-export function statsMenuSparkSources() {
-  return {
-    habits: loadHabits(),
-    records: loadRecords(),
-    qazaLog: loadQazaLog(),
-    sleep: loadSleep(),
-    fast: loadFast(),
-    tasks: loadTasks(),
-  };
-}
-// Выполненные задачи по дням: день берётся из doneAt через toISODate, то есть
-// по местному календарю, как и ключи записей привычек. Задача без doneAt
-// (снят руками без отметки времени, старые версии хранилища) в ряд не
-// попадает — выдумывать ей день незачем
-function matrixDoneByDay(tasks, dates) {
-  const index = {};
-  for (let i = 0; i < dates.length; i++) index[dates[i]] = i;
-  const values = dates.map(() => 0);
-  const list = Array.isArray(tasks) ? tasks : [];
-  for (let i = 0; i < list.length; i++) {
-    const task = list[i];
-    if (!task || task.done !== true || typeof task.doneAt !== 'string') continue;
-    let day;
-    try {
-      day = toISODate(new Date(task.doneAt));
-    } catch (e) {
-      continue;
-    }
-    const at = index[day];
-    if (at !== undefined) values[at] += 1;
-  }
-  return values;
-}
-// Ряд одного раздела → {values, ceiling} | null. Потолок шкалы: где есть
-// естественная норма (3 намаза в день, 100% привычек) — она, где нормы нет
-// (минуты сна, количество задач, дни уразы) — максимум окна. Без этого линия
-// из «3 ч» и «9 ч» выглядела бы плоской, а смысл тренда именно в форме
-export function statsMenuSparkSeries(key, dates, src) {
-  const days = Array.isArray(dates) ? dates : [];
-  if (!key || !days.length || !src) return null;
-
-  const history = src.sleep && Array.isArray(src.sleep.history) ? src.sleep.history : [];
-  const habits = Array.isArray(src.habits) ? src.habits : [];
-
-  if (key === 'qaza') {
-    const values = qazaDayCounts(src.records, src.qazaLog, days).values;
-    // Потолок не ниже дневной цели, но и не режет день, где каза больше нормы
-    return { values: values, ceiling: Math.max(QAZA_DAILY_GOAL, maxOf(values, 1)) };
-  }
-  if (key === 'fast') {
-    const values = fastPeriodStats(src.fast, days).values;
-    return { values: values, ceiling: maxOf(values, 1) };
-  }
-  if (key === 'sleep') {
-    const values = sleepMinutesByDay(history, days);
-    return { values: values, ceiling: maxOf(values, 1) };
-  }
-  if (key === 'matrix') {
-    const values = matrixDoneByDay(src.tasks, days);
-    return { values: values, ceiling: maxOf(values, 1) };
-  }
-  if (key === 'habits') {
-    return {
-      values: sparkValues(days, d => (habitsAveragePercent(habits, [d]) || 0) / 100),
-      ceiling: 1,
-    };
-  }
-  if (key === 'sleep-cycle') {
-    // Ритм записей, а не длительность: линия «Сна» уже показывает минуты,
-    // повтор её в соседнем пункте был бы шумом. Отбор годных записей —
-    // правило data-слоя (excluded и дни вне окна отсекает sleepEntriesInPeriod)
-    const marked = {};
-    const entries = sleepEntriesInPeriod(history, days);
-    for (let i = 0; i < entries.length; i++) marked[entries[i].date] = true;
-    return { values: sparkValues(days, d => (marked[d] ? 1 : 0)), ceiling: 1 };
-  }
-  if (key === 'hub') {
-    // Заполненность дня: доля из четырёх разделов, где за день есть прогресс
-    const filled = {};
-    const bump = function (values) {
-      for (let i = 0; i < values.length; i++) {
-        if (values[i] > 0) filled[days[i]] = (filled[days[i]] || 0) + 1;
-      }
-    };
-    bump(qazaDayCounts(src.records, src.qazaLog, days).values);
-    bump(fastPeriodStats(src.fast, days).values);
-    bump(sleepMinutesByDay(history, days));
-    bump(sparkValues(days, d => (habitsAveragePercent(habits, [d]) || 0) / 100));
-    return {
-      values: sparkValues(days, d => (filled[d] || 0) / MENU_SPARK_SECTIONS),
-      ceiling: 1,
-    };
-  }
-  return null;
-}
-// Рисует ряды по слотам .stats-menu-spark внутри пунктов; возвращает число
-// отрисованных линий. Правится innerHTML слота, а не текста пункта: подпись
-// остаётся нетронутой (для скринридера смысл строки именно в ней), и
-// делегирование кликов по .stats-menu-item не меняется
-export function renderStatsMenuSparks() {
-  const menu = document.getElementById('stats-menu');
-  if (!menu || typeof menu.querySelectorAll !== 'function') return 0;
-  let drawn = 0;
-  try {
-    const items = menu.querySelectorAll('.stats-menu-item');
-    if (!items || items.length === 0) return 0;
-    const dates = lastDates(new Date(), MENU_SPARK_DAYS);
-    const src = statsMenuSparkSources();
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      const slot = item && typeof item.querySelector === 'function'
-        ? item.querySelector('.stats-menu-spark')
-        : null;
-      if (!slot) continue;
-      const series = statsMenuSparkSeries(statsMenuSparkKey(item), dates, src);
-      // label не передаётся намеренно: слот декоративен (aria-hidden в
-      // разметке), а <title> внутри спорил бы с ним — смысл строки остаётся
-      // в её тексте
-      slot.innerHTML = series
-        ? sparklineSvg(series.values, { ceiling: series.ceiling })
-        : '';
-      if (series) drawn++;
-    }
-  } catch (e) {
-    console.warn('[stats-menu] микро-тренды пунктов не отрисованы:', e);
-  }
-  return drawn;
 }
 // Экраны раздела «Статистика»: у них общий вход и общий возврат «Назад»
 export function isStatsView(name) {

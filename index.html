@@ -19,10 +19,7 @@
   <title>YouPlanner — трекер привычек</title>
   <link rel="stylesheet" href="styles/tokens.css">
   <link rel="stylesheet" href="styles/layout.css">
-  <link rel="stylesheet" href="styles/buttons.css">
   <link rel="stylesheet" href="styles/table.css">
-  <link rel="stylesheet" href="styles/cells.css">
-  <link rel="stylesheet" href="styles/progress-circle.css">
   <link rel="stylesheet" href="styles/modal.css">
   <link rel="stylesheet" href="styles/qaza.css">
   <link rel="stylesheet" href="styles/day-view.css">
@@ -33,10 +30,8 @@
   <link rel="stylesheet" href="styles/settings.css">
   <link rel="stylesheet" href="styles/stats.css">
   <link rel="stylesheet" href="styles/matrix.css">
-  <link rel="stylesheet" href="styles/sparkline.css">
   <link rel="stylesheet" href="styles/habits-edit.css">
   <link rel="stylesheet" href="styles/assistant.css">
-  <link rel="stylesheet" href="styles/background.css">
   <link rel="stylesheet" href="styles/mobile.css">
 </head>
 <body>
@@ -831,38 +826,37 @@
          пока стрелку не тронули; раскрытие помечает панель классом
          is-hub-open, по нему разворачивается иконка -->
 
-    <!-- Спарклайн (.stats-menu-spark) — декоративный слот внутри пункта:
-         ряд тренда своего раздела рисует renderStatsMenuSparks
-         (js/ui/stats-view.js) при открытии панели. Пустой слот в разметке
-         держит место в строке, чтобы пункт не «прыгал» после отрисовки;
+    <!-- Эмодзи (.stats-menu-emoji) — декоративный значок внутри пункта:
+         текстовый глиф СЛЕВА от названия (вместо прежнего SVG-тренда).
          aria-hidden на нём — смысл остаётся в тексте пункта, лишней
-         остановки в обходе Tab не появляется. pointer-events снят в
-         styles/sparkline.css, поэтому делегирование кликов по
-         .stats-menu-item не меняется: целью всегда остаётся сама кнопка
-         (стрелка toggle стоит вне пункта и со своим обработчиком) -->
+         остановки в обходе Tab не появляется; размер эмодзи наследуется
+         от пункта, цвет не задаётся. Кликается при этом вся строка —
+         делегирование по .stats-menu-item не меняется: целью остаётся
+         сама кнопка (стрелка toggle стоит вне пункта и со своим
+         обработчиком) -->
     <div class="stats-menu-row">
-      <button type="button" class="stats-menu-item" data-stats-view="stats">Общая статистика<span class="stats-menu-spark" aria-hidden="true"></span></button>
+      <button type="button" class="stats-menu-item" data-stats-view="stats"><span class="stats-menu-emoji" aria-hidden="true">📊</span>Общая статистика</button>
       <button type="button" class="stats-menu-toggle" id="stats-hub-toggle"
               aria-label="Показать категории статистики" aria-expanded="false"
               aria-controls="stats-hub-sub"><span class="stats-menu-toggle-icon" aria-hidden="true">▸</span></button>
     </div>
 
     <div class="stats-menu-sub" id="stats-hub-sub" hidden>
-      <button type="button" class="stats-menu-item" data-stats-view="stats-qaza">Каза-намазы<span class="stats-menu-spark" aria-hidden="true"></span></button>
-      <button type="button" class="stats-menu-item" data-stats-view="stats-sleep">Сон<span class="stats-menu-spark" aria-hidden="true"></span></button>
-      <button type="button" class="stats-menu-item" data-stats-view="stats-fast">Ураза<span class="stats-menu-spark" aria-hidden="true"></span></button>
-      <button type="button" class="stats-menu-item" data-stats-view="stats-habits">Привычки<span class="stats-menu-spark" aria-hidden="true"></span></button>
+      <button type="button" class="stats-menu-item" data-stats-view="stats-qaza"><span class="stats-menu-emoji" aria-hidden="true">🚫</span>Каза-намазы</button>
+      <button type="button" class="stats-menu-item" data-stats-view="stats-sleep"><span class="stats-menu-emoji" aria-hidden="true">🌙</span>Сон</button>
+      <button type="button" class="stats-menu-item" data-stats-view="stats-fast"><span class="stats-menu-emoji" aria-hidden="true">✅</span>Ураза</button>
+      <button type="button" class="stats-menu-item" data-stats-view="stats-habits"><span class="stats-menu-emoji" aria-hidden="true">✅</span>Привычки</button>
     </div>
 
     <!-- «Цикл сна» стоит на верхнем уровне панели, а не внутри категорий
          статистики: экран к статистике не относится. Свой атрибут вместо
          data-stats-view — экран берётся из него, и общего обработчика
          панели это не ломает -->
-    <button type="button" class="stats-menu-item" data-sleep-view>Цикл сна<span class="stats-menu-spark" aria-hidden="true"></span></button>
+    <button type="button" class="stats-menu-item" data-sleep-view><span class="stats-menu-emoji" aria-hidden="true">🌙</span>Цикл сна</button>
     <!-- Матрица — не раздел статистики, поэтому у неё свой атрибут, как у
          «Цикла сна»: экран не лежит в data-stats-view и общий обработчик
          статистики его не открыл бы -->
-    <button type="button" class="stats-menu-item" data-matrix-view>Матрица Эйзенхауэра<span class="stats-menu-spark" aria-hidden="true"></span></button>
+    <button type="button" class="stats-menu-item" data-matrix-view><span class="stats-menu-emoji" aria-hidden="true">🗂️</span>Матрица Эйзенхауэра</button>
   </aside>
 
   <!-- Нижний таб-бар: переключает разделы. Виден только на телефоне,
