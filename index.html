@@ -3,6 +3,44 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <!-- Content-Security-Policy (задача 2.1, P1-4 из GPT-аудита). Мета-тег стоит
+       до первого внешнего ресурса, иначе браузер мог бы загрузить что-то до
+       применения политики. Каждое расширение базового набора обосновано
+       аудитом 2026-11-06 и закреплено тестами tests/csp.test.mjs:
+       * script-src 'self' — в коде нет inline-скриптов, обработчиков on*= и
+         eval (единственный скрипт — внешний модуль js/app.js);
+       * style-src … 'unsafe-inline' — в проекте инлайн-СТИЛИ-АТРИБУТЫ:
+         статические в body (блок schedule-edit-view ниже, body не
+         трогается) и инъекция через innerHTML (js/ui/main-table.js:134,
+         js/ui/schedule-view.js:40-41). CSSOM-присваивания CSP не блокирует;
+         сузить до style-src-attr нельзя — Safari < 15.4 его не знает
+         (проект держит старые Safari, см. js/sync/sync.js:32-38);
+         https://fonts.googleapis.com — stylesheet Inter (строка ниже);
+       * img-src blob: — фото пользователя из IndexedDB (фон приложения и
+         превью, js/app.js:1217,1270,1237; декодирование js/data/image.js:43);
+         data: — вложения ассистента: фото и страницы PDF-скана
+         (js/ui/assistant-view.js:979, js/ui/assistant-pdf.js:419);
+       * font-src https://fonts.gstatic.com — woff2-файлы Inter; офлайн
+         деградирует на system-ui (см. комментарий к preconnect ниже);
+       * connect-src — точный список хостов, к которым код ходит по fetch
+         (WebSocket/EventSource/XHR в проекте нет):
+           firebaseio.com — REST-синхронизация (js/sync/core.js:22,27);
+           identitytoolkit + securetoken .googleapis.com — Firebase Auth
+           REST (js/data/firebase-auth.js:190,255,275);
+           api.neuraldeep.ru — ассистент (js/ui/assistant-media.js:34);
+         wss-портов нет: Realtime Database ходит через REST, а https:-
+         источник в connect-src покрывает и wss на этот хост, если когда-
+         нибудь понадобится стриминг;
+       * worker-src 'self' — модульный воркер pdf.js same-origin
+         (js/ui/assistant-pdf.js:446; blob-обёртка в pdf.min.mjs включается
+         только для cross-origin workerSrc, поэтому blob: не нужен);
+       * manifest-src 'self' — манифест PWA подключён ниже;
+       * сервис-воркер (sw.js) CSP страницы не подчиняется: офлайн-кэш
+         политика не ограничивает.
+       НЕ покрыто мета-тегом и сознательно отложено: frame-ancestors —
+       работает только HTTP-заголовком на хостинге. -->
+  <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' blob: data:; font-src 'self' https://fonts.gstatic.com; connect-src https://youplanner-5c2f5-default-rtdb.firebaseio.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://api.neuraldeep.ru; worker-src 'self'; manifest-src 'self'; base-uri 'self'; object-src 'none'; form-action 'none'">
   <!-- Установка на телефон как отдельного приложения: иконка, имя, цвет строки статуса -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -933,18 +971,16 @@
      шторки, что у попапа уровня (§styles/sheets.css): нижняя панель на
      телефоне, окошко по центру на ПК — отдельной «централизованной модалки»
      в проекте нет, и ещё один способ спрашивать подтверждение стал бы
-     третьей дорогой, о которую пользователь спотыкается. Лист живёт вне
-     #assistant-form: кнопка «Удалить» внутри формы стала бы её submit-ом -->
+     третьей дорогой, о которую пользователь спотыкается. Лист открывается
+     долгим нажатием на пузырь (задача 3.1), пузырь виден под подложкой —
+     поэтому внутри только «Удалить» и «Отмена», без заголовка и превью.
+     Лист живёт вне #assistant-form: кнопка «Удалить» внутри формы стала бы
+     её submit-ом -->
 <div id="assistant-delete-sheet" class="sheet" hidden>
   <div class="sheet-backdrop" data-assistant-delete-close></div>
   <div class="sheet-panel" role="dialog" aria-modal="true"
-       aria-labelledby="assistant-delete-title">
-    <div class="sheet-head">
-      <h2 id="assistant-delete-title">Удалить сообщение?</h2>
-    </div>
-    <p class="assistant-delete-role" id="assistant-delete-role"></p>
-    <blockquote class="assistant-delete-preview" id="assistant-delete-preview"></blockquote>
-    <button type="button" id="assistant-delete-confirm" class="btn btn-primary">Удалить</button>
+       aria-label="Удалить сообщение?">
+    <button type="button" id="assistant-delete-confirm" class="btn btn-danger">Удалить</button>
     <button type="button" class="btn btn-secondary sheet-cancel-btn"
             data-assistant-delete-close>Отмена</button>
   </div>

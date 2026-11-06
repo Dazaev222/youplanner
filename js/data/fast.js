@@ -1,6 +1,7 @@
 import { bus } from '../core/bus.js';
 import { toISODate } from '../core/dates.js';
 import { safeSetItem } from '../core/storage.js';
+import { markSectionWritten } from './storage.js';
 // Ключ свой, отдельный от каза-намазов: счётчики независимы (§5).
 // Отсутствие ключа — это и есть первый запуск; дефолта у уразы нет,
 // начальное число задаёт человек.
@@ -76,6 +77,9 @@ export function saveFast(fast) {
     remaining: Math.max(0, Math.floor(fast.remaining)),
     history: Array.isArray(fast.history) ? fast.history : [],
   }))) return false;
+  // Метка записи для конвертов LWW (P1-3, js/data/storage.js): правка
+  // пользователя — раздел становится свежее
+  markSectionWritten('fast');
   bus.emit('data:changed');
   return true;
 }

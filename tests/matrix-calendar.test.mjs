@@ -905,6 +905,58 @@ test('Б7.6 выполнение повторяющейся задачи даё�
   assert.equal(next.schedule.startDate, iso(1), 'следующий — завтра');
 });
 
+test('Б7.5 превью «Далее» в листе даты считает от series.index задачи, а не от начала правила', (t) => {
+  // Отчёт марафона §4.2 п.11: зонд превью в calRepeatBlock принудительно
+  // ставил series.index=1, поэтому потолок «после N» считался от начала
+  // правила: у задачи на последнем экземпляре серии превью обещало
+  // несуществующий следующий экземпляр, а у промежуточных экземпляров
+  // нумерация «Далее» съезжала. Правильный зонд передаёт series как есть
+  // (nextOccurrence сам берёт index и anchorDay из series).
+  const app = loadApp();
+  const dom = installMatrixDom(app);
+  const first = app.context.startSeries(app.context.createTask({
+    title: 'Курс',
+    priority: 2,
+    schedule: {
+      allDay: true, startDate: iso(0), endDate: iso(0),
+      repeat: { unit: 'day', interval: 1, ends: { type: 'count', count: 3 } },
+    },
+  }), new Date());
+
+  // Цепочка выполнений, как в жизни: голова серии сама продвигается по
+  // экземплярам — вторая задача несёт index=2 и свою дату iso(1).
+  const step1 = app.context.completeOccurrence([first], first.id, new Date());
+  assert.equal(step1.status, 'recurring');
+  const second = step1.next;
+  assert.equal(second.schedule.series.index, 2);
+
+  // Второй из трёх: превью показывает следующий, третий экземпляр — iso(2).
+  // calDateText — тот же форматировщик, что рисует превью («пн, 9 нояб.»),
+  // поэтому ожидание строится им же, а не строкой на ISO.
+  app.context.saveTasks([second]);
+  app.context.renderMatrixView();
+  findByClass(dom.screen, 'matrix-task-schedule')[0].fire('click');
+  assert.equal(dateSheets(dom).length, 1, 'лист даты открылся');
+  const preview = oneByClass(dom.host, 'matrix-repeat-next');
+  assert.match(preview.textContent, /Далее:/);
+  const thirdDate = app.context.calDateText(iso(2));
+  assert.ok(preview.textContent.indexOf(thirdDate) !== -1,
+    'превью называет экземпляр index=3 (' + thirdDate + '), получили: '
+    + preview.textContent);
+  app.context.handleMatrixEscape();
+
+  // Третий из трёх — последний: после него серия исчерпана, строки «Далее»
+  // быть не должно (nextOccurrence вернёт status none, reason count-exhausted).
+  const step2 = app.context.completeOccurrence([second], second.id, new Date());
+  assert.equal(step2.status, 'recurring');
+  assert.equal(step2.next.schedule.series.index, 3);
+  app.context.saveTasks([step2.next]);
+  app.context.renderMatrixView();
+  findByClass(dom.screen, 'matrix-task-schedule')[0].fire('click');
+  assert.equal(findByClass(dom.host, 'matrix-repeat-next').length, 0,
+    'у последнего экземпляра серии превью «Далее» не показывается: серия исчерпана');
+});
+
 test('Б7 карточка показывает признаки повтора и напоминания', (t) => {
   const app = loadApp();
   const dom = installMatrixDom(app);

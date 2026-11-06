@@ -33,13 +33,13 @@ function readRules() {
   return JSON.parse(readFileSync(join(ROOT, 'database.rules.json'), 'utf8')).rules;
 }
 
-// Узлы, которые приложение адресует как корни запросов: FIREBASE_URL и
-// FIREBASE_BACKUPS_URL. Берём из исходника, а не пересказываем, иначе тест
-// проверял бы мои ожидания, а не контракт кода.
+// Узлы, которые приложение адресует как корни запросов: FIREBASE_URL,
+// FIREBASE_PLANNER_URL и FIREBASE_BACKUPS_URL. Берём из исходника, а не
+// пересказываем, иначе тест проверял бы мои ожидания, а не контракт кода.
 function readCloudRoots() {
   const source = readFileSync(join(ROOT, 'js/sync/core.js'), 'utf8');
   const roots = [];
-  for (const name of ['FIREBASE_URL', 'FIREBASE_BACKUPS_URL']) {
+  for (const name of ['FIREBASE_URL', 'FIREBASE_PLANNER_URL', 'FIREBASE_BACKUPS_URL']) {
     const match = source.match(new RegExp(name + "\\s*=\\s*'([^']+)'"));
     assert.ok(match, `в js/sync/core.js не найден ${name}`);
     const url = match[1];

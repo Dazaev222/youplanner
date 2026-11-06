@@ -11,10 +11,14 @@
 //   habits особая оговорка: привычка, чьё надгробие удаления (tombstones)
 //   не старше метки раздела habits снимка, в ветке extra не привозится —
 //   иначе удаление отменялось бы каждой сверкой (B.3);
-//   qaza, prayer, fast, schedule, скаляры сна — цельные объекты: применяются
-//   с сервера, только если метка раздела (sectionTs, fallback updatedAt)
-//   строго новее нашей последней сверки, и только когда нет правки, которой
-//   сервер ещё не видел (pending);
+//   qaza, prayer, fast, schedule — цельные объекты в конвертах {v, ts}
+//   (P1-3): применяются с сервера, только если метка записи раздела строго
+//   новее локальной (opts.sectionWrites, js/data/storage.js); при равенстве
+//   побеждает локальная версия, раздел без конверта — прежнее правило
+//   (метка раздела sectionTs, fallback updatedAt, против последней сверки)
+//   и только когда нет правки, которой сервер ещё не видел (pending);
+//   скаляры сна — по метке раздела (sectionTs, fallback updatedAt) против
+//   последней сверки;
 //   archive — производные месячные сводки: объединение по месяцам;
 //   tombstones — надгробия удалённых привычек: слияние по max(ts) на id,
 //   аддитивно, метка раздела не участвует (надгробие не воскрешается).
@@ -524,6 +528,43 @@ export function sectionTsOf(cloud, section, fallbackTs) {
   return Number(fallbackTs) || 0;
 }
 
+// ── Конверты цельных разделов {v, ts} (аудит P1-3) ──────────────────────────
+// Цельные разделы qaza/prayer/fast/schedule ходят в снимке в конвертах:
+// v — полезные данные раздела, ts — часы отправителя на момент записи раздела
+// (метки записи живут соседним ключом — js/data/storage.js). Раздел старого
+// клиента без конверта — ts=0: конверт побеждает его при первом же обмене,
+// а голый раздел не затирает свежий конверт. Чистые функции: только данные.
+
+// Похож на конверт: объект с полем v и ЧИСЛОВОЙ ts. Форма строгая не случайно:
+// у полезных данных этих разделов поля v нет (qaza и fast несут version,
+// prayer — lat/lng, schedule — типы дней), а «полуконверт» без числа-ts не
+// даёт ничего, чем можно сравнивать.
+export function isSectionEnvelope(raw) {
+  return !!raw && typeof raw === 'object' && !Array.isArray(raw) &&
+    Object.prototype.hasOwnProperty.call(raw, 'v') &&
+    typeof raw.ts === 'number' && Number.isFinite(raw.ts);
+}
+
+// Раздел снимка → {v, ts}: конверт разворачивается, legacy-раздел — как есть
+// с нулевой меткой. null на входе (раздела нет) остаётся null: валидаторы
+// разделов читают его как «раздела нет», как и раньше.
+export function unwrapSection(raw) {
+  if (isSectionEnvelope(raw)) return { v: raw.v, ts: raw.ts };
+  return { v: raw === undefined ? null : raw, ts: 0 };
+}
+
+// Кто победил в паре конвертов. Больший ts — облако; равенство — локальная
+// версия (детерминированно: обе стороны выберут одно и то же); оба ts=0 —
+// пара без конвертов, решает прежнее правило вызывающего (legacyWins): у
+// applyCloudData снимок уже прошёл общий гейт новизны, у слияния это метка
+// раздела против последней сверки.
+export function sectionEnvelopeWins(cloudTs, localTs, legacyWins) {
+  const cloud = Number(cloudTs) || 0;
+  const local = Number(localTs) || 0;
+  if (cloud === 0 && local === 0) return !!legacyWins;
+  return cloud > local;
+}
+
 // Надгробия удалённых привычек: слияние по max(ts) на id, аддитивно.
 // Надгробие никогда не «воскрешается»: отсутствие пары на чужой стороне
 // локальную не отменяет — снятие метки локальное решение устройства
@@ -843,17 +884,33 @@ export function mergeCloudIntoLocal(local, cloud, opts) {
     const cloudWins = function (section) {
       return sectionTsOf(cloud, section, cloudTs) > localTs;
     };
-    if (validCloudQaza(cloud.qaza) && hasData(cloud.qaza) && cloudWins('qaza')) {
-      merged.qaza = cloud.qaza;
+    // Цельные разделы приходят в конвертах {v, ts}: ts — метка записи раздела
+    // на отправителе (P1-3). Локальные метки сливающий берёт из
+    // opts.sectionWrites — модуль чистый, хранилище читает вызывающий
+    // (applyMergedFromCloud). Раздел без конверта — старый клиент: решает
+    // прежнее правило (метка раздела/снимка против последней сверки), он же
+    // работает, когда обе стороны без конвертов.
+    const writes = options.sectionWrites && typeof options.sectionWrites === 'object'
+      ? options.sectionWrites : {};
+    const cloudQaza = unwrapSection(cloud.qaza);
+    if (validCloudQaza(cloudQaza.v) && hasData(cloudQaza.v) &&
+        sectionEnvelopeWins(cloudQaza.ts, writes.qaza, cloudWins('qaza'))) {
+      merged.qaza = cloudQaza.v;
     }
-    if (validCloudPrayer(cloud.prayer) && hasData(cloud.prayer) && cloudWins('prayer')) {
-      merged.prayer = cloud.prayer;
+    const cloudPrayer = unwrapSection(cloud.prayer);
+    if (validCloudPrayer(cloudPrayer.v) && hasData(cloudPrayer.v) &&
+        sectionEnvelopeWins(cloudPrayer.ts, writes.prayer, cloudWins('prayer'))) {
+      merged.prayer = cloudPrayer.v;
     }
-    if (validCloudFast(cloud.fast) && hasData(cloud.fast) && cloudWins('fast')) {
-      merged.fast = cloud.fast;
+    const cloudFast = unwrapSection(cloud.fast);
+    if (validCloudFast(cloudFast.v) && hasData(cloudFast.v) &&
+        sectionEnvelopeWins(cloudFast.ts, writes.fast, cloudWins('fast'))) {
+      merged.fast = cloudFast.v;
     }
-    if (validCloudSchedule(cloud.schedule) && cloudWins('schedule')) {
-      merged.schedule = cloud.schedule;
+    const cloudSchedule = unwrapSection(cloud.schedule);
+    if (validCloudSchedule(cloudSchedule.v) &&
+        sectionEnvelopeWins(cloudSchedule.ts, writes.schedule, cloudWins('schedule'))) {
+      merged.schedule = cloudSchedule.v;
     }
     if (validCloudSleep(cloud.sleep) && hasData(cloud.sleep)) {
       merged.sleep = mergeSleepEntry(local.sleep, cloud.sleep, cloudWins('sleep'), true);

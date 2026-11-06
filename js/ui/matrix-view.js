@@ -1812,8 +1812,15 @@ function calRepeatBlock() {
   block.appendChild(row);
 
   if (calendarDraft.repeat) {
+    // Превью считает от реального состояния задачи: series существующей
+    // задачи уходит в зонд как есть — nextOccurrence сам берёт из неё index
+    // (потолок «после N», Б7.5) и anchorDay (день «по числу», Б7.2), с
+    // честными fallback'ами. Прежний зонд затирал index единицей: потолок
+    // считался от начала правила, и у задачи на последнем экземпляре серии
+    // превью обещало несуществующий следующий (отчёт марафона §4.2 п.11).
+    // Для новой задачи series нет — index=1, как и раньше.
     const series = calendarDraft.series
-      ? Object.assign({}, calendarDraft.series, { index: 1 })
+      ? Object.assign({}, calendarDraft.series)
       : { id: 'draft', index: 1, anchorDate: calendarDraft.startDate, anchorDay: null, anchorMonth: null };
     const probe = nextOccurrence(Object.assign({}, calendarDraft, { series: series }),
       { completionDate: today() });

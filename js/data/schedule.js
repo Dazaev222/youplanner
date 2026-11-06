@@ -1,6 +1,6 @@
 import { bus } from '../core/bus.js';
 import { safeSetItem } from '../core/storage.js';
-import { STORAGE_KEYS } from './storage.js';
+import { STORAGE_KEYS, markSectionWritten } from './storage.js';
 // Базовое расписание. Хранится по ключу youplanner.schedule: ключа нет в
 // хранилище штатно — человек ещё не редактировал расписание, и loadSchedule()
 // подставляет DEFAULT_SCHEDULE. Редактирование через Настройки — Этап 6.
@@ -122,6 +122,9 @@ export function loadSchedule() {
 // при успехе — отложенная отправка и boolean для вызывающего кода.
 export function saveSchedule(schedule) {
   if (!safeSetItem(STORAGE_KEYS.schedule, JSON.stringify(schedule))) return false;
+  // Метка записи для конвертов LWW (P1-3, js/data/storage.js): правка
+  // пользователя — раздел становится свежее
+  markSectionWritten('schedule');
   bus.emit('data:changed');
   return true;
 }

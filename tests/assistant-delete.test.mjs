@@ -1,4 +1,6 @@
-// Удаление ОДНОГО сообщения в чате с ассистентом (Воркер 3, смена 2026-11-04).
+// Удаление ОДНОГО сообщения в чате с ассистентом (Воркер 3, смена 2026-11-04;
+// с задачи 3.1, смена 2026-11-06 — удаление открывается долгим нажатием на
+// пузырь, крестика «✕» больше нет; сам жест — tests/assistant-longpress.test.mjs).
 //
 // Что фиксируют проверки:
 //   * удаление вырезает ровно одну реплику из хранилища и из последующего
@@ -6,25 +8,31 @@
 //   * пузырь ленты и реплика сходятся индексом, а не позицией: лента после
 //     перерисовки не даёт «удалить не то»;
 //   * у узлов, которых в истории нет (приветствие, «Печатает…», пузырь
-//     ошибки), кнопки удаления нет;
+//     ошибки), индекса нет — и удалять их нельзя;
 //   * подтверждение — нижний лист приложения (styles/sheets.css), а не
-//     confirm() и не централизованная модалка;
+//     confirm() и не централизованная модалка; внутри только «Удалить» и
+//     «Отмена»;
 //   * удаление из середины не отправляет модели контекст, начинающийся с
 //     assistant-реплики (правило — в requestTail, описано в коде);
-//   * текст реплики уходит в превью через textContent: XSS не внесён;
+//   * текст реплики не становится разметкой ни в пузыре, ни в листе:
+//     XSS не внесён;
 //   * history key — device-local (js/data/storage.js), синхронизация других
 //     разделов не затрагивается: ни одного вызова шины и чужих ключей.
 //
 // Fake DOM здесь полнее, чем в assistant.test.mjs: нужны closest, атрибуты,
-// hidden у шторки и делегирование клика по ленте. Всплытие события fake не
-// моделирует — поэтому «клик по кнопке» проверяется вызом обработчика с
-// target-ом кнопки, а живое всплытие — ручная браузерная проверка.
+// hidden у шторки и делегирование жеста по ленте. Всплытие события fake не
+// моделирует — поэтому «долгое нажатие по пузырю» проверяется вызовом
+// обработчика ленты с target-ом пузыря, а живое всплытие — ручная
+// браузерная проверка.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { loadApp } from './helpers/load-app.mjs';
+import { makeFakeTimers } from './helpers/fake-timers.mjs';
 import { readIndexHtml } from './helpers/sources.mjs';
+
+const PRESS_MS = 450;   // порог долгого нажатия (задача 3.1)
 
 const HISTORY_KEY = 'youplanner.assistant_history';
 const API_KEY = 'youplanner.api_key';
@@ -108,8 +116,12 @@ function makeDoc() {
     get() { return ''; },
     set() { chat.children.length = 0; for (const child of chat.children) child.parentNode = null; },
   });
-  chat.fireOn = (child, type) => {
-    const event = { target: child, preventDefault() {}, stopPropagation() {} };
+  // extra докладывает в событие координаты касания (touch-жест через инъекцию
+  // событий — см. assistant-longpress.test.mjs)
+  chat.fireOn = (child, type, extra) => {
+    const event = Object.assign(
+      { target: child, preventDefault() {}, stopPropagation() {} },
+      extra || {});
     for (const fn of chat._events[type] || []) fn(event);
   };
   doc.chat = chat;
@@ -119,14 +131,6 @@ function makeDoc() {
   sheet.hidden = true;
   byId['assistant-delete-sheet'] = sheet;
   doc.sheet = sheet;
-
-  const preview = makeNode(doc, 'p');
-  byId['assistant-delete-preview'] = preview;
-  doc.preview = preview;
-
-  const role = makeNode(doc, 'p');
-  byId['assistant-delete-role'] = role;
-  doc.role = role;
 
   const confirmBtn = makeNode(doc, 'button');
   byId['assistant-delete-confirm'] = confirmBtn;
@@ -155,13 +159,30 @@ function bindDoc(sandbox, doc) {
 }
 
 // Проводка как в js/app.js (init/bindEvents в песочнице не запускается:
-// document.addEventListener там no-op): ленту слушает onAssistantChatClick,
-// подтверждение — confirmAssistantDelete. Соответствие этой проводки разметке
-// закрепляет статическая проверка ниже
+// document.addEventListener там no-op): лента слушает долгое нажатие через
+// bindAssistantChatLongPress, подтверждение — confirmAssistantDelete.
+// Соответствие этой проводки разметке закрепляет статическая проверка ниже
 function wire(app, doc) {
-  doc.chat.addEventListener('click', app.context.onAssistantChatClick);
+  doc.timers = makeFakeTimers();
+  app.context.bindAssistantChatLongPress(doc.chat, {
+    scheduleTimer: doc.timers.schedule,
+    cancelTimer: doc.timers.cancel,
+  });
   doc.confirmBtn.addEventListener('click', app.context.confirmAssistantDelete);
   return doc;
+}
+
+// Долгое нажатие по пузырю в fake-ленте: touchstart по ленте с target-ом
+// пузыря + порог фейковых часов
+function longPressOn(doc, bubble) {
+  doc.chat.fireOn(bubble, 'touchstart', { touches: [{ clientX: 5, clientY: 5 }] });
+  doc.timers.advance(PRESS_MS);
+}
+
+// Быстрый тап: нажатие и отпускание до порога
+function tapOn(doc, bubble) {
+  doc.chat.fireOn(bubble, 'touchstart', { touches: [{ clientX: 5, clientY: 5 }] });
+  doc.chat.fireOn(bubble, 'touchend');
 }
 
 function stored(sandbox) {
@@ -204,9 +225,9 @@ function bubbles(doc) {
   return doc.chat.children.slice();
 }
 
-/* --- кнопки удаления на пузырях -------------------------------------------- */
+/* --- индексы удаления на пузырях -------------------------------------------- */
 
-test('delete: у каждого пузыря истории есть кнопка и свой индекс', () => {
+test('delete: у каждого пузыря истории есть индекс, а крестика-кнопки нет', () => {
   const app = loadApp();
   const doc = bindDoc(app.sandbox, makeDoc());
   wire(app, doc);
@@ -222,15 +243,14 @@ test('delete: у каждого пузыря истории есть кнопк�
   nodes.forEach((bubble, i) => {
     assert.equal(bubble.getAttribute('data-msg-index'), String(i),
       'индекс = позиция в readHistory, пузырь ' + i);
-    const button = bubble.children.filter(c => c.className === 'assistant-msg-del');
-    assert.equal(button.length, 1, 'одна кнопка удаления на пузырь');
-    assert.equal(button[0].type, 'button',
-      'type=button: внутри #assistant-form submit-кнопка отправила бы реплику');
-    assert.equal(button[0].getAttribute('aria-label'), 'Удалить сообщение');
+    assert.equal(bubble.children.filter(c => c.className === 'assistant-msg-del').length, 0,
+      'крестика на пузыре нет: удаление — долгим нажатием (задача 3.1)');
+    assert.equal(bubble.children.filter(c => c.tagName === 'button').length, 0,
+      'интерактивных детей у пузыря нет вовсе');
   });
 });
 
-test('delete: приветствие, «Печатает…» и пузырь ошибки кнопки не имеют', async () => {
+test('delete: приветствие, «Печатает…» и пузырь ошибки индекса не имеют', async () => {
   const app = loadApp({ fetchImpl: () => Promise.reject(new Error('сети нет')) });
   const doc = bindDoc(app.sandbox, makeDoc());
   wire(app, doc);
@@ -241,6 +261,8 @@ test('delete: приветствие, «Печатает…» и пузырь о
   assert.equal(bubbles(doc).length, 1, 'приветствие отрисовано');
   assert.equal(bubbles(doc)[0].hasAttribute('data-msg-index'), false,
     'у приветствия удалять нечего');
+  longPressOn(doc, bubbles(doc)[0]);
+  assert.equal(doc.sheet.hidden, true, 'долгое нажатие по приветствию лист не открывает');
 
   // Ошибка хода к API: пузырь есть, реплики в истории нет
   assert.equal(app.context.onAssistantSubmit('вопрос'), true);
@@ -250,7 +272,7 @@ test('delete: приветствие, «Печатает…» и пузырь о
   assert.equal(errorBubble[0].hasAttribute('data-msg-index'), false,
     'пузырь ошибки не подписан индексом истории');
   assert.equal(errorBubble[0].children.filter(c => c.className === 'assistant-msg-del').length, 0,
-    'кнопки удаления у пузыря ошибки нет');
+    'крестика у пузыря ошибки тоже нет');
 });
 
 test('delete: живой вопрос и живой ответ получают индекс сразу, без перерисовки', async () => {
@@ -332,7 +354,7 @@ test('delete: невалидный индекс и уже удалённая р�
     'повторное удаление того же места ничего не вырезает');
 });
 
-test('delete: клик по кнопке открывает лист, а не удаляет сразу', () => {
+test('delete: долгое нажатие открывает лист, а не удаляет сразу', () => {
   const app = loadApp();
   const doc = bindDoc(app.sandbox, makeDoc());
   wire(app, doc);
@@ -341,27 +363,26 @@ test('delete: клик по кнопке открывает лист, а не у
     { role: 'assistant', content: 'отвечу' },
   ]);
   app.context.renderHistory();
-  // Делегирование: слушатель висит на ленте, target — кнопка внутри пузыря
-  const button = bubbles(doc)[1].children.find(c => c.className === 'assistant-msg-del');
-  doc.chat.fireOn(button, 'click');
+  // Делегирование: слушатель жеста висит на ленте, target — пузырь
+  longPressOn(doc, bubbles(doc)[1]);
 
   assert.equal(doc.sheet.hidden, false, 'открылся лист подтверждения');
-  assert.equal(doc.preview.textContent, 'отвечу', 'в превью — текст удаляемой реплики');
-  assert.equal(doc.role.textContent, 'Ответ ассистента');
   assert.deepEqual(stored(app.sandbox).map(m => m.content), ['спроси', 'отвечу'],
     'без подтверждения ничего не удалено');
 });
 
-test('delete: чужой клик по ленте листа не открывает', () => {
+test('delete: быстрый тап по пузырю лист не открывает', () => {
   const app = loadApp();
   const doc = bindDoc(app.sandbox, makeDoc());
   wire(app, doc);
   seeded(app, [{ role: 'user', content: 'q1' }]);
   app.context.renderHistory();
 
-  doc.chat.fireOn(bubbles(doc)[0], 'click');   // тап по пузырю, не по кнопке
+  tapOn(doc, bubbles(doc)[0]);   // тап по пузырю — не жест удаления
   assert.equal(doc.sheet.hidden, true, 'лист закрыт');
-  assert.equal(app.context.removeHistoryAt(0), true, 'а по кнопке — открывается, не удаляет');
+  assert.equal(doc.timers.pendingCount(), 0, 'таймер жеста снят отпуском');
+  assert.equal(app.context.removeHistoryAt(0), true,
+    'а долгое нажатие по тому же пузырю — открыло бы');
 });
 
 test('delete: «Удалить» в листе вырезает реплику и закрывает шторку', () => {
@@ -374,8 +395,7 @@ test('delete: «Удалить» в листе вырезает реплику �
     { role: 'user', content: 'q2' },
   ]);
   app.context.renderHistory();
-  const button = bubbles(doc)[1].children.find(c => c.className === 'assistant-msg-del');
-  doc.chat.fireOn(button, 'click');
+  longPressOn(doc, bubbles(doc)[1]);
   assert.equal(doc.sheet.hidden, false);
 
   // Подтверждение — кнопка листа (в app.js на ней confirmAssistantDelete)
@@ -390,7 +410,7 @@ test('delete: «Отмена» и закрытие листа ничего не 
   wire(app, doc);
   seeded(app, [{ role: 'user', content: 'q1' }, { role: 'assistant', content: 'a1' }]);
   app.context.renderHistory();
-  doc.chat.fireOn(bubbles(doc)[0].children.find(c => c.className === 'assistant-msg-del'), 'click');
+  longPressOn(doc, bubbles(doc)[0]);
   assert.equal(doc.sheet.hidden, false);
 
   app.context.closeAssistantDeleteSheet();
@@ -408,7 +428,7 @@ test('delete: лист закрывается по Escape-слою и на см�
   wire(app, doc);
   seeded(app, [{ role: 'user', content: 'q1' }]);
   app.context.renderHistory();
-  doc.chat.fireOn(bubbles(doc)[0].children.find(c => c.className === 'assistant-msg-del'), 'click');
+  longPressOn(doc, bubbles(doc)[0]);
   assert.equal(app.context.isAssistantDeleteSheetOpen(), true);
 
   app.context.closeAssistantDeleteSheet();
@@ -439,7 +459,7 @@ test('delete: индекс не устаревает после перерисо
   assert.ok(answer, 'ответ получил индекс 2, а не 1');
 });
 
-test('delete: реплика не записана (квота) — кнопки удаления на ней нет', () => {
+test('delete: реплика не записана (квота) — индекса удаления на ней нет', () => {
   const app = loadApp({ fetchImpl: () => Promise.reject(new Error('сети нет')) });
   const doc = bindDoc(app.sandbox, makeDoc());
   wire(app, doc);
@@ -455,8 +475,8 @@ test('delete: реплика не записана (квота) — кнопки
   assert.ok(bubblesNow.length >= 1, 'пузырь вопроса показан');
   assert.equal(bubblesNow[0].hasAttribute('data-msg-index'), false,
     'несостоявшейся записи не выдаём индекс');
-  assert.equal(bubblesNow[0].children.filter(c => c.className === 'assistant-msg-del').length, 0,
-    'и кнопку удаления тоже: резать нечего');
+  longPressOn(doc, bubblesNow[0]);
+  assert.equal(doc.sheet.hidden, true, 'и лист по такому пузырю не открывается');
 });
 
 /* --- контекст запроса ---------------------------------------------------- */
@@ -538,7 +558,7 @@ test('delete: удаление не задевает другие разделы
 
 /* --- XSS ----------------------------------------------------------------- */
 
-test('delete: текст реплики не становится разметкой ни в пузыре, ни в превью', () => {
+test('delete: текст реплики не становится разметкой ни в пузыре, ни в листе', () => {
   const app = loadApp();
   const doc = bindDoc(app.sandbox, makeDoc());
   wire(app, doc);
@@ -550,30 +570,18 @@ test('delete: текст реплики не становится разметк
   app.context.renderHistory();
   const node = bubbles(doc)[0];
   assert.equal(node.textContent, hostile, 'текст пузыря — textContent');
-  const buttons = node.children.filter(c => c.tagName === 'button');
-  assert.equal(buttons.length, 1, 'внутри пузыря только кнопка удаления');
-  assert.equal(buttons[0].textContent, '✕');
+  assert.equal(node.children.filter(c => c.tagName === 'button').length, 0,
+    'интерактивных детей у пузыря нет (крестик убран, задача 3.1)');
   assert.ok(!node.children.some(c => c.tagName === 'img'),
     'из текста не родится разметка: ни img, ни чего-либо ещё');
 
-  doc.chat.fireOn(buttons[0], 'click');
-  assert.equal(doc.preview.textContent, hostile, 'превью тоже только текст');
-  assert.ok(!doc.preview.children.length, 'в превью не появилось детей-разметки');
+  // Лист открывается долгим нажатием по враждебному пузырю и не исполняет текст
+  longPressOn(doc, node);
+  assert.equal(doc.sheet.hidden, false, 'лист открыт жестом');
+  assert.ok(!doc.sheet.children.some(c => c.tagName === 'img'),
+    'в листе не появилось детей-разметки');
   const serialized = JSON.stringify(stored(app.sandbox));
   assert.ok(serialized.includes('&lt;') === false, 'в хранилище текст не экранирован дважды');
-});
-
-test('delete: кнопка не содержит текста реплики и не ломает a11y ленты', () => {
-  const app = loadApp();
-  const doc = bindDoc(app.sandbox, makeDoc());
-  wire(app, doc);
-  seeded(app, [{ role: 'user', content: 'длинный вопрос ' + 'а'.repeat(200) }]);
-  app.context.renderHistory();
-  const button = bubbles(doc)[0].children[0];
-  assert.equal(button.textContent, '✕', 'подпись кнопки не растёт из текста реплики');
-  assert.equal(button.getAttribute('aria-label'), 'Удалить сообщение');
-  assert.equal(button.hasAttribute('tabindex'), false,
-    'лишних остановок фокуса нет: кнопка и так в порядке DOM');
 });
 
 /* --- разметка и стили ---------------------------------------------------- */
@@ -588,7 +596,7 @@ test('delete: в разметке — нижний лист приложения
   const called = [];
   app.sandbox.confirm = () => { called.push('confirm'); return true; };
   app.context.renderHistory();
-  doc.chat.fireOn(bubbles(doc)[0].children[0], 'click');
+  longPressOn(doc, bubbles(doc)[0]);
   assert.deepEqual(plain(called), [], 'нативный confirm не использован');
 
   const sheet = app.sandbox.document.getElementById('assistant-delete-sheet');
@@ -597,14 +605,15 @@ test('delete: в разметке — нижний лист приложения
 
 // --- Проводка и разметка: поведение выше проверяется на ручном wire(), этот
 // тест закрепляет, что живой app.js и index.html подключены тем же манером
-// (иначе тесты зелёные, а в браузере кнопка ничего не делает)
+// (иначе тесты зелёные, а в браузере жест ничего не делает)
 
-test('delete: app.js слушает ленту, подтверждение и закрытие листа', () => {
+test('delete: app.js вешает долгое нажатие на ленту, подтверждение и закрытие листа', () => {
   const app = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
-  assert.match(app, /onAssistantChatClick/, 'обработчик ленты импортирован');
+  assert.match(app, /bindAssistantChatLongPress/, 'проводка жеста импортирована');
   assert.match(app,
-    /getElementById\('assistant-chat'\)[\s\S]{0,120}addEventListener\('click', onAssistantChatClick\)/,
-    'делегирование клика висит на ленте, а не на каждом пузыре');
+    /getElementById\('assistant-chat'\)[\s\S]{0,120}bindAssistantChatLongPress\(assistantChat\)/,
+    'жест делегирован ленте, а не каждому пузырю');
+  assert.ok(!app.includes('onAssistantChatClick'), 'обработчик крестика убран из app.js');
   assert.match(app,
     /getElementById\('assistant-delete-confirm'\)[\s\S]{0,160}addEventListener\('click', confirmAssistantDelete\)/,
     'кнопка «Удалить» подтверждена обработчиком');
@@ -617,7 +626,7 @@ test('delete: app.js слушает ленту, подтверждение и з
     'смена экрана закрывает лист вместе с остальными шторками');
 });
 
-test('delete: разметка листа — шторка вне формы ассистента, текст через id', () => {
+test('delete: разметка листа — шторка вне формы ассистента, внутри только кнопки', () => {
   const html = readIndexHtml();
   const sheetStart = html.indexOf('<div id="assistant-delete-sheet"');
   assert.ok(sheetStart >= 0, 'лист удаления есть в разметке');
@@ -626,10 +635,14 @@ test('delete: разметка листа — шторка вне формы а�
   assert.match(sheet, /class="sheet"/, 'это слой шторки (styles/sheets.css)');
   assert.match(sheet, /role="dialog"/);
   assert.match(sheet, /aria-modal="true"/);
-  assert.match(sheet, /aria-labelledby="assistant-delete-title"/,
-    'заголовок листа связан с диалогом');
-  assert.match(sheet, /id="assistant-delete-preview"/);
-  assert.match(sheet, /id="assistant-delete-role"/);
+  assert.match(sheet, /aria-label="Удалить сообщение\?"/,
+    'заголовка в листе нет — имя диалога живёт в aria-label');
+  assert.ok(!/assistant-delete-preview|assistant-delete-role|assistant-delete-title/.test(sheet),
+    'превью и заголовок убраны: внутри только «Удалить» и «Отмена»');
+  const buttons = sheet.match(/<button\b/g) || [];
+  assert.equal(buttons.length, 2, 'ровно две кнопки');
+  assert.match(sheet, /id="assistant-delete-confirm"[^>]*class="btn btn-danger"/,
+    '«Удалить» — деструктивный стиль проекта (layout.css)');
   assert.match(sheet, /data-assistant-delete-close/);
   // Лист обязан лежать ВНЕ #assistant-form: кнопка внутри формы отправляла бы
   // реплику вместе с подтверждением удаления
@@ -641,18 +654,19 @@ test('delete: разметка листа — шторка вне формы а�
   assert.ok(!/onclick="confirm\(/.test(sheet), 'инлайнового confirm() нет');
 });
 
-test('delete: кнопка удаления и лист описаны стилями без новых цветов', () => {
+test('delete: пузырь и лист описаны стилями без новых цветов', () => {
   const css = readFileSync(new URL('../styles/assistant.css', import.meta.url), 'utf8');
-  assert.match(css, /\.assistant-msg \{\s*position: relative/, 'пузырь — якорь кнопки');
-  const block = css.slice(css.indexOf('.assistant-msg-del {'), css.indexOf('.assistant-msg-del::after'));
-  assert.ok(block.length > 0, 'правило кнопки найдено');
-  assert.match(block, /position: absolute/, 'кнопка не толкает текст пузыря');
-  assert.match(block, /var\(--surface-pressed\)/, 'фон — существующий токен');
-  assert.ok(!/#([0-9a-fA-F]{3,6})\b/.test(block), 'шестнадцатеричных цветов нет');
-  assert.match(css, /\.assistant-msg:has\(\.assistant-msg-del\)\s*\{\s*padding-right/,
-    'под кнопку зарезервировано место, текст не уезжает под неё');
-  assert.match(css, /\.assistant-msg-del::after\s*\{[\s\S]{0,120}inset: -11px/,
-    'тап-цель больше видимого кружка');
-  assert.match(css, /\.assistant-msg-del:focus-visible\s*\{\s*outline/,
-    'фокус с клавиатуры виден');
+  assert.ok(!css.includes('.assistant-msg-del'), 'стили крестика вычищены');
+  // Жест долгого нажатия не должен перехватываться системой
+  const msgRule = css.match(/\.assistant-msg\s*\{[^}]*\}/);
+  assert.ok(msgRule, 'правило пузыря найдено');
+  assert.match(msgRule[0], /user-select:\s*none/, 'текст пузыря не выделяется');
+  assert.match(msgRule[0], /-webkit-touch-callout:\s*none/, 'iOS не зовёт свою плашку');
+  // Кнопки листа — во всю ширину панели, как в остальных шторках
+  assert.match(css, /#assistant-delete-sheet \.btn\s*\{\s*width: 100%/,
+    'кнопки листа во всю ширину');
+  // Цвета — только токены проекта
+  const section = css.slice(css.indexOf('Удаление одной реплики'));
+  assert.ok(section.length > 0, 'секция удаления найдена');
+  assert.ok(!/#([0-9a-fA-F]{3,6})\b/.test(section), 'шестнадцатеричных цветов нет');
 });

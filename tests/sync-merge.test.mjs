@@ -15,6 +15,7 @@ import assert from 'node:assert/strict';
 import {
   mergeCloudIntoLocal, mergeHabitsById, mergeQazaLogEntries,
   mergeRecordsByDay, mergeSleepHistories, sectionTsOf,
+  unwrapSection, sectionEnvelopeWins,
 } from '../js/sync/merge.js';
 import { loadApp } from './helpers/load-app.mjs';
 import { habit } from './helpers/fixtures.mjs';
@@ -157,6 +158,80 @@ test('цельные разделы при pending не трогаются во�
   assert.equal(merged.prayer.madhhab, 'hanafi');
   assert.equal(merged.fast.remaining, 2);
   assert.equal(merged.sleep.realSleepMin, null, 'скаляры сна затёрты при pending');
+});
+
+// ── LWW-конверты цельных разделов (P1-3) ────────────────────────────────────
+// qaza/prayer/fast/schedule ходят в снимке в конвертах {v, ts}: v — полезные
+// данные раздела, ts — часы отправителя на момент ЗАПИСИ раздела. Побеждает
+// больший ts; при равенстве — локальная версия (детерминированно); раздел
+// без конверта (старый клиент) считается ts=0: конверт побеждает его при
+// первом же обмене, а он сам не затирает свежий конверт. Оба без конвертов —
+// прежнее правило (метка раздела/снимка против последней сверки).
+
+test('unwrapSection: конверт разворачивается, legacy-раздел читается с ts=0', () => {
+  const payload = { version: 3, cursor: 0 };
+  assert.deepEqual(unwrapSection({ v: payload, ts: 100 }), { v: payload, ts: 100 });
+  assert.deepEqual(unwrapSection(payload), { v: payload, ts: 0 },
+    'legacy-раздел без конверта должен читаться с нулевой меткой');
+  assert.deepEqual(unwrapSection(null), { v: null, ts: 0 });
+  assert.deepEqual(unwrapSection({ v: payload }), { v: { v: payload }, ts: 0 },
+    'объект с v без числовой ts — не конверт');
+  assert.deepEqual(unwrapSection({ v: payload, ts: 'завтра' }), { v: { v: payload, ts: 'завтра' }, ts: 0 },
+    'не-числовая ts — не конверт');
+});
+
+test('sectionEnvelopeWins: больше ts — облако, равенство — локальное, 0 против 0 — прежнее правило', () => {
+  assert.equal(sectionEnvelopeWins(300, 200), true);
+  assert.equal(sectionEnvelopeWins(100, 200), false);
+  assert.equal(sectionEnvelopeWins(200, 200), false,
+    'при равенстве ts побеждает локальная версия');
+  assert.equal(sectionEnvelopeWins(100, 0), true,
+    'конверт побеждает legacy-раздел при первом же обмене');
+  assert.equal(sectionEnvelopeWins(0, 200), false,
+    'legacy-раздел не затирает локальный конверт');
+  assert.equal(sectionEnvelopeWins(0, 0, true), true,
+    'оба без конвертов — прежнее правило вызывающего');
+  assert.equal(sectionEnvelopeWins(0, 0, false), false);
+  assert.equal(sectionEnvelopeWins('300', 200), true, 'строковая метка приводится к числу');
+});
+
+test('конверт с меткой записи: новее локальной правки — применяется, старее — нет', () => {
+  const cloud = baseCloud();
+  cloud.qaza = { v: baseCloud().qaza, ts: CLOUD_TS + 5000 };
+
+  const newer = merge(baseLocal(), cloud, { sectionWrites: { qaza: CLOUD_TS } });
+  assert.equal(newer.qaza.cursor, 0, 'конверт новее локальной записи — должен примениться');
+
+  const older = merge(baseLocal(), cloud, { sectionWrites: { qaza: CLOUD_TS + 9000 } });
+  assert.equal(older.qaza.cursor, 3, 'локальная правка новее конверта затёрта быть не должна');
+});
+
+test('publish-метка sectionTs не отменяет сравнения конвертов', () => {
+  const cloud = baseCloud();
+  // Снимок опубликован позже (sectionTs.qaza = CLOUD_TS > localTs), но сам
+  // раздел записан на отправителе давно: решает метка записи, не публикации
+  cloud.qaza = { v: baseCloud().qaza, ts: LOCAL_TS - 500 };
+  const merged = merge(baseLocal(), cloud, { sectionWrites: { qaza: LOCAL_TS } });
+  assert.equal(merged.qaza.cursor, 3,
+    'конверт старее локальной записи, хотя снимок опубликован позже — раздел затёрт');
+});
+
+test('legacy-раздел снимка не затирает локальный конверт; оба legacy — прежнее правило', () => {
+  const cloud = baseCloud(); // qaza — «голый» раздел, как у старого клиента
+  const kept = merge(baseLocal(), cloud, { sectionWrites: { qaza: CLOUD_TS + 1 } });
+  assert.equal(kept.qaza.cursor, 3, 'голый раздел стёр локальный конверт');
+
+  const legacyApplied = merge(baseLocal(), cloud, {});
+  assert.equal(legacyApplied.qaza.cursor, 0,
+    'оба раздела legacy — прежнее правило (метка раздела против последней сверки)');
+});
+
+test('конверт принимается устройством без локальной метки (первый обмен)', () => {
+  const cloud = baseCloud();
+  cloud.qaza = { v: baseCloud().qaza, ts: CLOUD_TS };
+  const merged = merge(baseLocal(), cloud, { sectionWrites: {} });
+  assert.equal(merged.qaza.cursor, 0,
+    'новый формат должен побеждать legacy при первом же обмене');
 });
 
 // ── Сон: история ────────────────────────────────────────────────────────────

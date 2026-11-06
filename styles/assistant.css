@@ -124,6 +124,12 @@ body.view-assistant #app {
   overflow-wrap: anywhere;
   white-space: pre-wrap;
   animation: assistant-msg-in .18s ease-out;
+  /* Удаление реплики — долгое нажатие по пузырю (задача 3.1): выделение
+     текста и системная плашка iOS перехватили бы жест себе, и до листа
+     удаления нажатие не доживало бы */
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
 }
 
 @keyframes assistant-msg-in {
@@ -431,108 +437,20 @@ body.view-assistant #app {
   }
 }
 
-/* --- Удаление одной реплики (Воркер 3, смена 2026-11-04) ------------------
-   Кнопка живёт в углу пузыря, в том углу, где у пузыря нет «хвоста»: у
-   пользовательского хвост снизу справа, у ответа — снизу слева, поэтому
-   правый верхний свободен у обоих. Пузырь — relative: кнопка позиционируется
-   от него, а не от ленты, и не уезжает при прокрутке.
+/* --- Удаление одной реплики долгим нажатием (задача 3.1, смена 2026-11-06) --
+   Крестик в углу пузыря убран: на телефоне он съедал тап-цель в 44px на
+   каждом пузыре и замусоривал ленту. Удаление — жест долгого нажатия по
+   пузырю (450 мс, детектор в js/ui/assistant-view.js); перехват жеста
+   системой гасится на самом пузыре (user-select/-webkit-touch-callout в
+   базовом правиле выше) и preventDefault-ом contextmenu в JS.
 
-   Цвета — существующие токены (--surface-pressed, --text-muted, --on-accent,
-   --danger): глобальная палитра, шрифты и фоны приложения этой правкой не
-   тронуты. */
-.assistant-msg {
-  position: relative;
-}
+   Цвета — существующие токены: глобальная палитра, шрифты и фоны приложения
+   этой правкой не тронуты. */
 
-.assistant-msg-del {
-  position: absolute;
-  top: 5px;
-  right: 5px;
-  width: 22px;
-  height: 22px;
-  padding: 0;
-  border: 0;
-  border-radius: 50%;
-  background: var(--surface-pressed);
-  color: var(--text-muted);
-  font-size: 12px;
-  line-height: 1;
-  opacity: .55;
-  cursor: pointer;
-}
-
-/* Тап-цель больше видимого кружка: 44×44 по гайдлайну приложения, иначе на
-   телефоне попадать по «✕» пришлось бы пальцем в 22 px */
-.assistant-msg-del::after {
-  content: '';
-  position: absolute;
-  inset: -11px;
-}
-
-/* Место для кнопки зарезервировано padding-ом: текст не должен уезжать под
-   неё. Браузеры без :has() сохраняют прежний padding — кнопка всё равно
-   видима и нажимаема, просто длинная первая строка подходит ближе к краю */
-.assistant-msg:has(.assistant-msg-del) {
-  padding-right: 34px;
-}
-
-/* Акцентная пилюля пользователя: кружок на ней читается своим цветом */
-.assistant-msg-user .assistant-msg-del {
-  color: var(--on-accent);
-  background: rgba(255, 255, 255, .22);
-}
-
-.assistant-msg-del:active {
-  background: var(--danger);
-  color: var(--on-danger);
-}
-
-.assistant-msg-del:focus-visible {
-  outline: 2px solid var(--accent);
-  outline-offset: 2px;
-  opacity: 1;
-}
-
-/* На устройствах с курсором кнопка показывается только при наведении на
-   пузырь или фокусе с клавиатуры: лента не превращается в поле из крестиков.
-   На тач-устройствах (hover: none) кнопка видна всегда — навведения там нет */
-@media (hover: hover) {
-  .assistant-msg-del {
-    opacity: 0;
-  }
-
-  .assistant-msg:hover .assistant-msg-del,
-  .assistant-msg:focus-within .assistant-msg-del,
-  .assistant-msg-del:focus-visible {
-    opacity: 1;
-  }
-}
-
-/* Лист подтверждения удаления (styles/sheets.css даёт слой и панель; здесь —
-   только содержимое). Превью реплики — текст, а не разметка: его кладёт
-   askAssistantDelete через textContent */
-.assistant-delete-role {
-  margin: 10px 0 4px;
-  color: var(--text-tertiary);
-  font-size: 13px;
-}
-
-.assistant-delete-preview {
-  margin: 0 0 14px;
-  padding: 10px 12px;
-  border-radius: var(--radius-md);
-  background: var(--surface-alt);
-  color: var(--text);
-  font-size: 14px;
-  line-height: 1.4;
-  /* Длинная реплика не должна выталкивать кнопки подтверждения за экран:
-     превью прокручивается внутри себя */
-  max-height: 40vh;
-  overflow-y: auto;
-  white-space: pre-wrap;
-  overflow-wrap: anywhere;
-}
-
+/* Лист подтверждения (styles/sheets.css даёт слой и панель; на телефоне
+   панель приезжает снизу общим правилом mobile.css, на ПК садится по центру).
+   Превью реплики выкинуто: пузырь виден под подложкой шторки, а лист с двумя
+   кнопками («Удалить» — btn-danger, «Отмена») читается мгновенно */
 #assistant-delete-sheet .btn {
   width: 100%;
   min-height: 44px;

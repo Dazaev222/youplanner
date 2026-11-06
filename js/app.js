@@ -17,8 +17,8 @@ import { STORAGE_KEYS } from './data/storage.js';
 import { SYNC_STATUS_MS, clearSyncPending, syncPending } from './sync/core.js';
 import { deniedStatus, flushPendingSync, markCloudReady, scheduleSync, settleHabitsAfterSync, syncFromCloud, syncToCloud } from './sync/sync.js';
 import {
-  closeAssistantKeyModal, confirmAssistantDelete, closeAssistantDeleteSheet,
-  onAssistantChatClick, onAssistantChipClick, onAssistantClear,
+  bindAssistantChatLongPress, closeAssistantKeyModal, confirmAssistantDelete,
+  closeAssistantDeleteSheet, onAssistantChipClick, onAssistantClear,
   onAssistantFormSubmit, onAssistantImageClear, onAssistantImagePick,
   onAssistantInputInput, onAssistantInputKeydown, onAssistantKeyCancel,
   onAssistantKeySave, onAssistantModelChange, onAssistantPdfClear,
@@ -702,12 +702,12 @@ export function bindEvents() {
   const assistantChips = document.getElementById('assistant-chips');
   if (assistantChips) assistantChips.addEventListener('click', onAssistantChipClick);
 
-  // Удаление одной реплики: лента делегирует клик по кнопке пузыря (один
-  // слушатель на контейнер, а не по обработчику на каждом пузыре — лента
-  // перерисовывается целиком на каждое изменение истории), а подтверждение
-  // берётся в нижнем листе приложения, не в централизованной модалке
+  // Удаление одной реплики (задача 3.1): долгое нажатие на пузырь открывает
+  // нижний лист подтверждения. Жест делегирован ленте — один слушатель на
+  // контейнер, а не по обработчику на каждом пузыре (лента перерисовывается
+  // целиком на каждое изменение истории)
   const assistantChat = document.getElementById('assistant-chat');
-  if (assistantChat) assistantChat.addEventListener('click', onAssistantChatClick);
+  if (assistantChat) bindAssistantChatLongPress(assistantChat);
 
   const assistantDeleteConfirm = document.getElementById('assistant-delete-confirm');
   if (assistantDeleteConfirm) {

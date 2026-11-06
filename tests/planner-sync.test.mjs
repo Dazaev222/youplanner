@@ -571,11 +571,16 @@ test('envelope: много tombstones — ни GC, ни вытеснения п�
 // ── Unit 3: транспорт — ETag/If-Match CAS, outbox, ack, владелец (ТЗ §1.4.2–4) ─
 // Модель сервера: GET отдаёт ETag, PUT с чужим If-Match → 412. Второй GET без
 // CAS не считается защитой от гонки: запись условная, иначе last-write-wins.
+// С выносом planner на соседний корень модель держит два независимых узла
+// данных — корневой (state.snapshot) и выделенный (state.plannerNode) — у
+// каждого свой ETag и своя условная запись.
 
 function makeCasServer(initialSnapshot) {
   const state = {
     snapshot: initialSnapshot || {},
+    plannerNode: null,
     etag: 'etag-1',
+    plannerEtag: 'planner-etag-1',
     etagSeq: 1,
     calls: [],
     putsWithoutMatch: 0,
@@ -589,6 +594,14 @@ function makeCasServer(initialSnapshot) {
     state.raceApplied = false;
   };
 
+  // Чужой писатель выделенного узла: устройство B записывает planner между
+  // нашим GET и PUT — как и у корня, запись применяется при первом PUT,
+  // чтобы наш GET успел пройти по старому ETag, а условный PUT получил 412
+  state.externalPlannerWrite = function (snapshot) {
+    state.plannerRaceSnapshot = snapshot;
+    state.plannerRaceApplied = false;
+  };
+
   state.respond = function (url, opts) {
     const options = opts || {};
     const method = options.method || 'GET';
@@ -597,8 +610,16 @@ function makeCasServer(initialSnapshot) {
       url: String(url), method: method, headers: headers, body: options.body,
     });
     const isBackups = String(url).includes('backups');
+    const isPlanner = String(url).includes('-planner');
     if (method === 'GET') {
       if (isBackups) return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve([]); } });
+      if (isPlanner) {
+        return Promise.resolve({
+          ok: true, status: 200,
+          headers: { get: function (name) { return String(name).toLowerCase() === 'etag' ? state.plannerEtag : null; } },
+          json: function () { return Promise.resolve(state.plannerNode); },
+        });
+      }
       return Promise.resolve({
         ok: true, status: 200,
         headers: { get: function (name) { return String(name).toLowerCase() === 'etag' ? state.etag : null; } },
@@ -606,10 +627,25 @@ function makeCasServer(initialSnapshot) {
       });
     }
     if (isBackups) return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve({}); } });
-    // PUT основного узла: сначала отрабатывает внешний писатель (гонка),
+    // PUT узла данных: сначала отрабатывает внешний писатель (гонка),
     // затем условная запись по If-Match — как настоящий RTDB-REST
     const match = headers['If-Match'];
     if (!match) state.putsWithoutMatch += 1;
+    if (isPlanner) {
+      if (state.plannerRaceSnapshot && !state.plannerRaceApplied) {
+        state.plannerRaceApplied = true;
+        state.plannerNode = state.plannerRaceSnapshot;
+        state.etagSeq += 1;
+        state.plannerEtag = 'planner-etag-' + state.etagSeq;
+      }
+      if (state.conflictEveryPut || (match && match !== state.plannerEtag)) {
+        return Promise.resolve({ ok: false, status: 412, json: function () { return Promise.resolve({ error: 'conflict' }); } });
+      }
+      state.plannerNode = JSON.parse(options.body);
+      state.etagSeq += 1;
+      state.plannerEtag = 'planner-etag-' + state.etagSeq;
+      return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve(state.plannerNode); } });
+    }
     if (state.raceSnapshot && !state.raceApplied) {
       state.raceApplied = true;
       state.snapshot = state.raceSnapshot;
@@ -626,12 +662,19 @@ function makeCasServer(initialSnapshot) {
   };
   state.mainPuts = function () {
     return state.calls.filter(function (c) {
-      return c.method === 'PUT' && c.url.includes('firebaseio.com') && !c.url.includes('backups');
+      return c.method === 'PUT' && c.url.includes('firebaseio.com') &&
+        !c.url.includes('backups') && !c.url.includes('-planner');
     });
   };
   state.mainGets = function () {
     return state.calls.filter(function (c) {
-      return c.method === 'GET' && c.url.includes('firebaseio.com') && !c.url.includes('backups');
+      return c.method === 'GET' && c.url.includes('firebaseio.com') &&
+        !c.url.includes('backups') && !c.url.includes('-planner');
+    });
+  };
+  state.plannerPuts = function () {
+    return state.calls.filter(function (c) {
+      return c.method === 'PUT' && c.url.includes('-planner');
     });
   };
   return state;
@@ -655,12 +698,22 @@ test('GET снимка идёт с X-Firebase-ETag, PUT — с If-Match; пос�
   assert.ok(gets.length >= 1);
   assert.equal(gets[0].headers['X-Firebase-ETag'], 'true', 'GET без X-Firebase-ETag — сервер не отдаст ETag');
   const puts = server.mainPuts();
-  assert.equal(puts.length, 1, 'CAS: один успешный обмен — один PUT');
+  assert.equal(puts.length, 1, 'CAS: один успешный обмен — один корневой PUT');
   assert.ok(puts[0].headers['If-Match'], 'PUT пошёл без If-Match при известном ETag');
 
+  // plannerV1 в корневом теле НЕТ: старомодный клиент с таким телом стирал
+  // бы Матрицу. Снимок уезжает выделенным PUT в соседний корень.
   const body = JSON.parse(puts[0].body);
-  assert.ok(body.plannerV1 && body.plannerV1.entries.t1, 'plannerV1 не уехал в снимок');
-  assert.ok(body.sectionTs && body.sectionTs.plannerV1, 'нет метки свежести plannerV1');
+  assert.equal(body.plannerV1, undefined, 'plannerV1 уехал корневым PUT');
+  assert.equal(body.sectionTs && body.sectionTs.plannerV1, undefined,
+    'метка свежести plannerV1 осталась в корневом снимке');
+
+  const plannerPuts = server.plannerPuts();
+  assert.equal(plannerPuts.length, 1, 'planner не опубликован выделенным PUT');
+  assert.ok(plannerPuts[0].headers['If-Match'],
+    'PUT planner без If-Match: ETag узла прочитан GET-ом этого же обмена');
+  const plannerBody = JSON.parse(plannerPuts[0].body);
+  assert.ok(plannerBody.entries.t1, 'plannerV1 не уехал в выделенный узел');
 
   const env = readEnvelope(app);
   assert.equal(env.outbox.length, 0, 'ack после успешного CAS не снял outbox');
@@ -674,27 +727,24 @@ test('гонка на одном ETag: чужой PUT раньше → свой 
   app.sandbox.localStorage.setItem('youplanner.sync.ts', '1');
   assert.equal(app.context.saveTasks([mkTask('tA', { title: 'Задача A' })]), true);
 
-  // Устройство B легально записалось между нашим GET и PUT: полный снимок
-  // узла (externalWrite имитирует чужой корневой PUT), ETag изменился —
+  // Устройство B легально записало выделенный узел между нашим GET и PUT
+  // (externalPlannerWrite имитирует чужой planner-PUT), ETag изменился —
   // наш условный PUT обязан получить 412, перечитать, слить и написать
   // объединение
-  server.externalWrite({
-    updatedAt: 777,
-    plannerV1: plannerCloudNode({
-      tB: entry('tB', { title: fld('Задача B', 4, 'devB') }),
-    }),
-  });
+  server.externalPlannerWrite(plannerCloudNode({
+    tB: entry('tB', { title: fld('Задача B', 4, 'devB') }),
+  }));
   await app.context.syncToCloudNow();
 
-  const final = server.snapshot;
-  assert.ok(final.plannerV1, 'PUT не принёс plannerV1');
-  assert.ok(final.plannerV1.entries.tA, 'правка A потеряна после гонки');
-  assert.ok(final.plannerV1.entries.tB, 'чужая правка B затёрта');
-  assert.equal(final.plannerV1.tombstones.tB, undefined);
-  assert.ok(server.mainPuts().length >= 2, 'повторная попытка после 412 не состоялась');
+  const final = server.plannerNode;
+  assert.ok(final, 'выделенный узел не записан');
+  assert.ok(final.entries.tA, 'правка A потеряна после гонки');
+  assert.ok(final.entries.tB, 'чужая правка B затёрта');
+  assert.equal(final.tombstones.tB, undefined);
+  assert.ok(server.plannerPuts().length >= 2, 'повторная попытка после 412 не состоялась');
 });
 
-test('412 после лимита повторов: ровно 5 PUT, outbox сохранён, метка сверки не двинута', async () => {
+test('412 после лимита повторов: ровно 5 PUT в каждом узле, outbox сохранён, метка сверки не двинута', async () => {
   const server = makeCasServer({});
   server.conflictEveryPut = true;
   const app = loadApp({ fetchImpl: server.respond });
@@ -706,7 +756,9 @@ test('412 после лимита повторов: ровно 5 PUT, outbox с�
   await app.context.syncToCloudNow();
 
   assert.equal(server.mainPuts().length, 5,
-    'максимум 5 попыток за цикл не соблюдён: ' + server.mainPuts().length);
+    'максимум 5 попыток за цикл не соблюдён (корень): ' + server.mainPuts().length);
+  assert.equal(server.plannerPuts().length, 5,
+    'максимум 5 попыток за цикл не соблюдён (planner): ' + server.plannerPuts().length);
   assert.equal(app.sandbox.localStorage.getItem('youplanner.sync.ts'), '1',
     'SYNC_TS двинут на неудачном обмене');
   const envAfter = readEnvelope(app);
@@ -738,13 +790,14 @@ test('net-ошибка после лимита → reconnect: тот же opId �
   assert.equal(app.context.saveTasks([mkTask('t1')]), true);
 
   await app.context.syncToCloudNow();
-  assert.equal(server.mainPuts().length, 0, 'при отказе сети PUT всё равно ушёл');
+  assert.equal(server.mainPuts().length, 0, 'при отказе сети корневой PUT всё равно ушёл');
+  assert.equal(server.plannerPuts().length, 0, 'при отказе сети planner-PUT всё равно ушёл');
   assert.ok(readEnvelope(app).outbox.length >= 1, 'отказ сети стёр outbox');
 
   networkDown = false;
   await app.context.syncToCloudNow();
   assert.ok(readEnvelope(app).outbox.length === 0, 'после reconnect правка не доехала');
-  const delivered = server.snapshot.plannerV1.entries.t1;
+  const delivered = server.plannerNode.entries.t1;
   assert.equal(delivered.fields.title.version.counter, titleCounter,
     'повтор использует ту же opId/версию, а не создаёт новый id');
 });
@@ -812,7 +865,8 @@ test('владелец: чужой uid не получает чужой outbox �
   app.sandbox.localStorage.setItem('youplanner.sync.ts', '1');
   assert.equal(app.context.saveTasks([mkTask('t1')]), true);
   await app.context.syncToCloudNow();
-  assert.ok(server.snapshot.plannerV1, 'первая публикация не состоялась');
+  assert.ok(server.plannerNode, 'первая публикация не состоялась');
+  assert.equal(server.plannerPuts().length, 1, 'первая публикация уехала не одним planner-PUT');
 
   // смена аккаунта: старый outbox новому не отправляется
   app.sandbox.localStorage.setItem('youplanner.fb.owner', JSON.stringify({ email: 'b@e', uid: 'uid-B' }));
@@ -824,7 +878,9 @@ test('владелец: чужой uid не получает чужой outbox �
   await app.context.syncToCloudNow();
   const puts = server.mainPuts();
   const lastBody = JSON.parse(puts[puts.length - 1].body);
-  assert.equal(lastBody.plannerV1, undefined, 'plannerV1 уехал под другим владельцем');
+  assert.equal(lastBody.plannerV1, undefined, 'plannerV1 уехал корневым PUT под другим владельцем');
+  assert.equal(server.plannerPuts().length, 1,
+    'planner-узел перезаписан под другим владельцем');
   const envAfter = readEnvelope(app);
   assert.ok(envAfter.outbox.length >= 1, 'при блокировке по владельцу outbox стёрся');
 });
@@ -868,7 +924,9 @@ function rulesTree() {
 }
 
 function ownerNodeName() {
-  return Object.keys(rulesTree()).filter(function (k) { return !k.startsWith('.') && !k.endsWith('-backups'); })[0];
+  return Object.keys(rulesTree()).filter(function (k) {
+    return !k.startsWith('.') && !k.endsWith('-backups') && !k.endsWith('-planner');
+  })[0];
 }
 
 // data → DataSnapshot-обёртка: child/val/isX/hasChild(s)/key — подмножество
@@ -909,9 +967,14 @@ function snapshotResolve(rootValue, path, keyForLeaf) {
 }
 
 function evalRule(expression, ctx) {
-  // Изолированный контекст без глобалов: только auth/data/newRoot/`$`-дики
+  // Изолированный контекст без глобалов: только auth/data/newRoot/`$`-дики.
+  // 1000 мс, а не 100: бюджет мерил скорость машины, а не защиту от
+  // бесконечного цикла — под параллельной нагрузкой npm test (52 файла)
+  // создание контекста vm иногда не укладывалось в 100 мс, и тест
+  // «модель правил» падал случайным образом. Защита от зацикливания
+  // остаётся: секундный предел так же останавливает runaway-выражение.
   const sandbox = Object.assign(Object.create(null), ctx);
-  return vmLib.runInNewContext(String(expression), sandbox, { timeout: 100 });
+  return vmLib.runInNewContext(String(expression), sandbox, { timeout: 1000 });
 }
 
 // Разрешение (наследование .read/.write): любая метка по пути-предку.
@@ -1082,18 +1145,31 @@ test('модель правил: валидация срабатывает и п
     { habits: [], plannerV1: snap({ t: entry('t', { title: fld('x', 1, 'a') }) }) }, {}).allowed, true);
 });
 
-test('модель правил (зафиксированный РИСК, выпуск остановлен по §1.4.2): старый клиент затирает plannerV1 безусловным PUT, правила это не блокируют', () => {
-  // .validate не вызывается при УДАЛЕНИИ (newData=null), а child-.write не
-  // может отнять разрешение, унаследованное от узла. Единственный способ
-  // запретить «PUT без plannerV1, если он уже есть» — условие на .write
-  // самого узла по newData, но оно сломает и чтение (newData при GET пуст),
-  // а identical read/write требует тест firebase-rules. Правки вне whitelist
-  // (раздельные read/write) здесь невозможны → риск задокументирован,
-  // защита осталась на клиенте: syncBody всегда несёт слитый снимок.
-  const state = { [OWNER]: { plannerV1: snap({ t: entry('t', { title: fld('x', 1, 'a') }) }) } };
+test('модель правил (РИСК закрыт выделенным корнем): стирание legacy-plannerV1 старым клиентом больше не теряет данные', () => {
+  // Правила действительно НЕ могут блокировать стирание: .validate не
+  // вызывается при УДАЛЕНИИ (newData=null), а child-.write не может отнять
+  // разрешение, унаследованное от узла. Поэтому состояние планировщика
+  // перенесено в СОСЕДНИЙ корень (узел «-planner»): старомодный клиент
+  // адресует только рабочий узел, и его корневой PUT стирает разве что
+  // legacy-остаток plannerV1, который миграция уже скопировала в выделенный
+  // узел (migratePlannerFromRoot, js/sync/sync.js).
+  const legacyPlanner = snap({ t: entry('t', { title: fld('x', 1, 'a') }) });
+  const state = {
+    [OWNER]: { plannerV1: legacyPlanner },
+    [OWNER + '-planner']: legacyPlanner,
+  };
   const oldClientPut = { habits: [], updatedAt: 5 };
+  // модель честно показывает: правило НЕ блокирует корневой PUT без plannerV1
   assert.equal(modelRequest(ownerAuth(), 'PUT', [OWNER], oldClientPut, state).allowed, true,
     'модель должна честно показать: правило НЕ блокирует стирание узла старым writers');
   const after = mergeAtPath(state, [OWNER], oldClientPut);
-  assert.equal(after[OWNER].plannerV1, undefined);
+  assert.equal(after[OWNER].plannerV1, undefined, 'legacy-остаток из корня не исчез');
+  // но выделенный корень старомодный PUT не адресует: данные planner целы
+  assert.deepEqual(after[OWNER + '-planner'], legacyPlanner,
+    'корневой PUT старомодного клиента тронул выделенный узел planner');
+  // выделенный узел в правилах: запись только владельцу, тот же пин
+  assert.equal(modelRequest({ uid: 'someone-else' }, 'PUT', [OWNER + '-planner'], legacyPlanner, state).allowed, false,
+    'чужой uid пишет в выделенный узел planner');
+  assert.equal(modelRequest(ownerAuth(), 'PUT', [OWNER + '-planner'], legacyPlanner, state).allowed, true,
+    'владелец не может писать в выделенный узел planner — правила ломают собственную запись');
 });

@@ -212,8 +212,10 @@ test('offline: удаление → импорт pre-удаленной копи
   assert.equal(app.context.loadTasks().some(function (t) { return t.id === 't1'; }), false,
     'удалённый id воскрес локально после импорта старой копии');
 
-  // reconnect: тот же аппарат, сеть появляется
-  const server = { snapshot: {}, etag: 'e1' };
+  // reconnect: тот же аппарат, сеть появляется. Два независимых узла данных:
+  // корневой снимок и выделенный узел planner (старомодный корневой PUT
+  // больше не несёт plannerV1).
+  const server = { snapshot: {}, plannerNode: null, etag: 'e1' };
   app.sandbox.fetch = function (url, opts) {
     const options = opts || {};
     const method = options.method || 'GET';
@@ -221,14 +223,19 @@ test('offline: удаление → импорт pre-удаленной копи
       return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve([]); } });
     }
     if (method === 'GET') {
+      const value = String(url).includes('-planner') ? server.plannerNode : server.snapshot;
       return Promise.resolve({
         ok: true, status: 200,
         headers: { get: function (n) { return String(n).toLowerCase() === 'etag' ? server.etag : null; } },
-        json: function () { return Promise.resolve(server.snapshot); },
+        json: function () { return Promise.resolve(value); },
       });
     }
     if (String(url).includes('backups')) {
       return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve({}); } });
+    }
+    if (String(url).includes('-planner')) {
+      server.plannerNode = JSON.parse(options.body);
+      return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve(server.plannerNode); } });
     }
     server.snapshot = JSON.parse(options.body);
     server.etag = 'e2';
@@ -237,8 +244,8 @@ test('offline: удаление → импорт pre-удаленной копи
 
   await app.context.syncToCloudNow();
 
-  const cloud = server.snapshot.plannerV1;
-  assert.ok(cloud, 'облако не получило plannerV1');
+  const cloud = server.plannerNode;
+  assert.ok(cloud, 'облако не получило plannerV1 в выделенном узле');
   assert.equal(cloud.entries.t1, undefined, 'удалённый id воскрес в облачном снимке');
   assert.ok(cloud.tombstones.t1, 'delete-wins не доехал до облака');
   assert.ok(cloud.entries.keep);

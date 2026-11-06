@@ -23,7 +23,7 @@ import { FAST_KEY, FAST_VERSION, loadFast } from './fast.js';
 import { QAZA_LOG_KEY, QAZA_LOG_VERSION, loadQazaLog } from './qaza.js';
 import { loadRecords, saveRecords } from './records.js';
 import { SLEEP_KEY, SLEEP_VERSION, loadSleep, saveSleepRecord } from './sleep.js';
-import { STORAGE_KEYS } from './storage.js';
+import { STORAGE_KEYS, markSectionWritten } from './storage.js';
 
 export const ARCHIVE_KEY = 'youplanner.archive';
 export const ARCHIVE_VERSION = 1;
@@ -259,7 +259,13 @@ export function archiveHistories(now) {
           version: FAST_VERSION,
           remaining: fast.remaining,
           history: parts.kept,
-        }))) changed = true;
+        }))) {
+          // Срезка меняет содержимое раздела: без метки записи (P1-3,
+          // js/data/storage.js) другое устройство оставило бы у себя
+          // несрезанную историю — равные метки читаются как «локальное свежее»
+          markSectionWritten('fast');
+          changed = true;
+        }
       }
     }
   } catch (e) {

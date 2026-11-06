@@ -231,47 +231,179 @@ function pushHistory(role, content) {
     return -1;
   }
   // Индекс реплики в сохранённом массиве: он всегда последний, и по нему
-  // пузырь ленты получает кнопку удаления (см. markBubbleDeletable). -1 —
-  // запись не состоялась, кнопки быть не должно: удалять нечего, а индекс
+  // пузырь ленты подписывается жестом удаления (см. markBubbleDeletable).
+  // -1 — запись не состоялась, жест быть не должен: удалять нечего, а индекс
   // несостоявшейся реплики срезал бы соседа
   return tail.length - 1;
 }
 
-// --- Удаление одной реплики ------------------------------------------------
+// --- Удаление одной реплики долгим нажатием (задача 3.1, смена 2026-11-06) --
+// Крестик в углу пузыря убран: на телефоне он отъедал тап-цель в 44px у
+// каждого пузыря и замусоривал ленту. Удаление — жест долгого нажатия по
+// пузырю (450 мс), как в мессенджерах. Решение разложено на два слоя:
+//
+//   * createLongPressDetector — ЧИСТАЯ логика жеста без DOM: получает
+//     события-подобные объекты и таймеры через инъекцию, поэтому её гоняет
+//     node --test (tests/assistant-longpress.test.mjs);
+//   * bindAssistantChatLongPress — проводка на ленту: превращает события
+//     #assistant-chat в вызовы детектора, а срабатывание — в лист удаления.
+//
 // Пузырь ленты, которому есть что удалять: индекс в истории кладётся на узел,
 // а не выводится из порядка детей. Узы, которых в истории нет (приветствие
 // пустого чата, «Печатает…», пузырь ошибки хода к API), индекса не получают
-// и кнопки не показывают: кнопка без цели была бы обещанием, которое не
-// выполняется, и удаление по позиции молча срезало бы соседнюю реплику,
-// стоит ленте разойтись с хранилищем
+// и жест по ним молчит: удаление по позиции без цели молча срезало бы
+// соседнюю реплику, стоит ленте разойтись с хранилищем
 function markBubbleDeletable(node, index) {
   if (!node || typeof node.setAttribute !== 'function') return null;
   if (!(index >= 0)) return null;
   node.setAttribute('data-msg-index', String(index));
-  const button = document.createElement('button');
-  // type=button обязателен: лента живёт внутри #assistant-form, и кнопка без
-  // типа стала бы submit-ом — тап по «удалить» отправил бы ещё и реплику
-  button.type = 'button';
-  button.className = 'assistant-msg-del';
-  button.setAttribute('aria-label', 'Удалить сообщение');
-  button.textContent = '✕';
-  node.appendChild(button);
   return node;
 }
 
-// Делегирование по ленте: слушатель один на #assistant-chat, а пузырей
-// десятки и перерисовываются они часто — вешать обработчик на каждый значило
-// бы копить замыкания на узлах, которые уже отброшены
-export function onAssistantChatClick(event) {
-  const target = event && event.target;
-  if (!target || typeof target.closest !== 'function') return;
-  const button = target.closest('.assistant-msg-del');
-  if (!button) return;
-  const bubble = button.closest('.assistant-msg');
-  if (!bubble || typeof bubble.getAttribute !== 'function') return;
-  const index = Number(bubble.getAttribute('data-msg-index'));
-  if (!Number.isInteger(index) || index < 0) return;
-  askAssistantDelete(index);
+const LONG_PRESS_MS = 450;    // порог «долгого» нажатия
+const LONG_PRESS_CANCEL_PX = 10; // сдвиг больше этого — скролл/дрожь, отмена
+
+// Точка события: у touchstart/touchmove она в touches[0], у мыши — на самом
+// событии. Чужой/кривой объект даёт null: жест просто не начинается
+function longPressPoint(event) {
+  if (!event) return null;
+  const point = (event.touches && event.touches[0]) || event;
+  const x = point.clientX;
+  const y = point.clientY;
+  if (typeof x !== 'number' || typeof y !== 'number') return null;
+  return { x: x, y: y };
+}
+
+export function createLongPressDetector(handlers, options) {
+  const opts = options || {};
+  const delayMs = typeof opts.delayMs === 'number' && opts.delayMs > 0
+    ? opts.delayMs : LONG_PRESS_MS;
+  const cancelPx = typeof opts.moveCancelPx === 'number' && opts.moveCancelPx >= 0
+    ? opts.moveCancelPx : LONG_PRESS_CANCEL_PX;
+  // Инъекция таймеров: продакшн живёт на настоящих setTimeout/clearTimeout,
+  // тест подставляет фейковые часы и двигает время сам
+  const scheduleTimer = opts.scheduleTimer || setTimeout;
+  const cancelTimer = opts.cancelTimer || clearTimeout;
+  const onLongPress = handlers && typeof handlers.onLongPress === 'function'
+    ? handlers.onLongPress
+    : null;
+
+  let timer = null;
+  let startX = 0;
+  let startY = 0;
+
+  function cancel() {
+    if (timer === null) return false;
+    cancelTimer(timer);
+    timer = null;
+    return true;
+  }
+
+  function press(event) {
+    if (timer !== null) return false;   // нажатие уже в работе — не перезапуск
+    const point = longPressPoint(event);
+    if (!point || !onLongPress) return false;
+    startX = point.x;
+    startY = point.y;
+    timer = scheduleTimer(function () {
+      timer = null;
+      onLongPress();
+    }, delayMs);
+    return true;
+  }
+
+  function move(event) {
+    if (timer === null) return false;
+    const point = longPressPoint(event);
+    if (!point) return false;
+    const dx = point.x - startX;
+    const dy = point.y - startY;
+    // Квадрат расстояния вместо корня: порог сравнивается в квадрате, и
+    // диагональный сдвиг ловится так же честно, как сдвиг по оси
+    if (dx * dx + dy * dy > cancelPx * cancelPx) return cancel();
+    return false;
+  }
+
+  return {
+    press: press,
+    move: move,
+    // Отпускание раньше порога — это обычный тап, жест отменяется
+    release: cancel,
+    // Мышь ушла с пузыря при зажатой кнопке / системный touchcancel
+    leave: cancel,
+    cancel: cancel,
+    isArmed: function () { return timer !== null; },
+  };
+}
+
+// Проводка жеста на ленту чата. Делегирование — по той же причине, что и у
+// прежнего клика по крестику: слушателей немного, а пузыри десятки и они
+// часто перерисовываются — вешать обработчик на каждый значило бы копить
+// замыкания на узлах, которые уже отброшены. Опции (таймеры) пробрасываются
+// в детектор: тест подставляет фейковые часы, app.js зовёт без опций.
+export function bindAssistantChatLongPress(chat, options) {
+  if (!chat || typeof chat.addEventListener !== 'function') return null;
+
+  // Индекс пузыря, на котором началось нажатие. На длинное нажатие открывается
+  // лист именно с ним — пузырь и реплика сходятся индексом, а не позицией
+  let pressedIndex = null;
+
+  const detector = createLongPressDetector({
+    onLongPress: function () {
+      if (pressedIndex === null) return;
+      askAssistantDelete(pressedIndex);
+    },
+  }, options);
+
+  // Пузырь под пальцем/курсором: только реплики с индексом умеют удаляться
+  function deletableBubbleFrom(event) {
+    const target = event && event.target;
+    if (!target || typeof target.closest !== 'function') return null;
+    const bubble = target.closest('.assistant-msg');
+    if (!bubble || typeof bubble.hasAttribute !== 'function') return null;
+    if (!bubble.hasAttribute('data-msg-index')) return null;
+    const index = Number(bubble.getAttribute('data-msg-index'));
+    if (!Number.isInteger(index) || index < 0) return null;
+    return index;
+  }
+
+  function onStart(event) {
+    const index = deletableBubbleFrom(event);
+    if (index === null) return;
+    pressedIndex = index;
+    detector.press(event);
+  }
+
+  function onMove(event) {
+    detector.move(event);   // скролл/дрожь отменяют, внутри детектора
+  }
+
+  function onEnd() {
+    detector.release();
+    pressedIndex = null;
+  }
+
+  function onContextMenu(event) {
+    const target = event && event.target;
+    if (!target || typeof target.closest !== 'function') return;
+    // Системное меню по долгому нажатию перехватило бы жест себе: гасим его
+    // в пузырях. Вне пузырей браузерное меню живёт как обычно
+    if (!target.closest('.assistant-msg')) return;
+    if (typeof event.preventDefault === 'function') event.preventDefault();
+  }
+
+  // passive: true — обработчики касаний не зовут preventDefault, и браузеру
+  // можно не ждать их перед скроллом (как у жестов тоста в js/core/dom.js)
+  chat.addEventListener('touchstart', onStart, { passive: true });
+  chat.addEventListener('touchmove', onMove, { passive: true });
+  chat.addEventListener('touchend', onEnd, { passive: true });
+  chat.addEventListener('touchcancel', onEnd, { passive: true });
+  chat.addEventListener('mousedown', onStart);
+  chat.addEventListener('mousemove', onMove);
+  chat.addEventListener('mouseup', onEnd);
+  chat.addEventListener('mouseleave', onEnd);
+  chat.addEventListener('contextmenu', onContextMenu);
+  return detector;
 }
 
 // Лист подтверждения удаления — та же шторка приложения, что и попап уровня
@@ -290,21 +422,14 @@ export function askAssistantDelete(index) {
   const sheet = document.getElementById('assistant-delete-sheet');
   if (!sheet) return false;
   const history = readHistory();
-  const entry = history[index];
   // Индекс мог устареть (лента не перерисована после очистки/другого
   // удаления): ничего не удаляем и не закрываем то, что не открывали
-  if (!entry) {
+  if (!history[index]) {
     showToast('Это сообщение уже удалено');
     return false;
   }
-  const preview = document.getElementById('assistant-delete-preview');
-  if (preview) {
-    // textContent, не innerHTML: реплика — пользовательский текст, и в
-    // превью листе он не должен становиться разметкой (см. tests/xss.test.mjs)
-    preview.textContent = entry.content;
-  }
-  const role = document.getElementById('assistant-delete-role');
-  if (role) role.textContent = entry.role === 'user' ? 'Ваш вопрос' : 'Ответ ассистента';
+  // Превью реплики в листе не рисуем (задача 3.1): пузырь виден под
+  // подложкой шторки, а лист с двумя кнопками читается мгновенно
   assistantDeleteIndex = index;
   sheet.hidden = false;
   return true;

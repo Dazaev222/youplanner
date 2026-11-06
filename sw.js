@@ -1,9 +1,19 @@
-// v48: чистка мёртвого кода — четыре микро-CSS-файла слиты в соседние по
+// v49: синхронизация — plannerV1 уехал из корневого снимка на выделенный
+// узел -planner (js/sync/core.js, js/sync/sync.js: свой CAS-контур с If-Match
+// и миграция legacy-данных; корневой PUT старого клиента больше не может
+// стереть Матрицу), четыре раздела qaza/prayer/fast/schedule завернуты в
+// LWW-конверты {v, ts} (js/sync/sync.js, js/sync/merge.js, js/data/storage.js
+// и сами разделы). Безопасность: CSP-мета в index.html. Чат ИИ: крестик «✕»
+// заменён долгим нажатием на пузырь (450 мс) с листом «Удалить/Отмена»
+// (js/ui/assistant-view.js, js/app.js, index.html, styles/assistant.css).
+// Превью «Далее» в листе даты считает остаток серии от series.index задачи
+// (js/ui/matrix-view.js). Правило прежнее: любой изменившийся в main файл из
+// ASSETS обязан уйти в новое имя кэша, иначе устройство крутит старые байты.
+// (v48: чистка мёртвого кода — четыре микро-CSS-файла слиты в соседние по
 // смыслу (buttons.css → layout.css, cells.css и progress-circle.css →
 // table.css, sparkline.css → stats.css, background.css → settings.css),
 // ui/constants.js слит в ui/state.js; правила перенесены дословно, порядок
-// каскада сохранён. Правило прежнее: любой изменившийся в main файл из
-// ASSETS обязан уйти в новое имя кэша, иначе устройство крутит старые байты.
+// каскада сохранён.)
 // (v47: эмодзи вместо SVG-трендов в пунктах меню статистики (index.html,
 // js/ui/stats-view.js, styles/mobile.css, стили спарклайнов — теперь в
 // styles/stats.css) и стили календаря/матрицы по замеру TickTick — серые
@@ -12,7 +22,7 @@
 // (v46 — правка текстовая (в комментарии js/data/matrix.js:771 перепутались
 // алфавиты), v45 — четыре файла после v44, v44 — восемь файлов аудита,
 // v43 — транспорт plannerV1, v42 — пересобранная вёрстка Матрицы.)
-const CACHE = 'youplanner-v48';
+const CACHE = 'youplanner-v49';
 // Иконки — все из manifest.json: отсутствующая в кэше иконка ломала бы
 // офлайн-установку PWA (аудит 2026-10-31: icon-512.png не кэшировался)
 const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon-512.png', './icon.svg',

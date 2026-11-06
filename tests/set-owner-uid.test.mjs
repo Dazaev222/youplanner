@@ -3,7 +3,8 @@
 // Скрипт — единственная вещь, которая превращает публичный шаблон правил с
 // заглушкой OWNER_UID в файл, который владелец вставляет в Console. Цена
 // ошибки в нём удвоенная: лишний символ в uid → синхронизации нет, а пропуск
-// заглушки в одно из четырёх разрешений → база открыта наполовину. Поэтому
+// заглушки в одно из шести разрешений (read+write на трёх узлах: данные,
+// выделенный planner, копии) → база открыта наполовину. Поэтому
 // проверяем и чистую функцию, и CLI целиком (временный файл в .test_tmp,
 // репозиторий не трогаем).
 
@@ -48,8 +49,8 @@ test('сборка правил: заглушка заменена во всех
   const { text, changed } = buildRules(source, UID);
 
   assert.equal(text.indexOf(PLACEHOLDER), -1, 'заглушка осталась в собранном файле');
-  assert.equal(changed.length, 4,
-    'ожидается четыре подстановки (.read и .write на двух узлах), реально: ' + changed.join(', '));
+  assert.equal(changed.length, 6,
+    'ожидается шесть подстановок (.read и .write на трёх узлах), реально: ' + changed.join(', '));
 
   const built = JSON.parse(text).rules;
   const template = JSON.parse(source).rules;
@@ -77,7 +78,7 @@ test('шаблон без заглушки: скрипт падает, а не �
 // иначе проба приняла бы заглушку за настоящего владельца.
 test('pinnedUid: собранный файл отдаёт uid, шаблон и пустые правила — null', () => {
   const built = JSON.parse(buildRules(readFileSync(TEMPLATE, 'utf8'), UID).text);
-  assert.deepEqual(pinnedUid(JSON.stringify(built)), { uid: UID, grants: 4 });
+  assert.deepEqual(pinnedUid(JSON.stringify(built)), { uid: UID, grants: 6 });
   assert.equal(pinnedUid(readFileSync(TEMPLATE, 'utf8')), null,
     'заглушка проведена как настоящий uid');
   assert.equal(pinnedUid('{"rules":{".read":false,".write":false}}'), null,
@@ -96,7 +97,7 @@ test('CLI: --uid пишет файл, --check его подтверждает', 
 
   const checked = run(['--check', '--out', out]);
   assert.equal(checked.code, 0, 'собранный файл не прошёл проверку: ' + checked.err);
-  assert.match(checked.out, /4 разрешениях/);
+  assert.match(checked.out, /6 разрешениях/);
 });
 
 test('CLI: битый uid и отсутствие файла — ненулевой выход, файл не создан', () => {

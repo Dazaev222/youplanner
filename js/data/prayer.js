@@ -1,5 +1,6 @@
 import { bus } from '../core/bus.js';
 import { safeSetItem } from '../core/storage.js';
+import { markSectionWritten } from './storage.js';
 // Координаты и мазхаб живут одним ключом и ходят на сервер одним разделом,
 // как каза. Ключа нет — координаты не заданы: это и есть первый
 // запуск, по нему показывается приветственный экран.
@@ -216,6 +217,9 @@ export function savePrayer(prayer) {
     madhhab: PRAYER_SHADOW[prayer.madhhab] ? prayer.madhhab : 'shafi',
     method: PRAYER_METHODS.indexOf(prayer.method) >= 0 ? prayer.method : PRAYER_METHOD_DEFAULT,
   }))) return false;
+  // Метка записи для конвертов LWW (P1-3, js/data/storage.js): правка
+  // пользователя — раздел становится свежее
+  markSectionWritten('prayer');
   bus.emit('data:changed');
   return true;
 }

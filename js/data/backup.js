@@ -8,7 +8,7 @@ import { QAZA_LOG_KEY, QAZA_STORAGE_KEY, loadQaza, loadQazaLog, validQazaLogDate
 import { invalidateRecordsCache, loadRecords } from './records.js';
 import { loadSchedule } from './schedule.js';
 import { SLEEP_KEY, SLEEP_MAX_MINUTES, loadSleep, sleepDurationMinutes, sleepTimeMinutes, validSleepHistory } from './sleep.js';
-import { STORAGE_KEYS, loadPlannerEnvelope } from './storage.js';
+import { SECTION_WRITE_TS_KEY, STORAGE_KEYS, loadPlannerEnvelope, sectionWriteTsJson } from './storage.js';
 import { normalizePlannerV1 } from '../sync/merge.js';
 import { planPlannerApply } from '../sync/sync.js';
 import { hasData, validCloudArchive, validCloudSchedule } from '../sync/core.js';
@@ -277,6 +277,25 @@ export function applyBackup(data) {
     stage.push({ key: STORAGE_KEYS.plannerEnvelope, value: plannerStage.envValue });
     stage.push({ key: MATRIX_STORAGE_KEY, value: plannerStage.tasksValue });
   }
+
+  // Метки записи восстановленных цельных разделов (P1-3, js/data/storage.js).
+  // Импорт — действие пользователя «сейчас»: копия должна победить конверты
+  // других устройств при следующей сверке, а не быть затёртой ими. Условия —
+  // ровно те же, по которым разделы попали в stage выше. Запись карты — тем
+  // же stage: откат импорта возвращает и метки.
+  const writeTsUpdates = {};
+  if (data.qaza) writeTsUpdates.qaza = Date.now();
+  if (data.prayer && typeof data.prayer === 'object' && !Array.isArray(data.prayer)) {
+    writeTsUpdates.prayer = Date.now();
+  }
+  if (data.fast && typeof data.fast === 'object' && !Array.isArray(data.fast)) {
+    writeTsUpdates.fast = Date.now();
+  }
+  if (data.schedule && validCloudSchedule(data.schedule)) {
+    writeTsUpdates.schedule = Date.now();
+  }
+  const writeTsJson = sectionWriteTsJson(writeTsUpdates);
+  if (writeTsJson) stage.push({ key: SECTION_WRITE_TS_KEY, value: writeTsJson });
 
   // ── Фаза 2: снимок предыдущего состояния каждого ключа stage ──
   // Журнал — он же протокол отката: written отмечает уже записанные ключи

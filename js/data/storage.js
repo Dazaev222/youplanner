@@ -150,3 +150,80 @@ export function plannerObserveVersions(env, snapshot) {
   });
   return env;
 }
+
+// ── Метки записи цельных разделов (аудит P1-3) ──────────────────────────────
+// Цельные разделы qaza/prayer/fast/schedule ходят между устройствами в
+// конвертах {v, ts}: v — полезные данные раздела, ts — часы отправителя на
+// момент записи раздела. Без своей метки записи приёмнику нечего сравнивать:
+// серверный снимок, у которого новее метка всего узла (updatedAt), переписывал
+// раздел целиком — и правка, сделанная позже на другом устройстве, терялась.
+// Метки живут СОСЕДНИМ ключом, а не внутри данных разделов: те читают напрямую
+// ассистент и файловые копии (js/ui/assistant-view.js, js/data/backup.js), и
+// менять их форму нельзя. Ключ — состояние устройства: на сервер не уходит и
+// в файловые копии не входит.
+export const SECTION_WRITE_TS_KEY = 'youplanner.sync.section-writes';
+
+// Карта меток чтением с проверкой: битая строка или чужая форма — «меток нет»,
+// вызывающий продолжает работу с нулевыми метками (как до введения конвертов).
+export function loadSectionWriteTs() {
+  let raw = null;
+  try {
+    raw = typeof localStorage === 'undefined' ? null : localStorage.getItem(SECTION_WRITE_TS_KEY);
+  } catch (e) {
+    return {};
+  }
+  if (!raw) return {};
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (e) {
+    return {};
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return {};
+  const map = {};
+  const names = Object.keys(parsed);
+  for (let i = 0; i < names.length; i++) {
+    const ts = Number(parsed[names[i]]);
+    if (Number.isFinite(ts) && ts >= 0) map[names[i]] = ts;
+  }
+  return map;
+}
+
+// Метка записи раздела: нет метки — 0 («данные писаны до введения конвертов»)
+export function sectionWrittenTs(section) {
+  const map = loadSectionWriteTs();
+  const ts = Number(map[section]);
+  return Number.isFinite(ts) ? ts : 0;
+}
+
+// Метка записи раздела. ts не задан — часы устройства сейчас (правка
+// пользователя). Записи при ЧТЕНИИ (loadQaza под saveNormalized) метку не
+// двигают: нормализация — не правка, иначе время записи подменялось бы
+// временем чтения, и сравнение конвертов превращалось бы в гонку публикаций.
+export function markSectionWritten(section, ts) {
+  const value = typeof ts === 'number' && Number.isFinite(ts) ? ts : Date.now();
+  const map = loadSectionWriteTs();
+  map[section] = value;
+  return safeSetItem(SECTION_WRITE_TS_KEY, JSON.stringify(map));
+}
+
+// Карта с добавленными метками одной JSON-строкой — для stage-записи
+// (applyCloudData/applyMergedFromCloud/applyBackup): null — обновлять нечего.
+// Отдельная функция, а не markSectionWritten в цикле: карта обязана писаться
+// тем же атомарным stage с откатом, что и сами разделы, — иначе сбой записи
+// посреди применения оставил бы метку, не подкреплённую данными (или наоборот).
+export function sectionWriteTsJson(updates) {
+  if (!updates || typeof updates !== 'object') return null;
+  const names = Object.keys(updates);
+  if (names.length === 0) return null;
+  const map = loadSectionWriteTs();
+  let changed = false;
+  for (let i = 0; i < names.length; i++) {
+    const ts = Number(updates[names[i]]);
+    if (!Number.isFinite(ts) || map[names[i]] === ts) continue;
+    map[names[i]] = ts;
+    changed = true;
+  }
+  if (!changed) return null;
+  return JSON.stringify(map);
+}

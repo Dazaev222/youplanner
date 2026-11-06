@@ -8,7 +8,8 @@ import { getRecord, setRecord } from './records.js';
 // безвреден: обе стороны зовут друг друга только внутри функций, и на
 // загрузке модулей ни одна ещё не работает
 import { qazaDoneOn } from './stats.js';
-import { saveNormalized } from '../sync/core.js';
+import { normalizing, saveNormalized } from '../sync/core.js';
+import { markSectionWritten } from './storage.js';
 export const QAZA_STORAGE_KEY = 'youplanner.qaza';
 // Привычка, которая показывает счётчик каза за день. Id из спеки трекера:
 // дефолтные привычки имеют стабильные id h1…h12.
@@ -184,6 +185,12 @@ export function loadQaza(skipSave = false) {
 }
 export function saveQaza(qaza) {
   if (!safeSetItem(QAZA_STORAGE_KEY, JSON.stringify(qaza))) return false;
+  // Метка записи для конвертов LWW (P1-3, js/data/storage.js): правка
+  // пользователя делает раздел свежее. Нормализующая запись при чтении
+  // (loadQaza переписывает состояние под saveNormalized на каждом старте) —
+  // не правка: двигай она метку, время записи подменялось бы временем
+  // чтения/публикации, и сравнение конвертов теряло бы смысл.
+  if (!normalizing) markSectionWritten('qaza');
   bus.emit('data:changed');
   return true;
 }

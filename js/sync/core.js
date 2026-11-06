@@ -25,6 +25,13 @@ export const FIREBASE_URL = 'https://youplanner-5c2f5-default-rtdb.firebaseio.co
 // поэтому вложенный /backups стирался бы каждой же синхронизацией
 // сразу после записи. Соседний корень основной PUT не трогает.
 export const FIREBASE_BACKUPS_URL = 'https://youplanner-5c2f5-default-rtdb.firebaseio.com/youplanner-d8aaea12-60e6-4ac9-973c-46c19b387cd9-backups';
+// Состояние планировщика (plannerV1) — СОСЕДНИЙ корень по той же причине, что
+// и бэкапы выше: PUT на FIREBASE_URL заменяет узел целиком, и клиент на кэше
+// ниже v43, не знающий ключа plannerV1, стирал бы Матрицу с сервера каждым
+// корневым PUT (status.md, заходит 2026-11-05). Соседний корень старый клиент
+// не адресует вовсе, поэтому данные переживают любой его PUT. Правила узла —
+// в database.rules.json (запись только владельцу, валидатор схемы).
+export const FIREBASE_PLANNER_URL = 'https://youplanner-5c2f5-default-rtdb.firebaseio.com/youplanner-d8aaea12-60e6-4ac9-973c-46c19b387cd9-planner';
 export const SYNC_TS_KEY = 'youplanner.sync.ts';
 // Сколько версий держим в узле бэкапов (FIREBASE_BACKUPS_URL)
 export const BACKUP_LIMIT = 10;
