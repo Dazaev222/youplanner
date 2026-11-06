@@ -768,8 +768,8 @@ export function editSchedule(task, value, today) {
     legacyDue: typeof value.due === 'string' ? value.due : null,
   }).schedule;
   const previousRepeat = plainObject(base.schedule) ? base.schedule.repeat : null;
-  // Сменное правило — новая серия (Б7.9); преancor менять нельзя, поэтому
-  // series обнуляется и создаётся заново с index=1.
+  // Сменное правило — новая серия (Б7.9); прежнюю серию пересчитывать
+  // нельзя, поэтому series обнуляется и создаётся заново с index=1.
   if (JSON.stringify(normalized.repeat) !== JSON.stringify(previousRepeat)) normalized.series = null;
 
   const next = Object.assign({}, base, {
