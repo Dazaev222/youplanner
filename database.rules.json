@@ -9,7 +9,7 @@
         ".validate": "newData.child('schemaVersion').val() === 1",
         "entries": {
           "$entryId": {
-            ".validate": "newData.child('id').val() === $entryId && (!newData.hasChild('fields') || newData.child('fields').isOther())"
+            ".validate": "newData.child('id').val() === $entryId && (!newData.hasChild('fields') || (!newData.child('fields').isString() && !newData.child('fields').isNumber() && !newData.child('fields').isBoolean()))"
           }
         },
         "tombstones": {
@@ -25,7 +25,7 @@
       ".validate": "newData.child('schemaVersion').val() === 1",
       "entries": {
         "$entryId": {
-          ".validate": "newData.child('id').val() === $entryId && (!newData.hasChild('fields') || newData.child('fields').isOther())"
+          ".validate": "newData.child('id').val() === $entryId && (!newData.hasChild('fields') || (!newData.child('fields').isString() && !newData.child('fields').isNumber() && !newData.child('fields').isBoolean()))"
         }
       },
       "tombstones": {

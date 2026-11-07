@@ -3,6 +3,22 @@
     "rules": "database.rules.local.json"
   },
   "hosting": {
+    "public": ".",
+    "ignore": [
+      "node_modules/**",
+      ".git/**",
+      ".test_tmp/**",
+      ".scratch/**",
+      "_orchestra_tasks/**",
+      "_tools/**",
+      "docs/**",
+      "tests/**",
+      "**/*.md",
+      "package.json",
+      "package-lock.json",
+      "database.rules.json",
+      "database.rules.local.json"
+    ],
     "headers": [
       {
         "source": "/**",
