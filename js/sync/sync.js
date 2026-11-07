@@ -69,27 +69,30 @@ export let deniedStatus = 0;
 // getAuthToken() не бросает и при неудаче не выходит в сеть до конца своей
 // 5-минутной паузы, так что вызов здесь дешёвый.
 //
-// Токен ходит ЗАГОЛОВКОМ Authorization: Bearer <idToken> (REST RTDB принимает
-// и легаси-параметр ?auth= в URL, и этот заголовок), не параметром ?auth=:
-// URL запроса оседает в логах серверов, прокси и истории браузера, заголовок —
-// нигде из них не остаётся (аудит секретов, задача 3.1).
+// Токен ходит легаси-параметром ?auth=<idToken> в URL. Возврат с Bearer
+// (эпик-3, «аудит секретов»): живая проверка 2026-11-07 показала, что RTDB
+// REST отвечает 401 «Unauthorized request.» на Authorization: Bearer с
+// Firebase ID-токеном при ЛЮБОЙ его свежести (валидный токен подтверждался
+// успешным securetoken-обменом), а принимает ID-токен только параметром
+// ?auth= — заголовок Bearer он резервирует для OAuth2 access-токенов.
+// Компромисс осознанный: ?auth= оседает в логах серверов, компенсация —
+// App Check (список «Предложено»).
 //
 // Ответ 401 «токен просрочен» (INVALID_ID_TOKEN и родня) — не отказ правил,
 // а протухший id-токен: часы устройства врут или страница спала дольше часа.
-// Такой ответ лечится здесь же: forceRefreshAuthToken() меняет refresh-токен
+// Такой ответ лечится здесь же: refreshAuthToken() меняет refresh-токен
 // на свежую пару, и ИСХОДНЫЙ запрос повторяется один раз с новым токеном.
 // «Permission denied» (правила не пускают) и повторный 401 после refresh
 // обновлением не лечатся — это уже честный sync:denied.
 function authedFetch(url, options, token) {
   const guard = syncGuard();
-  const request = Object.assign({}, options, { signal: guard.signal });
+  let requestUrl = url;
   if (token) {
-    // Чужие заголовки вызова (X-Firebase-ETag, Content-Type) сохраняются:
-    // Bearer добавляется к ним, а не вместо них.
-    request.headers = Object.assign({}, (options && options.headers) || {});
-    request.headers['Authorization'] = 'Bearer ' + token;
+    requestUrl = url + (url.indexOf('?') === -1 ? '?' : '&') +
+      'auth=' + encodeURIComponent(token);
   }
-  return fetch(url, request).finally(guard.cancel);
+  return fetch(requestUrl, Object.assign({}, options, { signal: guard.signal }))
+    .finally(guard.cancel);
 }
 
 // Протух ли токен по этому ответу. Тело читается СКЛОНА текстом (не json()):
@@ -149,7 +152,7 @@ async function fetchWithTimeout(url, options) {
 
   // 401 лечится токеном в двух случаях. (а) Ходили С токеном, и тело говорит
   // «протух» — классика. (б) Ходили БЕЗ токена: getAuthToken() вернул null
-  // из паузы после разового сбоя добычи (запрос уехал без Bearer, сервер
+  // из паузы после разового сбоя добычи (запрос уехал без ?auth=, сервер
   // ответил 401), а refresh-токен в хранилище жив — владелец при этом
   // авторизован, и молча отказываться от лечения нельзя (баг владельца
   // 2026-11-07: настройки показывают email/UID, синк ловит 401). Обмен при

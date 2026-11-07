@@ -108,6 +108,12 @@ export function renderOwnerSettings() {
 // и повторный тост перекрывал бы интерфейс бесконечно; строка Настроек
 // (renderOwnerSettings) остаётся видимой всегда.
 let deniedToastShown = false;
+// Тост «Сессия истекла, войдите заново» уже показан: syncFromCloud делает
+// несколько запросов, и ПОСЛЕ принудительного разлогина каждый из них
+// получает свой 401 -> sync:denied затирал бы объяснение общим тостом
+// «Синхронизация запрещена». Один раз за сессию — та же семантика, что у
+// deniedToastShown ниже.
+let authExpiredToastShown = false;
 
 /* ---------- Экспорт и импорт данных -------------------------------------- */
 
@@ -1565,11 +1571,26 @@ bus.on('sync:denied', function (payload) {
   // ошибку там, где её нет. Строка Настроек обновляется всегда, тост — один
   // раз за сессию (deniedToastShown выше).
   renderOwnerSettings();
+  if (authExpiredToastShown) {
+    // Принудительный разлогин уже объяснён тостом «Сессия истекла»: хвост
+    // 401 от запросов того же раунда синка не должен затирать его общим
+    // «Синхронизация запрещена».
+    return;
+  }
   if (!deniedToastShown) {
     deniedToastShown = true;
     showToast('Синхронизация запрещена правилами: нужен вход владельца' +
       ((payload && payload.status) ? ' (код ' + payload.status + ')' : ''));
   }
+});
+bus.on('sync:auth-expired', function () {
+  // Чистый разлогин (refresh-токен мёртв, отказ обмена 4xx): хранилище уже
+  // стёрто firebase-auth.js, и без этой строки человек узнал бы о выходе
+  // только по пропавшей синхронизации — тост объясняет причину и что делать,
+  // Настройки перерисовываются без email/UID мёртвой сессии.
+  authExpiredToastShown = true;
+  renderOwnerSettings();
+  showErrorToast('Сессия истекла, войдите заново');
 });
 
 document.addEventListener('DOMContentLoaded', init);

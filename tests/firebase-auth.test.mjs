@@ -864,6 +864,21 @@ test('пауза после сбоя добычи: беззаголовочны�
     'пауза не снята успешным обменом: следующий синк снова уйдёт без токена');
 });
 
+test('мёртвый refresh-токен: тост «Сессия истекла, войдите заново» и Настройки без email/UID', async () => {
+  const server = makeOwnerDataServer();
+  server.state.refreshBehavior = 'dead';
+  const app = await loadExpiredCase(server);
+
+  await app.context.syncFromCloud();
+
+  assert.equal(app.toastNode.textContent, 'Сессия истекла, войдите заново',
+    'тост о разлогине не показан: событие sync:auth-expired улетело в пустоту');
+  assert.equal(app.sandbox.localStorage.getItem(AUTH_OWNER_KEY), null,
+    'запись владельца не стёрта: Настройки продолжают показывать email/UID');
+  assert.equal(app.sandbox.localStorage.getItem(AUTH_REFRESH_KEY), null,
+    'refresh-токен не стёрт при чистом логауте');
+});
+
 test('401 Permission denied — правила, а не протухший токен: refresh не дёргается', async () => {
   const server = makeOwnerDataServer();
   server.state.dataError = 'Permission denied';
@@ -978,7 +993,9 @@ function makeSlowSecuretokenServer(clock) {
       const bearer = headers && typeof headers.Authorization === 'string'
         ? headers.Authorization.replace(/^Bearer\s+/i, '')
         : '';
-      if (bearer === 'tok-new') return Promise.resolve(okJson({}));
+      const authParam = (u.match(/[?&]auth=([^&]+)/) || [])[1] || '';
+      const token = decodeURIComponent(authParam) || bearer;
+      if (token === 'tok-new') return Promise.resolve(okJson({}));
       return Promise.resolve({
         ok: false,
         status: 401,

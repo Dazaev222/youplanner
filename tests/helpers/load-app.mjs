@@ -12,6 +12,16 @@ import { getAppJs } from './sources.mjs';
 export function loadApp({ fetchImpl } = {}) {
   const storage = new Map();
 
+  // Узел #toast: showToast/showErrorToast пишут в него через getElementById.
+  // Тесты читают textContent, чтобы проверить текст тоста (например, тост
+  // «Сессия истекла, войдите заново» при sync:auth-expired). addEventListener
+  // обязателен: bindToastGestures вешает жесты на живой элемент.
+  const toastNode = {
+    textContent: '',
+    hidden: true,
+    addEventListener() {},
+  };
+
   const sandbox = {
     localStorage: {
       getItem: (key) => (storage.has(key) ? storage.get(key) : null),
@@ -31,7 +41,7 @@ export function loadApp({ fetchImpl } = {}) {
     document: {
       addEventListener() {},
       removeEventListener() {},
-      getElementById() { return null; },
+      getElementById(id) { return id === 'toast' ? toastNode : null; },
       querySelector() { return null; },
       querySelectorAll() { return []; },
       createElement() { return { innerHTML: '', content: null }; },
@@ -83,6 +93,7 @@ export function loadApp({ fetchImpl } = {}) {
   return {
     sandbox,
     context,
+    toastNode,
     // выполнить код в том же контексте (доступ к глобальным лексическим
     // const — например bus или syncPending — возможен только изнутри)
     run(code) {

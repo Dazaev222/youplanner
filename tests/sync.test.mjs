@@ -147,7 +147,7 @@ function makeAuthAwareFetch() {
   return fetchImpl;
 }
 
-test('ключ задан: все firebaseio-обмены уходят с Bearer-заголовком, счётчики не меняются', async () => {
+test('ключ задан: все firebaseio-обмены уходят с ?auth=, Bearer-заголовка нет', async () => {
   const fetchImpl = makeAuthAwareFetch();
   const { context } = loadApp({ fetchImpl });
   context.setFirebaseApiKey('AIzatest');
@@ -159,10 +159,15 @@ test('ключ задан: все firebaseio-обмены уходят с Bearer
   });
   assert.ok(firebaseCalls.length > 0, 'firebaseio-вызовы не состоялись');
   for (const c of firebaseCalls) {
-    assert.equal(c.headers['Authorization'], 'Bearer tok1',
-      'обмен без Bearer-заголовка: ' + c.url);
-    assert.ok(!c.url.includes('auth='),
-      'токен утёк в URL (логи серверов, история браузера): ' + c.url);
+    // RTDB REST признаёт Firebase ID-токен только параметром ?auth=:
+    // Authorization: Bearer он отвечает 401 «Unauthorized request.» при
+    // любой свежести токена (живая проверка 2026-11-07). Компромисс —
+    // токен в URL оседает в логах; компенсация — App Check («Предложено»).
+    const auth = (c.url.match(/[?&]auth=([^&]+)/) || [])[1];
+    assert.equal(decodeURIComponent(auth || ''), 'tok1',
+      'обмен без ?auth= токена: ' + c.url);
+    assert.ok(!c.headers['Authorization'],
+      'заголовок Authorization вернулся (RTDB его отвергает): ' + c.url);
   }
   // Фильтры счётчиков по подстроке firebaseio не должны заметить auth-серверы.
   // Чтений два: бэкап плюс повторная сверка перед PUT (B.2), оба с токеном.
