@@ -14,12 +14,12 @@ PWA-трекер привычек: таблица недели и карточк
   Firebase не кэшируется, vendor-файлы pdf.js — в прекэше ASSETS.
 - Тесты — стандартная библиотека Node (`node --test`), песочница `node:vm`
   и настоящее исполнение модульного графа; браузерные прогоны — Playwright
-  (`.scratch/pdf-test/`, ассистент: сеть, PDF, офлайн, вёрстка).
+  (постоянные наборы `tests/e2e/`: chaos, user-crash, assistant-features).
 
 ## Структура
 
 ```
-index.html          # разметка + 19 стилей + единственный <script type="module">
+index.html          # разметка + 16 стилей + единственный <script type="module">
 styles/             # CSS по секциям исходного монолита (порядок = каскад)
 js/
 ├── app.js          # точка входа: главный экран, таблица, привычки, статистика,
@@ -33,9 +33,12 @@ js/
 ├── ui/             # state (appState, ui, isMobileView), вьюхи assistant/
 │                   # prayer/fast/sleep/qaza/schedule, main-table, stats
 └── vendor/         # pdf.js 4.10.38: pdf.min.mjs + pdf.worker.min.mjs
-tests/              # smoke (граф, id, импорты), bus, backup, sync, core,
-                    # modules, xss, timers, assistant, sleep, qaza-done,
-                    # sw-assets, schedule, fast
+tests/              # 60 наборов *.test.mjs: smoke (граф, id, импорты), bus,
+                    # backup, sync (CAS If-Match/412), merge, planner-узел,
+                    # tombstones, матрица (8 наборов), router, dates/dom,
+                    # xss, timers, assistant, sw-assets/sw-offline, csp…
+                    # tests/e2e/ — chaos, user-crash, assistant-features,
+                    # firebase-rules
 sw.js               # service worker (версия кэша растёт с каждым релизом)
 ```
 
@@ -84,13 +87,16 @@ sw.js               # service worker (версия кэша растёт с ка
 npm test
 ```
 
-`node --test "tests/*.test.mjs"`: **153/153** в 20 файлах. Дымовые (граф
+`node --test "tests/*.test.mjs"`: **823/823** в 60 файлах. Дымовые (граф
 модулей, связность id, отсутствие инлайн-обработчиков и дублей объявлений,
 каждый import находит export, нет неявных зависимостей), шина событий,
-разбор бэкапов, single-flight синхронизации, слияние снимков двух устройств
-(js/sync/merge.js), архивация историй (js/data/archive.js), debounce
-(js/core/debounce.js), Vision-вложения ассистента (assistant-view.js),
-утилиты ядра, исполнение
+разбор бэкапов, CAS-кольцо синхронизации (условная запись If-Match/412,
+троттлинг бэкап-снимка), single-flight синхронизации, слияние снимков двух
+устройств (js/sync/merge.js) и выделенный planner-узел, общие хелперы ядра
+(pluralDays, timeoutGuard), архивация историй (js/data/archive.js), debounce
+(js/core/debounce.js), матрица (задачи, расписание, напоминания, повторения,
+таймзоны, календарь, UI), роутер экранов, Vision-вложения ассистента
+(assistant-view.js), CSP, tombstones, исполнение
 модульного графа, XSS-экранирование пользовательских строк в рендерерах
 (привычки, таблица, расписание, статистика), снятие fallback-таймеров
 fetch (синхронизация, ассистент), умная нарезка PDF (чанкинг, отбор
@@ -104,6 +110,15 @@ JSON чужой схемы от сервера. Внешняя сеть блок
 Исторические 12 наборов в `.scratch` (1861 проверка) сохранены как
 регрессионный архив; штатный прогон — `npm test` + chaos.
 
+Краш-E2E (Playwright, постоянный набор): `node tests/e2e/user-crash.e2e.mjs` —
+8 реальных пользовательских сценариев, на каждом — сбор pageerror со сравнением
+с пустым массивом: создание и удаление привычки (включая long press),
+переключение всех вкладок подряд по реестру SCREENS (js/ui/router.js),
+стойкость настройки фона, стресс-офлайн с доставкой PUT после возврата сети,
+abort PUT сервером, битый JSON, 401 на GET/PUT без петли refresh-запросов.
+Ещё один Playwright-набор — `tests/e2e/assistant-features.e2e.mjs` (элементы
+чата ассистента).
+
 ## Ключевые правила проекта
 
 - `safeSetItem` защищает от `QuotaExceededError`; все `save*` возвращают
@@ -112,6 +127,15 @@ JSON чужой схемы от сервера. Внешняя сеть блок
   обязаны вызывать `invalidateRecordsCache()`.
 - Снимок с сервера валидируется `validCloud*` — битый не затирает локальные
   данные; бэкапы лежат в соседнем узле Firebase (PUT данных их не трогает).
+- Корневой PUT — условная запись (CAS): If-Match по ETag последней сверки;
+  412 — серверный снимок изменился: перечитать, слить, повторить.
+  Контрольный GET перед PUT убран — гонку двух устройств закрывает сервер,
+  а не второй запрос клиента.
+- Бэкап-снимок троттлится: не чаще раза за `BACKUP_MIN_INTERVAL_MS`
+  (5 минут, js/sync/core.js), в пропущенные обмены уходит null.
+- Общие хелперы живут в core, не в копиях: `pluralDays` (js/core/dates.js),
+  `midnightArcMinutes` (js/data/records.js), `timeoutGuard` (js/core/dom.js;
+  предел свой у слоя: синхронизация 20 с, auth 30 с, ассистент 60 с).
 - `BACKUP_VERSION = 11`; импорт старых копий отвергается.
 - Обновление ассетов — вместе с бампом версии кэша в `sw.js`.
 
@@ -191,6 +215,21 @@ node _tools/set-owner-uid.mjs --check         # сверить: один uid в�
 - `status.md` — текущий статус и бэклог.
 
 ## История
+
+- 2026-11-07/08 — сессия краш-теста: новый постоянный набор
+  tests/e2e/user-crash.e2e.mjs (8 пользовательских сценариев с нулевой
+  терпимостью к необработанным исключениям). Сеть синка: контрольный GET
+  перед корневым PUT убран — гонку двух устройств закрывает CAS, PUT несёт
+  If-Match по ETag последней сверки, чужая запись между GET и PUT отвечает
+  412 (перечитать, слить, повторить); бэкап-снимок не чаще раза за 5 минут
+  (BACKUP_MIN_INTERVAL_MS, js/sync/core.js). Три дубля выведены в core:
+  pluralDays (js/core/dates.js), midnightArcMinutes (js/data/records.js),
+  timeoutGuard (js/core/dom.js, таймауты 20/30/60 с — синк/auth/ассистент).
+  ПК-фиксы: аккордеон «Редактирование привычек» раскрывается и на ПК
+  (правило раскрытия жило только в mobile.css, styles/habits-edit.css),
+  Матрица Эйзенхауэра доступна на ПК через хаб статистики (строка
+  «Матрица Эйзенхауэра» в stats-view рядом с «Ураза»/«Привычки»).
+  `npm test` 153 → 823 (20 → 60 файлов), SW v55 → v56.
 
 - 2026-10-31 — Vision (NIGHT_REPORT §4): фото в чате ассистента — камера
   у поля ввода, до 3 снимков, сжатие общим compressImage (js/data/image.js,
