@@ -23,7 +23,7 @@ import {
   mergeCloudIntoLocal, mergeTombstonesById, mergePlannerV1, normalizePlannerV1,
   plannerCanonicalJson, sectionEnvelopeWins, unwrapSection,
 } from './merge.js';
-import { forceRefreshAuthToken, getAuthToken } from '../data/firebase-auth.js';
+import { refreshAuthToken, getAuthToken, hasSessionRefreshToken } from '../data/firebase-auth.js';
 export let syncTimer = null;
 // Сетевой таймаут обменов. Без него зависшее соединение (сеть отдаёт TCP,
 // но не отвечает) держит syncExchange открытым вечно: правки встают в
@@ -92,21 +92,34 @@ function authedFetch(url, options, token) {
   return fetch(url, request).finally(guard.cancel);
 }
 
-// Протух ли токен по этому ответу. Тело читается с клона, чтобы сам ответ
-// остался читаемым для вызывающих; в песочницах без Response.clone тело
+// Протух ли токен по этому ответу. Тело читается СКЛОНА текстом (не json()):
+// RTDB REST пишет 401 и JSON'ом ({"error": "строка"}), и текстом — прокси и
+// нестандартные обёртки вообще отвечают без JSON, и прежняя попытка
+// probe.json() кидала на них исключение, ответ навсегда оставался «обычным
+// отказом», и лечение токеном не запускалось (баг владельца 2026-11-07).
+// Разбор: JSON с полем error — сверяем сообщение со списком протухших;
+// нечитаемое/не-JSON непустое тело — кандидат на протухший токен (отказ
+// правил «Permission denied» ходит строго JSON'ом и сюда не попадает);
+// пустое тело — обычный отказ. В песочницах без Response.clone тело
 // читается напрямую — тела не-ok ответов вызывающие всё равно не читают.
-// Формы ошибки обе легальны: RTDB REST пишет {"error": "строка"},
-// identitytoolkit — {"error": {"message": "…"}}.
 async function isExpiredTokenResponse(response) {
   if (!response || response.status !== 401) return false;
-  let message = '';
+  let raw = '';
   try {
     const probe = typeof response.clone === 'function' ? response.clone() : response;
-    const body = await probe.json();
+    raw = await probe.text();
+  } catch (e) {
+    return false;
+  }
+  if (!raw) return false;
+  let message = raw;
+  try {
+    const body = JSON.parse(raw);
     const error = body && body.error;
+    if (error === undefined || error === null) return false;
     message = typeof error === 'string' ? error : (error && error.message) || '';
   } catch (e) {
-    return false; // тело не читается — ответ остаётся обычным отказом
+    return true; // не-JSON непустое тело — кандидат на протухший токен
   }
   return /INVALID_ID_TOKEN|TOKEN_EXPIRED|EXPIRED|INVALID_AUTH_TOKEN/i.test(message);
 }
@@ -134,14 +147,22 @@ async function fetchWithTimeout(url, options) {
   const token = await getAuthToken();
   const response = await authedFetch(url, options, token);
 
-  // Протухший id-токен: обновить пару токенов и повторить ИСХОДНЫЙ запрос
-  // один раз. Повтор оплачивается только новым токеном: refresh не удался
-  // (мёртвый refresh-токен, нет сети) — наружу уходит первый ответ как есть,
-  // а при 4xx-отказе обмена firebase-auth сам разлогинит и сообщит событием.
+  // 401 лечится токеном в двух случаях. (а) Ходили С токеном, и тело говорит
+  // «протух» — классика. (б) Ходили БЕЗ токена: getAuthToken() вернул null
+  // из паузы после разового сбоя добычи (запрос уехал без Bearer, сервер
+  // ответил 401), а refresh-токен в хранилище жив — владелец при этом
+  // авторизован, и молча отказываться от лечения нельзя (баг владельца
+  // 2026-11-07: настройки показывают email/UID, синк ловит 401). Обмен при
+  // успехе снимает паузу сам (exchangeRefreshToken: authPausedUntil = 0).
+  // Повтор оплачивается только новым токеном: refresh не удался (мёртвый
+  // refresh-токен, нет сети) — наружу уходит первый ответ как есть, а при
+  // 4xx-отказе обмена firebase-auth сам разлогинит и сообщит событием.
   // Ровно один повтор: ответ повтора дальше не проверяется — иначе упорный
   // 401 зациклил бы refresh.
-  if (token && await isExpiredTokenResponse(response)) {
-    const freshToken = await forceRefreshAuthToken();
+  const recoverable = response.status === 401 &&
+    (token ? await isExpiredTokenResponse(response) : hasSessionRefreshToken());
+  if (recoverable) {
+    const freshToken = await refreshAuthToken();
     if (freshToken) {
       const retried = await authedFetch(url, options, freshToken);
       noteDenied(retried);

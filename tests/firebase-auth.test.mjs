@@ -597,6 +597,8 @@ function makeOwnerDataServer() {
     // Текст ошибки в 401 данных: по умолчанию протухший токен, «Permission
     // denied» — отказ правил, который refresh-ом лечить нельзя
     dataError: 'INVALID_ID_TOKEN',
+    // Тело 401 данных: 'json' (как у RTDB REST) | 'raw' (текст, json() кидает)
+    dataBodyMode: 'json',
   };
   const impl = function (url, opts) {
     const u = String(url);
@@ -614,10 +616,20 @@ function makeOwnerDataServer() {
       if (token === 'tok-new' && !state.rejectNewToken) {
         return Promise.resolve(okJson({}));
       }
-      return Promise.resolve({
-        ok: false, status: 401,
-        json: function () { return Promise.resolve({ error: state.dataError }); },
-      });
+      const body401 = state.dataBodyMode === 'raw'
+        ? {
+            ok: false, status: 401,
+            text: function () { return Promise.resolve(state.dataError); },
+            json: function () { return Promise.reject(new Error('тело не JSON')); },
+          }
+        : {
+            ok: false, status: 401,
+            text: function () {
+              return Promise.resolve(JSON.stringify({ error: state.dataError }));
+            },
+            json: function () { return Promise.resolve({ error: state.dataError }); },
+          };
+      return Promise.resolve(body401);
     }
     if (u.indexOf('securetoken.googleapis.com') !== -1) {
       state.securetokenCalls.push({ url: u, body: opts && opts.body });
@@ -796,6 +808,62 @@ test('сеть отвалилась на обмене refresh-токена: се
   assert.equal(result.reachable, false);
 });
 
+test('401 телом НЕ-JSON (прокси/нестандартный сервер): refresh и повтор с новым токеном', async () => {
+  const server = makeOwnerDataServer();
+  server.state.dataBodyMode = 'raw';
+  server.state.dataError = 'Unauthorized';
+  const app = await loadExpiredCase(server);
+  const state = server.state;
+
+  const result = await app.context.syncFromCloud();
+
+  assert.equal(state.securetokenCalls.length, 1,
+    'нечитаемое тело 401 не распознано как протухший токен: обмена нет');
+  assert.ok(callsWithAuth(state.dataCalls, 'tok-new').length >= 1,
+    'повтор с новым токеном не состоялся');
+  assert.equal(result.reachable, true, 'нечитаемое тело 401 не вылечено');
+  assert.equal(app.run('deniedStatus'), 0, 'вылеченный 401 залип в deniedStatus');
+});
+
+test('отказ правил «Permission denied»: refresh НЕ вызывается', async () => {
+  const server = makeOwnerDataServer();
+  server.state.dataError = 'Permission denied';
+  const app = await loadExpiredCase(server);
+  const state = server.state;
+
+  const result = await app.context.syncFromCloud();
+
+  assert.equal(state.securetokenCalls.length, 0,
+    'отказ правил лечится обменом токена — так не должно быть');
+  assert.equal(result.reachable, false, 'отказ правил должен остаться отказом');
+  assert.equal(app.run('deniedStatus'), 401, 'отказ правил не доведён до deniedStatus');
+});
+
+test('пауза после сбоя добычи: беззаголовочный 401 лечится обменом на следующем синке', async () => {
+  const server = makeOwnerDataServer();
+  server.state.refreshBehavior = 'network';
+  const app = await loadExpiredCase(server);
+  const state = server.state;
+
+  await app.context.resetAuthForTests(); // кэш пуст, refresh-токен в хранилище
+  const first = await app.context.syncFromCloud();
+  assert.equal(first.reachable, false, 'первый синк при мёртвой сети не может дойти');
+  assert.equal(callsWithAuth(state.dataCalls, 'tok-new').length, 0,
+    'без токена и без обмена повтор невозможен');
+
+  // Сеть вылечилась: следующий синк идёт в ПАУЗЕ getAuthToken() — запрос
+  // уезжает без Bearer, сервер отвечает 401. Живой refresh-токен в хранилище
+  // обязан вылечить это обменом (баг владельца: авторизован, но 401).
+  server.state.refreshBehavior = 'ok';
+  const second = await app.context.syncFromCloud();
+  assert.equal(second.reachable, true,
+    'вылечившаяся сеть не подхватилась: беззаголовочный 401 не лечится обменом');
+  assert.ok(callsWithAuth(state.dataCalls, 'tok-new').length >= 1,
+    'повтор с новым токеном не состоялся');
+  assert.equal(await app.context.getAuthToken(), 'tok-new',
+    'пауза не снята успешным обменом: следующий синк снова уйдёт без токена');
+});
+
 test('401 Permission denied — правила, а не протухший токен: refresh не дёргается', async () => {
   const server = makeOwnerDataServer();
   server.state.dataError = 'Permission denied';
@@ -914,6 +982,9 @@ function makeSlowSecuretokenServer(clock) {
       return Promise.resolve({
         ok: false,
         status: 401,
+        text: function () {
+          return Promise.resolve(JSON.stringify({ error: 'INVALID_ID_TOKEN' }));
+        },
         json: function () { return Promise.resolve({ error: 'INVALID_ID_TOKEN' }); },
       });
     }

@@ -69,7 +69,14 @@ function okJson(data) {
 }
 
 function failJson(status, error) {
-  return { ok: false, status: status, json: () => Promise.resolve(error) };
+  // text() обязателен: обёртка синка читает тело 401 текстом (RTDB отвечает
+  // и JSON'ом, и текстом), не-JSON непустое тело считается протухшим токеном
+  return {
+    ok: false,
+    status: status,
+    text: () => Promise.resolve(JSON.stringify(error)),
+    json: () => Promise.resolve(error),
+  };
 }
 
 // ── Мок-сервер: одна база, честная auth-семантика ───────────────────────────
