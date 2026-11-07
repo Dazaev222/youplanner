@@ -104,10 +104,12 @@ test('выбор снимка: чистое правило timestamp и pending-
 
 // ── Аутентификация (js/data/firebase-auth.js) ──────────────────────────────
 // Токен добывается централизованно в fetchWithTimeout: при заданном ключе
-// каждый firebaseio-обмен обязан уйти с ?auth=, при недоступной аутентификации
-// — как раньше, без auth-параметра. Ключ подставляется через
-// context.setFirebaseApiKey(): верхнеуровневая function-объявление доступно
-// как свойство контекста песочницы.
+// каждый firebaseio-обмен обязан уйти с заголовком Authorization: Bearer, при
+// недоступной аутентификации — как раньше, без заголовка и без auth-параметра
+// в URL (токен в URL попадает в логи серверов и историю браузера; аудиту
+// секретов, задача 3.1, это обходится переводом на Bearer-заголовок). Ключ
+// подставляется через context.setFirebaseApiKey(): верхнеуровневая
+// function-объявление доступно как свойство контекста песочницы.
 
 function makeAuthAwareFetch() {
   const calls = [];
@@ -123,7 +125,7 @@ function makeAuthAwareFetch() {
 
   function fetchImpl(url, opts = {}) {
     const method = (opts && opts.method) || 'GET';
-    calls.push({ url: String(url), method });
+    calls.push({ url: String(url), method, headers: (opts && opts.headers) || {} });
     return Promise.resolve({
       ok: true,
       status: 200,
@@ -145,7 +147,7 @@ function makeAuthAwareFetch() {
   return fetchImpl;
 }
 
-test('ключ задан: все firebaseio-обмены уходят с ?auth=, счётчики не меняются', async () => {
+test('ключ задан: все firebaseio-обмены уходят с Bearer-заголовком, счётчики не меняются', async () => {
   const fetchImpl = makeAuthAwareFetch();
   const { context } = loadApp({ fetchImpl });
   context.setFirebaseApiKey('AIzatest');
@@ -157,9 +159,10 @@ test('ключ задан: все firebaseio-обмены уходят с ?auth=
   });
   assert.ok(firebaseCalls.length > 0, 'firebaseio-вызовы не состоялись');
   for (const c of firebaseCalls) {
-    assert.ok(
-      c.url.includes('?auth=tok1') || c.url.includes('&auth=tok1'),
-      'обмен без auth-параметра: ' + c.url);
+    assert.equal(c.headers['Authorization'], 'Bearer tok1',
+      'обмен без Bearer-заголовка: ' + c.url);
+    assert.ok(!c.url.includes('auth='),
+      'токен утёк в URL (логи серверов, история браузера): ' + c.url);
   }
   // Фильтры счётчиков по подстроке firebaseio не должны заметить auth-серверы.
   // Чтений два: бэкап плюс повторная сверка перед PUT (B.2), оба с токеном.
@@ -169,8 +172,8 @@ test('ключ задан: все firebaseio-обмены уходят с ?auth=
 
 test('аутентификация недоступна: обмен идёт как раньше, без auth-параметра', async () => {
   const calls = [];
-  const fetchImpl = function (url) {
-    calls.push({ url: String(url) });
+  const fetchImpl = function (url, opts = {}) {
+    calls.push({ url: String(url), headers: (opts && opts.headers) || {} });
     return Promise.reject(new Error('нет сети'));
   };
   const { context, sandbox } = loadApp({ fetchImpl });
@@ -185,6 +188,8 @@ test('аутентификация недоступна: обмен идёт к�
   for (const c of firebaseCalls) {
     assert.ok(!c.url.includes('auth='),
       'graceful-деградация сломана, auth попал в URL: ' + c.url);
+    assert.ok(!c.headers['Authorization'],
+      'graceful-деградация сломана, Bearer-заголовок пустого токена ушёл в запрос: ' + c.url);
   }
   // signUp предпринят один раз: пауза аутентификации держит остальные обмены
   const authCalls = calls.filter(function (c) {

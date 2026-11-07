@@ -246,7 +246,9 @@ function pushHistory(role, content) {
 //     события-подобные объекты и таймеры через инъекцию, поэтому её гоняет
 //     node --test (tests/assistant-longpress.test.mjs);
 //   * bindAssistantChatLongPress — проводка на ленту: превращает события
-//     #assistant-chat в вызовы детектора, а срабатывание — в лист удаления.
+//     #assistant-chat в вызовы детектора, а срабатывание — в попап удаления
+//     возле пузыря (смена 2026-11-07: прежняя шторка выезжала «красной
+//     полосой» на весь низ и перекрывала таб-бар — см. секцию попапа ниже).
 //
 // Пузырь ленты, которому есть что удалять: индекс в истории кладётся на узел,
 // а не выводится из порядка детей. Узы, которых в истории нет (приветствие
@@ -344,33 +346,37 @@ export function createLongPressDetector(handlers, options) {
 export function bindAssistantChatLongPress(chat, options) {
   if (!chat || typeof chat.addEventListener !== 'function') return null;
 
-  // Индекс пузыря, на котором началось нажатие. На длинное нажатие открывается
-  // лист именно с ним — пузырь и реплика сходятся индексом, а не позицией
+  // Пузырь и его индекс, на котором началось нажатие. На долгое нажатие
+  // открывается попап именно с ними — пузырь и реплика сходятся индексом,
+  // а попап позиционируется по живому узлу пузыря
   let pressedIndex = null;
+  let pressedBubble = null;
 
   const detector = createLongPressDetector({
     onLongPress: function () {
       if (pressedIndex === null) return;
-      askAssistantDelete(pressedIndex);
+      askAssistantDelete(pressedIndex, pressedBubble);
     },
   }, options);
 
-  // Пузырь под пальцем/курсором: только реплики с индексом умеют удаляться
+  // Пузырь под пальцем/курсором: только реплики с индексом умеют удаляться.
+  // Возвращает сам узел (попапу нужен его rect), индекс вынимает onStart
   function deletableBubbleFrom(event) {
     const target = event && event.target;
     if (!target || typeof target.closest !== 'function') return null;
     const bubble = target.closest('.assistant-msg');
     if (!bubble || typeof bubble.hasAttribute !== 'function') return null;
     if (!bubble.hasAttribute('data-msg-index')) return null;
-    const index = Number(bubble.getAttribute('data-msg-index'));
-    if (!Number.isInteger(index) || index < 0) return null;
-    return index;
+    return bubble;
   }
 
   function onStart(event) {
-    const index = deletableBubbleFrom(event);
-    if (index === null) return;
+    const bubble = deletableBubbleFrom(event);
+    if (!bubble) return;
+    const index = Number(bubble.getAttribute('data-msg-index'));
+    if (!Number.isInteger(index) || index < 0) return;
     pressedIndex = index;
+    pressedBubble = bubble;
     detector.press(event);
   }
 
@@ -381,6 +387,7 @@ export function bindAssistantChatLongPress(chat, options) {
   function onEnd() {
     detector.release();
     pressedIndex = null;
+    pressedBubble = null;
   }
 
   function onContextMenu(event) {
@@ -406,44 +413,168 @@ export function bindAssistantChatLongPress(chat, options) {
   return detector;
 }
 
-// Лист подтверждения удаления — та же шторка приложения, что и попап уровня
-// (styles/sheets.css): на телефоне панель приходит снизу, на ПК садится по
-// центру. Централизованной модалки здесь нет намеренно: в проекте уже есть
-// нижние листы, и второй способ спрашивать подтверждение был бы третья
-// дорога, по которой пользователь спотыкается
+// --- Попап удаления одной реплики (смена 2026-11-07) -------------------------
+// Прежнее подтверждение — нижняя шторка приложения (styles/sheets.css) — по
+// баг-репорту владельца выезжало «красной полосой» на весь низ экрана и
+// перекрывало таб-бар. Теперь долгое нажатие открывает КОМПАКТНУЮ карточку
+// возле пузыря сообщения:
+//
+//   * позицию считает чистая computePopupPosition (юнит-тесты:
+//     tests/assistant-popup.test.mjs) — по умолчанию над пузырём, у верха
+//     экрана под ним, по горизонтали центр пузыря с зажимом в полях;
+//   * размеры карточки меряются только ПОСЛЕ вставки в DOM;
+//   * клик/тап мимо карточки ловит прозрачная подложка на весь экран,
+//     карточка лежит выше неё; скролл и ресайз закрывают попап — он не
+//     должен отрываться от пузыря;
+//   * карточка создаётся из JS (узлов в index.html нет), и слушатели её
+//     кнопки/подложки вешает тоже JS — app.js про внутренности попапа не знает;
+//   * цепочка удаления прежняя: askAssistantDelete → confirmAssistantDelete →
+//     removeHistoryAt. Данные не тронуты.
 let assistantDeleteIndex = null;
+let deletePopupNode = null;
+let deleteBackdropNode = null;
 
-export function isAssistantDeleteSheetOpen() {
-  const sheet = document.getElementById('assistant-delete-sheet');
-  return !!sheet && !sheet.hidden;
+// Слушатель скролла/ресайза живёт на уровне модуля: close обязан уметь его
+// снять, а для этого нужен тот же экземпляр функции, что вставлялся
+function onViewportChanged() {
+  closeAssistantDeletePopup();
 }
 
-export function askAssistantDelete(index) {
-  const sheet = document.getElementById('assistant-delete-sheet');
-  if (!sheet) return false;
+function removeNodeFromParent(node) {
+  if (!node || !node.parentNode) return;
+  if (typeof node.parentNode.removeChild === 'function') {
+    node.parentNode.removeChild(node);
+  }
+}
+
+// Чистое позиционирование попапа возле пузыря. bubbleRect — rect пузыря,
+// popupSize — размеры попапа ({top, left, width, height}), viewport —
+// {width, height}, margin — зазоры (по умолчанию 8px). По вертикали:
+// сверху есть место (rect.top >= высота попапа + margin) — попап НАД
+// пузырём, низ попапа = rect.top - margin; иначе — ПОД пузырём, верх
+// попапа = rect.top + высота пузыря + margin. По горизонтали — центр
+// пузыря, зажатый в [margin, viewport.width - ширина - margin].
+export function computePopupPosition(bubbleRect, popupSize, viewport, margin) {
+  const gap = typeof margin === 'number' && margin >= 0 ? margin : 8;
+  const width = popupSize && Number.isFinite(popupSize.width) ? popupSize.width : 0;
+  const height = popupSize && Number.isFinite(popupSize.height) ? popupSize.height : 0;
+  const viewportWidth = viewport && Number.isFinite(viewport.width) ? viewport.width : 0;
+
+  let placement = 'above';
+  let top;
+  if (bubbleRect.top >= height + gap) {
+    top = bubbleRect.top - height - gap;
+  } else {
+    placement = 'below';
+    top = bubbleRect.top + bubbleRect.height + gap;
+  }
+
+  let left = bubbleRect.left + bubbleRect.width / 2 - width / 2;
+  const maxLeft = viewportWidth - width - gap;
+  if (left < gap) left = gap;
+  if (left > maxLeft) left = maxLeft;
+  // Вьюпорт уже попапа (maxLeft ушёл в минус): прижимаем к левому зазору
+  if (left < gap) left = gap;
+  return { top: top, left: left, placement: placement };
+}
+
+export function isAssistantDeletePopupOpen() {
+  return !!deletePopupNode;
+}
+
+export function closeAssistantDeletePopup() {
+  const popup = deletePopupNode;
+  const backdrop = deleteBackdropNode;
+  deletePopupNode = null;
+  deleteBackdropNode = null;
+  // Отписка до снятия узлов: во время неё клик по подложке уже не ловится
+  window.removeEventListener('resize', onViewportChanged);
+  document.removeEventListener('scroll', onViewportChanged, true);
+  removeNodeFromParent(backdrop);
+  removeNodeFromParent(popup);
+  // Индекс снимается вместе с попапом: подтверждение после закрытия
+  // удалять ничего не должно
+  assistantDeleteIndex = null;
+  return !!popup;
+}
+
+export function askAssistantDelete(index, bubble) {
   const history = readHistory();
   // Индекс мог устареть (лента не перерисована после очистки/другого
-  // удаления): ничего не удаляем и не закрываем то, что не открывали
+  // удаления): ничего не удаляем и не открываем то, что не откроем
   if (!history[index]) {
     showToast('Это сообщение уже удалено');
     return false;
   }
-  // Превью реплики в листе не рисуем (задача 3.1): пузырь виден под
-  // подложкой шторки, а лист с двумя кнопками читается мгновенно
+  // Попап открывается ДО записи индекса: его внутренний close (чистка
+  // возможного прежнего попапа) снимает индекс — запись после открытия
+  // даёт живой индекс ровно у открытого попапа
+  if (!openAssistantDeletePopup(bubble)) return false;
   assistantDeleteIndex = index;
-  sheet.hidden = false;
   return true;
 }
 
-export function closeAssistantDeleteSheet() {
-  const sheet = document.getElementById('assistant-delete-sheet');
-  if (sheet) sheet.hidden = true;
-  assistantDeleteIndex = null;
+// Карточка возле пузыря: создаётся, вставляется, измеряется и позиционируется
+// здесь же. false — открыть не удалось (пузырь без rect, нет body): в такой
+// среде молчаливое «нигде» честнее попапа, оторванного от пузыря
+function openAssistantDeletePopup(bubble) {
+  closeAssistantDeletePopup();
+  const bubbleRect = bubble && typeof bubble.getBoundingClientRect === 'function'
+    ? bubble.getBoundingClientRect()
+    : null;
+  if (!bubbleRect) return false;
+  const body = document.body;
+  if (!body || typeof body.appendChild !== 'function') return false;
+
+  const backdrop = document.createElement('div');
+  backdrop.className = 'assistant-delete-backdrop';
+  const popup = document.createElement('div');
+  popup.className = 'assistant-delete-popup';
+  popup.setAttribute('role', 'dialog');
+  popup.setAttribute('aria-label', 'Удалить сообщение?');
+  const confirmBtn = document.createElement('button');
+  confirmBtn.type = 'button';
+  confirmBtn.className = 'assistant-delete-confirm';
+  confirmBtn.textContent = 'Удалить';
+  popup.appendChild(confirmBtn);
+
+  // Порядок вставки — слои: подложка ниже, попап после неё выше
+  body.appendChild(backdrop);
+  body.appendChild(popup);
+
+  // Слушатели вешаются при создании: кнопка подтверждает, подложка закрывает
+  confirmBtn.addEventListener('click', confirmAssistantDelete);
+  backdrop.addEventListener('click', closeAssistantDeletePopup);
+
+  // Размеры карточки честны только после вставки в DOM
+  const popupSize = typeof popup.getBoundingClientRect === 'function'
+    ? popup.getBoundingClientRect()
+    : null;
+  if (!popupSize) {
+    closeAssistantDeletePopup();
+    return false;
+  }
+  const viewport = {
+    width: typeof window.innerWidth === 'number' ? window.innerWidth : 0,
+    height: typeof window.innerHeight === 'number' ? window.innerHeight : 0,
+  };
+  const pos = computePopupPosition(bubbleRect, popupSize, viewport);
+  popup.style.top = pos.top + 'px';
+  popup.style.left = pos.left + 'px';
+
+  deletePopupNode = popup;
+  deleteBackdropNode = backdrop;
+  // Скролл (в том числе ленты чата — scroll не всплывает, но capture-фаза
+  // спускается от document к цели) и ресайз рвут связь с пузырём: попап
+  // закрывается, а не уезжает оторванным
+  window.addEventListener('resize', onViewportChanged);
+  document.addEventListener('scroll', onViewportChanged, true);
+  return true;
 }
 
 export function confirmAssistantDelete() {
   const index = assistantDeleteIndex;
-  closeAssistantDeleteSheet();
+  closeAssistantDeletePopup();
   if (index === null) return false;
   return removeHistoryAt(index);
 }

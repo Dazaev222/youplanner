@@ -234,3 +234,73 @@ test('CSP: в index.html нет inline-скриптов', () => {
     'в index.html есть inline-<script> (сломаются под script-src \'self\'): ' +
     inline.join(', '));
 });
+
+// ---------------------------------------------------------------------------
+// Задача 3.2 (хвост P1-4): frame-ancestors — защита от кликджекинга.
+//
+// Честная модель доставки: по спецификации CSP Level 3 (§3.3 «The meta
+// element») директивы report-uri, frame-ancestors и sandbox в мета-теге
+// НЕ ПОДДЕРЖИВАЮТСЯ — frame-ancestors в мете браузер игнорирует. Поэтому
+// действующая защита — HTTP-заголовок Content-Security-Policy, который
+// Firebase Hosting отдаёт на каждый путь (hosting.headers на /** в
+// firebase.json). Мета держит ту же директиву для полноты политики, чтобы
+// мета и заголовок читались как одна политика, а тесты ниже не дают им
+// разъехаться.
+
+// CSP-заголовок из firebase.json: блок hosting.headers с source "/**",
+// внутри — пара { key: 'Content-Security-Policy', value: ... }.
+function readHeaderCsp() {
+  const config = JSON.parse(readFileSync(join(ROOT, 'firebase.json'), 'utf8'));
+  const blocks = config?.hosting?.headers;
+  assert.ok(Array.isArray(blocks) && blocks.length > 0,
+    'в firebase.json нет секции hosting.headers (схема Firebase Hosting: ' +
+    'hosting.headers[{ source, headers: [{ key, value }] }])');
+  const block = blocks.find((b) => b && b.source === '/**');
+  assert.ok(block,
+    'в hosting.headers нет блока с source "/**" — CSP обязан прилетать на каждый URL');
+  const header = (block.headers || []).find(
+    (h) => h && String(h.key).toLowerCase() === 'content-security-policy');
+  assert.ok(header, 'на "/**" нет заголовка Content-Security-Policy');
+  assert.ok(header.value, 'у заголовка Content-Security-Policy нет value');
+  return header.value;
+}
+
+test('CSP: мета держит frame-ancestors \'none\' (кликджекинг)', () => {
+  const policy = parsePolicy(readCsp());
+
+  // Ровно 'none': страницу нельзя встроить в iframe ни с какого origin.
+  // 'self' или список хостов ослабил бы защиту, поэтому deepEqual, а не
+  // includes.
+  assert.deepEqual(policy.get('frame-ancestors'), ["'none'"],
+    "frame-ancestors должен быть ровно 'none' (без 'self')");
+});
+
+test('CSP: firebase.json отдаёт заголовок CSP с frame-ancestors \'none\'', () => {
+  const policy = parsePolicy(readHeaderCsp());
+
+  // Это и есть действующая защита: frame-ancestors работает только
+  // заголовком (спецификация CSP 3, §3.3), мета-тег её игнорирует.
+  assert.deepEqual(policy.get('frame-ancestors'), ["'none'"],
+    "в заголовке CSP frame-ancestors должен быть ровно 'none'");
+});
+
+test('CSP: заголовок CSP не беднее меты и повторяет её значения', () => {
+  const meta = parsePolicy(readCsp());
+  const header = parsePolicy(readHeaderCsp());
+
+  // (в) Имена директив: всё, что есть в мете, обязано быть и в заголовке.
+  // Иначе новая директива, добавленная в мету, молча не подействует на
+  // хостинге (для frame-ancestors мета и вовсе игнорируется браузером).
+  const missing = [...meta.keys()].filter((name) => !header.has(name));
+  assert.deepEqual(missing, [],
+    'в заголовке CSP (firebase.json /**) нет директив из меты: ' + missing.join(', '));
+
+  // Обратная сторона «не разъехались»: у общих директив совпадают и
+  // значения — заголовок должен ПОЛНОСТЬЮ повторять политику меты.
+  // Ловит, например, хост, добавленный в connect-src меты и забытый в
+  // заголовке (под CSP заголовка страница упала бы — запрос отклонён).
+  const diverged = [...meta.keys()].filter((name) =>
+    JSON.stringify(meta.get(name)) !== JSON.stringify(header.get(name)));
+  assert.deepEqual(diverged, [],
+    'значения директив меты и заголовка CSP расходятся: ' + diverged.join(', '));
+});

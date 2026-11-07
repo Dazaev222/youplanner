@@ -36,11 +36,17 @@
          только для cross-origin workerSrc, поэтому blob: не нужен);
        * manifest-src 'self' — манифест PWA подключён ниже;
        * сервис-воркер (sw.js) CSP страницы не подчиняется: офлайн-кэш
-         политика не ограничивает.
-       НЕ покрыто мета-тегом и сознательно отложено: frame-ancestors —
-       работает только HTTP-заголовком на хостинге. -->
+         политика не ограничивает;
+       * frame-ancestors 'none' — защита от кликджекинга (задача 3.2).
+         ЧЕСТНО: по спецификации CSP Level 3 (§3.3) директива
+         frame-ancestors в мета-теге ИГНОРИРУЕТСЯ, как и report-uri/sandbox;
+         здесь она для полноты политики, чтобы мета и заголовок читались
+         как одна политика. Действующая защита — HTTP-заголовок
+         Content-Security-Policy с тем же frame-ancestors 'none' на каждый
+         путь (hosting.headers /** в firebase.json); заголовок начнёт
+         работать после следующего деплоя хостинга. -->
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' blob: data:; font-src 'self' https://fonts.gstatic.com; connect-src https://youplanner-5c2f5-default-rtdb.firebaseio.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://api.neuraldeep.ru; worker-src 'self'; manifest-src 'self'; base-uri 'self'; object-src 'none'; form-action 'none'">
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' blob: data:; font-src 'self' https://fonts.gstatic.com; connect-src https://youplanner-5c2f5-default-rtdb.firebaseio.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://api.neuraldeep.ru; worker-src 'self'; manifest-src 'self'; base-uri 'self'; object-src 'none'; form-action 'none'; frame-ancestors 'none'">
   <!-- Установка на телефон как отдельного приложения: иконка, имя, цвет строки статуса -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -967,24 +973,10 @@
   </div>
 </div>
 
-<!-- Лист подтверждения удаления ОДНОГО сообщения ассистента. Тот же слой
-     шторки, что у попапа уровня (§styles/sheets.css): нижняя панель на
-     телефоне, окошко по центру на ПК — отдельной «централизованной модалки»
-     в проекте нет, и ещё один способ спрашивать подтверждение стал бы
-     третьей дорогой, о которую пользователь спотыкается. Лист открывается
-     долгим нажатием на пузырь (задача 3.1), пузырь виден под подложкой —
-     поэтому внутри только «Удалить» и «Отмена», без заголовка и превью.
-     Лист живёт вне #assistant-form: кнопка «Удалить» внутри формы стала бы
-     её submit-ом -->
-<div id="assistant-delete-sheet" class="sheet" hidden>
-  <div class="sheet-backdrop" data-assistant-delete-close></div>
-  <div class="sheet-panel" role="dialog" aria-modal="true"
-       aria-label="Удалить сообщение?">
-    <button type="button" id="assistant-delete-confirm" class="btn btn-danger">Удалить</button>
-    <button type="button" class="btn btn-secondary sheet-cancel-btn"
-            data-assistant-delete-close>Отмена</button>
-  </div>
-</div>
+<!-- Подтверждение удаления ОДНОГО сообщения ассистента живёт в JS
+     (js/ui/assistant-view.js, смена 2026-11-07): долгое нажатие на пузырь
+     открывает компактный попап возле пузыря, а не шторку на весь низ —
+     прежняя шторка перекрывала таб-бар и вычищена отсюда -->
 
 <!-- Тост: короткая подсказка поверх шторок. Текст кладёт showToast() -->
 <div id="toast" role="status" hidden></div>

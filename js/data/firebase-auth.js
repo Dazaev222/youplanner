@@ -13,8 +13,10 @@
 //    молча заведённый анонимный аккаунт дал бы токен с чужим uid, правила
 //    ответили бы PERMISSION_DENIED, и синхронизация пропала бы без причины.
 //
-// Токен прикладывается к запросам синхронизации параметром ?auth=
-// централизованно, в единственной обёртке fetchWithTimeout (js/sync/sync.js).
+// Токен прикладывается к запросам синхронизации ЗАГОЛОВКОМ Authorization:
+// Bearer <idToken> (не параметром ?auth= в URL — тот оседает в логах серверов
+// и истории браузера) централизованно, в единственной обёртке fetchWithTimeout
+// (js/sync/sync.js). Аудит секретов, задача 3.1.
 //
 // Контракт: getAuthToken() разрешается строкой idToken либо null. null —
 // «аутентификации нет, работаем локально»: синк обязан продолжаться без
@@ -23,6 +25,13 @@
 // сессии владельца — даёт null и не бросает исключений: auth здесь расходник,
 // а не условие работы приложения. ownerSignIn() — единственное место, где
 // неудача бросается наружу: её показывает человек, нажавший «Войти».
+//
+// Если протухший id-токен всё-таки доехал до сервера данных (часы устройства
+// врут, страница спала дольше часа), тот отвечает 401 «токен просрочен» —
+// обёртка данных (js/sync/sync.js) зовёт forceRefreshAuthToken() ниже:
+// обменять refresh-токен на новый и повторить запрос один раз.
+
+import { bus } from '../core/bus.js';
 
 // Web API Key web-приложения Firebase. Владелец вписывает ключ из Firebase
 // Console (Project settings → General): ключ web-приложений не секрет —
@@ -63,6 +72,17 @@ let authPausedUntil = 0;
 // режим Safari, квота): сессия, введённая в этой вкладке, не должна
 // соскальзывать в анонимный режим — он запрещён ровно тем фактом входа.
 let ownerAccount = null;
+// Обещание идущего прямо сейчас обмена refresh-токена. Несколько запросов
+// данных, разом упёршись в 401 «токен просрочен», делят ОДИН обмен, а не
+// штампуют пять POST'ов к securetoken (forceRefreshAuthToken ниже).
+let refreshInFlight = null;
+
+// Поколение сессии. ownerSignOut() наращивает счётчик: обмены и входы,
+// начатые ДО выхода, при возврате ответа сверяют его и выбрасывают результат —
+// иначе опоздавший ответ securetoken записал бы свежую пару токенов владельца
+// обратно в хранилище уже ПОСЛЕ кнопки «Выйти», и «разлогиненное» устройство
+// продолжало бы ходить в базу с uid владельца (аудит секретов, задача 3.1).
+let authSession = 0;
 
 // Точка конфигурации и тестов: владелец правит константу выше в файле,
 // песочница и тесты подставляют ключ этой функцией, исходник не трогая.
@@ -76,6 +96,7 @@ export function resetAuthForTests() {
   authCache = null;
   authPausedUntil = 0;
   ownerAccount = null;
+  refreshInFlight = null;
 }
 
 // Тот же маленький guard, что timeoutGuard в js/ui/assistant-view.js и
@@ -186,6 +207,9 @@ export async function ownerSignIn(email, password) {
       'старая версия модуля в кэше. Если не поможет, ключ вписывают в js/data/firebase-auth.js');
   }
 
+  // Поколение сессии на момент старта входа: сверяется после сети (ниже).
+  const sessionAtStart = authSession;
+
   const response = await authPost(
     'https://identitytoolkit.googleapis.com/v1/accounts:signInWithPassword?key=' + encodeURIComponent(FIREBASE_WEB_API_KEY),
     { email: login, password: secret, returnSecureToken: true },
@@ -215,6 +239,12 @@ export async function ownerSignIn(email, password) {
     throw new Error('Вход не принят: ' + reason);
   }
 
+  // Пока вход ходил по сети, человек мог нажать «Выйти» (кнопки рядом).
+  // Ответ, пришедший после выхода, сессию не устанавливает: ни записи в
+  // хранилище, ни памяти модуля — наружу уходит отказ, который покажет тост.
+  if (authSession !== sessionAtStart) {
+    throw new Error('Вход отменён: устройство вышло из аккаунта');
+  }
   ownerAccount = { email: login, uid: uid };
   try {
     localStorage.setItem(AUTH_OWNER_KEY, JSON.stringify(ownerAccount));
@@ -234,19 +264,136 @@ export async function ownerSignIn(email, password) {
   return ownerAccount;
 }
 
-// Выход: снимается и запись владельца, и refresh-токен. Оставить токен —
-// значит оставить устройство ходить в базу чужим (владельческим) uid после
-// того, как человек нажал «Выйти».
+// Выход: стирается ВСЯ сессия. Оставить токен — значит оставить устройство
+// ходить в базу чужим (владельческим) uid после того, как человек нажал
+// «Выйти». Стираются три вещи:
+//   1) запись владельца (AUTH_OWNER_KEY) и refresh-токен (AUTH_REFRESH_KEY) —
+//      прямо, по именам;
+//   2) память модуля: кэш id-токена (authCache), состояние входа (ownerAccount),
+//      пауза и in-flight обмен — живой id-токен в localStorage никогда не жил;
+//   3) защитная зачистка пространства youplanner.fb.* — сессионные ключи,
+//      которых этот код не знает (остались от другой версии приложения или
+//      появятся в будущей), стираются тоже.
+// Кроме того, наращивается authSession: обмены, начатые до выхода, выбросят
+// свои опоздавшие ответы и не запишут свежую пару токенов в пустое хранилище.
 export function ownerSignOut() {
   ownerAccount = null;
   authCache = null;
   authPausedUntil = 0;
+  refreshInFlight = null;
+  authSession += 1;
   try {
     localStorage.removeItem(AUTH_OWNER_KEY);
     localStorage.removeItem(AUTH_REFRESH_KEY);
   } catch (e) {
     // глотаем: недоступное хранилище — то же самое, что стёртое
   }
+  // Зачистка пространства сессии. Перебор — как в DOM Storage, назад: удаление
+  // не должно сдвигать ещё не пройденные индексы. Хранилище без length/key()
+  // (старые тестовые заглушки, нестандартные окружения) пропускает зачистку —
+  // два известных ключа стёрты выше по именам.
+  try {
+    for (let i = localStorage.length - 1; i >= 0; i--) {
+      const key = localStorage.key(i);
+      if (key && key.indexOf('youplanner.fb.') === 0) localStorage.removeItem(key);
+    }
+  } catch (e) {
+    // глотаем: недоступное хранилище — то же самое, что стёртое
+  }
+}
+
+/* ---------- Автообновление протухшего ID-токена ---------------------------- */
+
+// Принудительный разлогин: сессия доказанно мертва, и хранить её дальше —
+// значит держать настройки с email и UID при неработающей синхронизации.
+// ownerSignOut() стирает и запись владельца, и refresh-токен; событие
+// рассказывает интерфейсу, что случилось (подписчик решает сам, что показать).
+function forcedSignOut(reason) {
+  ownerSignOut();
+  bus.emit('sync:auth-expired', { reason: reason });
+}
+
+// Один обмен refresh-токена на свежую пару токенов. Разрешается строкой
+// нового idToken либо null («повторять запрос нечем»). null — не бросок:
+// вызывающий здесь — обёртка данных, а не человек, и у неё уже есть
+// честный отказ сервера, который и так уйдёт в sync:denied.
+async function exchangeRefreshToken() {
+  // Поколение сессии на момент старта обмена: сверяется перед записью (ниже).
+  const sessionAtStart = authSession;
+  let refreshToken = null;
+  try {
+    refreshToken = localStorage.getItem(AUTH_REFRESH_KEY);
+  } catch (e) {
+    refreshToken = null;
+  }
+  if (!refreshToken) return null; // сессии уже нет — разлогинены раньше
+
+  let response = null;
+  try {
+    response = await authPost(
+      'https://securetoken.googleapis.com/v1/token?key=' + encodeURIComponent(FIREBASE_WEB_API_KEY),
+      { grant_type: 'refresh_token', refresh_token: refreshToken },
+    );
+  } catch (e) {
+    // Сеть недоступна: смерть токена не доказана — сессию храним.
+    // Выздоровевшая сеть вылечит обмен сама (следующий 401 повторит его).
+    return null;
+  }
+
+  if (!response.ok) {
+    // 4xx — сервер рассмотрел обмен и ОТКАЗАЛ: refresh-токен отозван,
+    // просрочен или аккаунт выключен (INVALID_REFRESH_TOKEN, TOKEN_EXPIRED,
+    // USER_DISABLED). Хранить его дальше значило бы умирать вечно — разлогин.
+    // 5xx сюда не попадает: временный сбой сервера не доказывает смерть
+    // токена (тот же принцип, что у 5xx-ветки requestFreshToken выше).
+    if (response.status >= 400 && response.status < 500) {
+      let reason = 'auth-сервер ответил ' + response.status;
+      try {
+        const data = await response.json();
+        if (data && data.error && data.error.message) reason = data.error.message;
+      } catch (e) {
+        // тело отказа не обязано быть JSON'ом
+      }
+      forcedSignOut(reason);
+    }
+    return null;
+  }
+
+  let parsed = null;
+  try {
+    parsed = parseAuthResponse(await response.json());
+  } catch (e) {
+    parsed = null;
+  }
+  if (!parsed || !parsed.idToken || parsed.expiresIn <= 0) return null;
+
+  // Пока обмен ходил по сети, человек мог нажать «Выйти»: опоздавший ответ
+  // не пишет пару токенов в пустое хранилище и не обслуживает запросы —
+  // «разлогиненное» устройство остаётся разлогиненным (задача 3.1).
+  if (authSession !== sessionAtStart) return null;
+
+  // Новая пара токенов — на прежние места: refresh-токен в AUTH_REFRESH_KEY,
+  // id-токен в кэш модуля. Пауза после прошлой неудачи не глушит свежий токен.
+  saveRefreshToken(parsed.refreshToken);
+  authCache = {
+    token: parsed.idToken,
+    expiresAt: Date.now() + (parsed.expiresIn - 300) * 1000,
+  };
+  authPausedUntil = 0;
+  return parsed.idToken;
+}
+
+// Единственная точка принудительного обмена. Зовётся обёрткой данных
+// (fetchWithTimeout в js/sync/sync.js), когда сервер ответил 401 «токен
+// просрочен». Параллельные вызовы возвращают одно и то же обещание: сколько
+// бы запросов ни упёрлось в 401, securetoken платится одним POST'ом.
+export function forceRefreshAuthToken() {
+  if (!refreshInFlight) {
+    refreshInFlight = exchangeRefreshToken().finally(function () {
+      refreshInFlight = null;
+    });
+  }
+  return refreshInFlight;
 }
 
 // Знакомому устройству — обмен refresh-токена, новому — signUp. Отдельная
@@ -261,6 +408,9 @@ function signUpPost() {  return authPost(
 // анонимного аккаунта signUp'ом. Бросает при любой неудаче — глотает
 // getAuthToken() ниже.
 async function requestFreshToken() {
+  // Поколение сессии на момент старта: разлогин во время обмена запрещает
+  // запись refresh-токена ниже (сам id-токен отбросит getAuthToken).
+  const sessionAtStart = authSession;
   const owner = readOwnerRecord();
   let refreshToken = null;
   try {
@@ -313,6 +463,9 @@ async function requestFreshToken() {
   if (!parsed || !parsed.idToken || parsed.expiresIn <= 0) {
     throw new Error('битый ответ: нет idToken или expiresIn');
   }
+  // Разлогин во время обмена: refresh-токен опоздавшего ответа в хранилище
+  // не пишется. Сам id-токен вернётся, но его отбросит getAuthToken.
+  if (authSession !== sessionAtStart) return parsed;
   saveRefreshToken(parsed.refreshToken);
   return parsed;
 }
@@ -331,8 +484,14 @@ export async function getAuthToken() {
     // Недавно неудачно: сеть не дёргаем до конца паузы
     return null;
   }
+  // Поколение сессии на момент старта: ответ, пришедший после ownerSignOut(),
+  // в кэш не попадает (см. exchangeRefreshToken/requestFreshToken выше).
+  const sessionAtStart = authSession;
   try {
     const parsed = await requestFreshToken();
+    // Не «неудача аутентификации», а выход: без 5-минутной паузы — после
+    // повторного входа токен должен добываться без оглядки на эту попытку.
+    if (authSession !== sessionAtStart) return null;
     authCache = {
       token: parsed.idToken,
       // Запас 5 минут до заявленного истечения: токен обязан дожить до

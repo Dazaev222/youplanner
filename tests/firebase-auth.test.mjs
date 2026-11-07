@@ -443,6 +443,81 @@ test('выход владельца: сессия, refresh-токен и кэш 
   assert.equal(callsTo(fetchImpl.calls, 'accounts:signUp').length, 1);
 });
 
+// Полный разлогин (аудит секретов, задача 3.1): в хранилище не остаётся НИ
+// ОДНОГО сессионного ключа. Два известных ключа ownerSignOut() стирает прямо;
+// всё прочее, что когда-либо появится под пространством youplanner.fb.*
+// (например, ключ старой версии приложения с токеном другого формата),
+// стирает защитная зачистка пространства — иначе «обновление приложения +
+// выход» оставило бы на устройстве живой токен, о котором новый код не знает.
+test('полный разлогин: ни одного ключа youplanner.fb.* в localStorage', async () => {
+  const fetchImpl = makeAuthFetch();
+  const { context, sandbox } = loadApp({ fetchImpl });
+  context.setFirebaseApiKey(KEY);
+  await context.ownerSignIn('owner@example.com', 'secret-pw');
+  // Чужой ключ сессии «из старой версии»: под пространством youplanner.fb.*
+  // зачистка обязана стереть и его.
+  sandbox.localStorage.setItem('youplanner.fb.legacy-token', 'tok-из-старой-версии');
+  assert.ok(sandbox.localStorage.getItem('youplanner.fb.legacy-token'),
+    'подготовка не удалась: legacy-ключ не записан');
+
+  context.ownerSignOut();
+
+  const leftover = Object.keys(sandbox.localStorage._dump())
+    .filter((k) => k.indexOf('youplanner.fb.') === 0);
+  assert.deepEqual(leftover, [],
+    'после разлогина остались сессионные ключи: ' + leftover.join(', '));
+  assert.equal(context.getOwnerAccount(), null, 'состояние входа не сброшено');
+
+  // Ровно то, ради чего зачистка: разлогиненное устройство добывает токен
+  // свежим анонимным signUp'ом, а не по уцелевшему сессионному ключу.
+  fetchImpl.calls.length = 0;
+  assert.equal(await context.getAuthToken(), 'tok1',
+    'после разлогина токен не из анонимного signUp');
+  assert.equal(callsTo(fetchImpl.calls, 'securetoken').length, 0,
+    'после разлогина прошёл обмен по уцелевшему refresh-токену');
+});
+
+// Гонка «выход во время обмена»: ответ securetoken, пришедший ПОСЛЕ
+// ownerSignOut(), не имеет права записать свежую пару токенов обратно в
+// хранилище — иначе «разлогиненное» устройство продолжало бы ходить в базу
+// с uid владельца, ровно то, чего владелец ждал от кнопки «Выйти».
+test('разлогин во время обмена: опоздавший ответ не возвращает сессию', async () => {
+  let resolveRefresh = null;
+  const fetchImpl = (url) => {
+    if (String(url).indexOf('securetoken.googleapis.com') !== -1) {
+      // Обмен висит, пока тест не разрешит его вручную
+      return new Promise((resolve) => { resolveRefresh = () => resolve(okJson({
+        id_token: 'tok-new', refresh_token: 'r-new-owner', expires_in: '3600',
+      })); });
+    }
+    return Promise.resolve(okJson({}));
+  };
+  const { context, sandbox } = loadApp({ fetchImpl });
+  context.setFirebaseApiKey(KEY);
+  sandbox.localStorage.setItem(AUTH_REFRESH_KEY, 'r-owner');
+  sandbox.localStorage.setItem(AUTH_OWNER_KEY,
+    JSON.stringify({ email: 'owner@example.com', uid: OWNER_UID }));
+
+  const pending = context.getAuthToken();
+  // Дать обмену дойти до ожидания ответа сети: макрозадача вымоет все
+  // микротаски цепочки getAuthToken → requestFreshToken → authPost
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  assert.ok(resolveRefresh, 'обмен не дошёл до сети до выхода');
+
+  context.ownerSignOut();
+  resolveRefresh();
+  const token = await pending;
+
+  assert.equal(token, null,
+    'опоздавший токен обслуживает запросы после выхода');
+  assert.equal(sandbox.localStorage.getItem(AUTH_REFRESH_KEY), null,
+    'опоздавший ответ вернул refresh-токен владельца в хранилище');
+  assert.equal(context.getOwnerAccount(), null, 'состояние входа восстановилось');
+  assert.deepEqual(Object.keys(sandbox.localStorage._dump())
+    .filter((k) => k.indexOf('youplanner.fb.') === 0), [],
+    'опоздавший ответ оставил сессионные ключи');
+});
+
 test('без входа: getOwnerAccount() пуст, анонимный режим работает как раньше', async () => {
   const fetchImpl = makeAuthFetch();
   const { context } = loadApp({ fetchImpl });
@@ -488,6 +563,255 @@ test('пустые email или пароль: ошибка до сети, ни �
   await assert.rejects(() => context.ownerSignIn('', 'pw'), /email/i);
   await assert.rejects(() => context.ownerSignIn('owner@example.com', ''), /парол/i);
   assert.equal(fetchImpl.calls.length, 0, 'проверка полей ушла в сеть');
+});
+
+/* ---------- Автообновление протухшего ID-токена (401 → refresh → повтор) ----
+   Баг со второго устройства: ID-токен протух, сервер данных отвечает 401
+   «INVALID_ID_TOKEN», автообновления нет — а настройки при этом показывают
+   email и UID (запись владельца цела). Контракт исправления:
+     * 401 с ошибкой протухшего токена → обмен refresh-токена (securetoken),
+       новые токены на прежние ключи, ИСХОДНЫЙ запрос повторён один раз;
+     * параллельные запросы делят один обмен (дедупликация in-flight);
+     * отказ обмена (4xx) — принудительный разлогин: хранилище чистое,
+       состояние входа сброшено, событие sync:auth-expired через bus;
+     * повторный 401 после refresh — не зацикливается. */
+
+// Сервер, пускающий в данные только с НОВЫМ токеном: запрос с токеном
+// tok-owner отвечает 401 с ошибкой протухшего токена, с tok-new — 200. Токен
+// принимается в ОБЕИХ формах REST RTDB — заголовком Authorization: Bearer
+// (как теперь ходит синхронизация) и легаси-параметром ?auth= в URL (как
+// ходят рукописные запросы в этих же тестах). Форма ошибки — строка, как у
+// RTDB REST; отказ обмена — объект {error:{message}}, как у identitytoolkit.
+// Вход владельца даёт пару tok-owner / r-owner.
+function makeOwnerDataServer() {
+  const state = {
+    calls: [],
+    dataCalls: [],
+    securetokenCalls: [],
+    // Поведение обмена refresh-токена: 'ok' | 'dead' (400) | 'network'
+    refreshBehavior: 'ok',
+    // Задержка обмена: параллельные 401 обязаны успеть сойтись в один вызов
+    refreshDelayMs: 0,
+    // Отвергать и новый токен (401 и после refresh) — проверка зацикливания
+    rejectNewToken: false,
+    // Текст ошибки в 401 данных: по умолчанию протухший токен, «Permission
+    // denied» — отказ правил, который refresh-ом лечить нельзя
+    dataError: 'INVALID_ID_TOKEN',
+  };
+  const impl = function (url, opts) {
+    const u = String(url);
+    const method = (opts && opts.method) || 'GET';
+    const headers = (opts && opts.headers) || {};
+    state.calls.push({ url: u, method: method, headers: headers });
+    if (u.indexOf('firebaseio.com') !== -1) {
+      state.dataCalls.push({ url: u, method: method, headers: headers });
+      // Обе формы: Bearer-заголовок или легаси ?auth= в URL
+      const bearer = headers && typeof headers.Authorization === 'string'
+        ? headers.Authorization.replace(/^Bearer\s+/i, '')
+        : '';
+      const match = u.match(/[?&]auth=([^&]+)/);
+      const token = bearer || (match ? decodeURIComponent(match[1]) : '');
+      if (token === 'tok-new' && !state.rejectNewToken) {
+        return Promise.resolve(okJson({}));
+      }
+      return Promise.resolve({
+        ok: false, status: 401,
+        json: function () { return Promise.resolve({ error: state.dataError }); },
+      });
+    }
+    if (u.indexOf('securetoken.googleapis.com') !== -1) {
+      state.securetokenCalls.push({ url: u, body: opts && opts.body });
+      return new Promise(function (resolve, reject) {
+        setTimeout(function () {
+          if (state.refreshBehavior === 'dead') {
+            resolve({
+              ok: false, status: 400,
+              json: function () {
+                return Promise.resolve({ error: { message: 'INVALID_REFRESH_TOKEN' } });
+              },
+            });
+          } else if (state.refreshBehavior === 'network') {
+            reject(new Error('нет сети'));
+          } else {
+            resolve(okJson({ id_token: 'tok-new', refresh_token: 'r-new', expires_in: '3600' }));
+          }
+        }, state.refreshDelayMs);
+      });
+    }
+    if (u.indexOf('signInWithPassword') !== -1) {
+      let email = '';
+      try { email = JSON.parse(String(opts.body)).email || ''; } catch (e) { email = ''; }
+      return Promise.resolve(okJson({
+        kind: 'identitytoolkit#VerifyPasswordResponse',
+        idToken: 'tok-owner', refreshToken: 'r-owner', expiresIn: '3600',
+        localId: OWNER_UID, email: email,
+      }));
+    }
+    return Promise.resolve(okJson({}));
+  };
+  impl.state = state;
+  return impl;
+}
+
+// Владелец со входом (токен tok-owner в кэше, refresh-токен r-owner в
+// хранилище) и подписчик bus на событие принудительного разлогина.
+async function loadExpiredCase(server) {
+  const app = loadApp({ fetchImpl: server });
+  app.context.setFirebaseApiKey(KEY);
+  await app.context.ownerSignIn('owner@example.com', 'secret-pw');
+  app.run("globalThis.__expired = [];");
+  app.run("bus.on('sync:auth-expired', function (p) { globalThis.__expired.push(p && p.reason); });");
+  return app;
+}
+
+function callsWithAuth(calls, token) {
+  return calls.filter(function (c) {
+    // Токен в записи вызова: Bearer-заголовок (как ходит синхронизация)
+    // или легаси ?auth= в URL (рукописные запросы тестов)
+    const header = c.headers && typeof c.headers.Authorization === 'string'
+      ? c.headers.Authorization.replace(/^Bearer\s+/i, '')
+      : '';
+    return header === token || c.url.indexOf('auth=' + token) !== -1;
+  });
+}
+
+test('401 INVALID_ID_TOKEN: refresh-обмен и повтор ИСХОДНОГО запроса с новым токеном', async () => {
+  const server = makeOwnerDataServer();
+  const app = await loadExpiredCase(server);
+  const state = server.state;
+
+  const result = await app.context.syncFromCloud();
+
+  assert.equal(result.reachable, true,
+    'запрос не повторён с новым токеном: синк посчитал сервер недоступным');
+  // Обмен ровно один, по протоколу securetoken, refresh-токен из хранилища
+  assert.equal(state.securetokenCalls.length, 1,
+    'обменов refresh-токена: ' + state.securetokenCalls.length);
+  assert.ok(state.securetokenCalls[0].url.indexOf('key=' + KEY) !== -1,
+    'обмен без ключа проекта');
+  assert.deepEqual(JSON.parse(state.securetokenCalls[0].body),
+    { grant_type: 'refresh_token', refresh_token: 'r-owner' },
+    'тело обмена не берёт refresh-токен из хранилища');
+  // Повтор: тот же запрос данных, уже с новым токеном
+  assert.ok(callsWithAuth(state.dataCalls, 'tok-owner').length >= 1,
+    'первый запрос с протухшим токеном не состоялся вовсе');
+  assert.ok(callsWithAuth(state.dataCalls, 'tok-new').length >= 1,
+    'запрос не повторён с НОВЫМ токеном');
+  // Новые токены на прежних ключах
+  assert.equal(app.sandbox.localStorage.getItem(AUTH_REFRESH_KEY), 'r-new',
+    'новый refresh-токен не записан на прежний ключ');
+  assert.equal(await app.context.getAuthToken(), 'tok-new',
+    'новый id-токен не в кэше: следующий обмен пойдёт со старым');
+  // Вылеченный 401 — не отказ: deniedStatus не залип
+  assert.equal(app.run('deniedStatus'), 0, 'вылеченный 401 залип в deniedStatus');
+});
+
+test('мёртвый refresh-токен: принудительный разлогин — хранилище чистое, состояние «нужен вход»', async () => {
+  const server = makeOwnerDataServer();
+  server.state.refreshBehavior = 'dead';
+  const app = await loadExpiredCase(server);
+  const state = server.state;
+
+  const result = await app.context.syncFromCloud();
+
+  // Обмен был ровно один, исходный запрос не повторялся — повторять нечем
+  assert.equal(state.securetokenCalls.length, 1, 'обменов больше одного');
+  assert.equal(callsWithAuth(state.dataCalls, 'tok-new').length, 0,
+    'повтор после НЕУДАВШЕГО refresh');
+  assert.equal(result.reachable, false, 'упорный 401 должен остаться отказом');
+
+  // Хранилище чистое: ни refresh-токена, ни записи владельца
+  assert.equal(app.sandbox.localStorage.getItem(AUTH_REFRESH_KEY), null,
+    'мёртвый refresh-токен не стёрт');
+  assert.equal(app.sandbox.localStorage.getItem(AUTH_OWNER_KEY), null,
+    'запись владельца осталась: настройки показывают email/UID при мёртвой сессии');
+  assert.equal(app.context.getOwnerAccount(), null,
+    'состояние входа не сброшено: приложение не понимает, что нужен вход');
+
+  // Событие о разлогине — с причиной из отказа auth-сервера
+  assert.deepEqual(Array.from(app.run('globalThis.__expired')), ['INVALID_REFRESH_TOKEN'],
+    'событие sync:auth-expired не пришло или без причины');
+});
+
+test('параллельные запросы на 401: ровно ОДИН вызов refresh', async () => {
+  const server = makeOwnerDataServer();
+  // Задержка обмена: оба запроса успевают упереться в 401 до его конца
+  server.state.refreshDelayMs = 20;
+  const app = await loadExpiredCase(server);
+  const state = server.state;
+
+  const results = await Promise.all([
+    app.context.syncFromCloud(),
+    app.context.syncFromCloud(),
+  ]);
+
+  assert.equal(state.securetokenCalls.length, 1,
+    'параллельные 401 породили ' + state.securetokenCalls.length +
+    ' обменов: обещание refresh не разделяется');
+  assert.equal(results.filter(function (r) { return r && r.reachable; }).length, 2,
+    'не оба запроса дошли до сервера с новым токеном');
+  assert.ok(callsWithAuth(state.dataCalls, 'tok-owner').length >= 2,
+    'не оба исходных запроса ушли с протухшим токеном');
+  assert.ok(callsWithAuth(state.dataCalls, 'tok-new').length >= 2,
+    'повторы с новым токеном не состоялись');
+});
+
+test('401 и ПОСЛЕ refresh: повтор ровно один, зацикливания нет', async () => {
+  const server = makeOwnerDataServer();
+  server.state.rejectNewToken = true; // сервер отвергает и новый токен
+  const app = await loadExpiredCase(server);
+  const state = server.state;
+
+  const result = await app.context.syncFromCloud();
+
+  assert.equal(state.securetokenCalls.length, 1,
+    'refresh вызван и после повторного 401: зацикливание');
+  // Исходный запрос + ровно один повтор
+  assert.equal(state.dataCalls.length, 2,
+    'запросов данных: ' + state.dataCalls.length);
+  assert.equal(result.reachable, false, 'упорный 401 должен остаться отказом');
+  assert.equal(app.run('deniedStatus'), 401,
+    'повторный 401 не доведён до sync:denied-статуса');
+});
+
+test('сеть отвалилась на обмене refresh-токена: сессия цела, повтора нет', async () => {
+  const server = makeOwnerDataServer();
+  server.state.refreshBehavior = 'network';
+  const app = await loadExpiredCase(server);
+  const state = server.state;
+
+  const result = await app.context.syncFromCloud();
+
+  // Живой refresh-токен не доказано, что мёртв: сессию храним — стирает
+  // только отказ САМОГО обмена (4xx), не сетевой сбой (принцип 5xx-ветки
+  // requestFreshToken). Выздоровевшая сеть сама вылечит обмен.
+  assert.equal(app.sandbox.localStorage.getItem(AUTH_REFRESH_KEY), 'r-owner',
+    'сетевой сбой обмена стёр живую сессию');
+  assert.ok(app.sandbox.localStorage.getItem(AUTH_OWNER_KEY),
+    'сетевой сбой обмена снял запись владельца');
+  assert.deepEqual(Array.from(app.run('globalThis.__expired')), [],
+    'сетевой сбой обмена разлогинил');
+  assert.equal(callsWithAuth(state.dataCalls, 'tok-new').length, 0,
+    'повтор без нового токена');
+  assert.equal(result.reachable, false);
+});
+
+test('401 Permission denied — правила, а не протухший токен: refresh не дёргается', async () => {
+  const server = makeOwnerDataServer();
+  server.state.dataError = 'Permission denied';
+  const app = await loadExpiredCase(server);
+  const state = server.state;
+
+  const result = await app.context.syncFromCloud();
+
+  assert.equal(state.securetokenCalls.length, 0,
+    'отказ правил запустил обмен токена: причина не протухший токен');
+  assert.equal(result.reachable, false);
+  assert.equal(app.run('deniedStatus'), 401, 'отказ правил не дошёл до sync:denied');
+  assert.equal(app.sandbox.localStorage.getItem(AUTH_REFRESH_KEY), 'r-owner',
+    'отказ правил стёр сессию');
+  assert.deepEqual(Array.from(app.run('globalThis.__expired')), [],
+    'отказ правил разлогинил');
 });
 
 // Вход по email/паролю падает с «Ключ Firebase-проекта не задан», если

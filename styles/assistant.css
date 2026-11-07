@@ -447,15 +447,53 @@ body.view-assistant #app {
    Цвета — существующие токены: глобальная палитра, шрифты и фоны приложения
    этой правкой не тронуты. */
 
-/* Лист подтверждения (styles/sheets.css даёт слой и панель; на телефоне
-   панель приезжает снизу общим правилом mobile.css, на ПК садится по центру).
-   Превью реплики выкинуто: пузырь виден под подложкой шторки, а лист с двумя
-   кнопками («Удалить» — btn-danger, «Отмена») читается мгновенно */
-#assistant-delete-sheet .btn {
-  width: 100%;
-  min-height: 44px;
+/* --- Попап подтверждения удаления (смена 2026-11-07) ----------------------
+   Прежняя шторка подтверждения (styles/sheets.css) выезжала «красной
+   полосой» на весь низ экрана и перекрывала таб-бар — баг-репорт владельца.
+   Теперь долгое нажатие открывает компактную карточку возле пузыря: узлы
+   создаёт из JS js/ui/assistant-view.js, координаты top/left ставит
+   computePopupPosition (position: fixed), поэтому в CSS их нет.
+   Размеры: ширина по содержимому с потолком 240px, радиус ~12px, тень и
+   светлый фон — те же токены, что у листов. */
+
+/* Прозрачная подложка на весь экран: её единственная работа — поймать
+   клик/тап вне карточки и закрыть попап. Фона нет — чат остаётся виден
+   целиком. z-index выше таб-бара (1000): тап мимо попапа ловится везде,
+   включая таб-бар */
+.assistant-delete-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1260;
 }
 
-#assistant-delete-sheet .sheet-cancel-btn {
-  margin: 8px 0 0;
+/* Карточка попапа: выше подложки (клик по кнопке доходит) и выше шторок
+   (level-sheet 1200) — это верхний слой экрана */
+.assistant-delete-popup {
+  position: fixed;
+  z-index: 1270;
+  max-width: 240px;
+  padding: 4px;
+  background: var(--surface-card);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow);
+}
+
+/* «Удалить» — красный ТЕКСТ на светлой карточке (как .form-error в
+   modal.css): деструктивное действие читается мгновенно, а экран не
+   заливается красным. Тап-цель 44px — как у кнопок проекта */
+.assistant-delete-confirm {
+  display: block;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--danger);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.assistant-delete-confirm:active {
+  background: var(--surface-pressed);
 }

@@ -18,10 +18,19 @@ export function loadApp({ fetchImpl } = {}) {
       setItem: (key, value) => { storage.set(key, String(value)); },
       removeItem: (key) => { storage.delete(key); },
       clear: () => storage.clear(),
+      // Перебор ключей — как в настоящем DOM Storage: код приложения (зачистка
+      // сессии в firebase-auth.js) ходит по length/key(i) и обязан работать
+      // одинаково в браузере и в песочнице. key(i) вне диапазона — null.
+      get length() { return storage.size; },
+      key: (i) => {
+        const keys = Array.from(storage.keys());
+        return Number.isInteger(i) && i >= 0 && i < keys.length ? keys[i] : null;
+      },
       _dump: () => Object.fromEntries(storage),
     },
     document: {
       addEventListener() {},
+      removeEventListener() {},
       getElementById() { return null; },
       querySelector() { return null; },
       querySelectorAll() { return []; },
@@ -34,6 +43,7 @@ export function loadApp({ fetchImpl } = {}) {
     },
     window: {
       addEventListener() {},
+      removeEventListener() {},
       matchMedia() { return { matches: false }; },
       scrollTo() {},
       innerWidth: 1200,

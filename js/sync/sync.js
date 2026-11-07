@@ -23,7 +23,7 @@ import {
   mergeCloudIntoLocal, mergeTombstonesById, mergePlannerV1, normalizePlannerV1,
   plannerCanonicalJson, sectionEnvelopeWins, unwrapSection,
 } from './merge.js';
-import { getAuthToken } from '../data/firebase-auth.js';
+import { forceRefreshAuthToken, getAuthToken } from '../data/firebase-auth.js';
 export let syncTimer = null;
 // Сетевой таймаут обменов. Без него зависшее соединение (сеть отдаёт TCP,
 // но не отвечает) держит syncExchange открытым вечно: правки встают в
@@ -63,35 +63,93 @@ export let deniedStatus = 0;
 // Токен аутентификации (js/data/firebase-auth.js) добывается здесь, в
 // единственной обёртке: правила базы закрывают все узлы сразу, и вызывающим
 // про аутентификацию знать не нужно. Токена нет (нет ключа, нет входа
-// владельца, офлайн, пауза после неудачи) — запрос идёт без ?auth=, и
+// владельца, офлайн, пауза после неудачи) — запрос идёт без заголовка, и
 // опубликованные правила ответят отказом: приложение продолжит работать на
 // локальных данных, а наружу уйдёт sync:denied, чтобы человек увидел причину.
 // getAuthToken() не бросает и при неудаче не выходит в сеть до конца своей
 // 5-минутной паузы, так что вызов здесь дешёвый.
-async function fetchWithTimeout(url, options) {
-  const token = await getAuthToken();
-  let fullUrl = url;
-  if (token) {
-    fullUrl = url + (url.indexOf('?') === -1 ? '?' : '&') +
-      'auth=' + encodeURIComponent(token);
-  }
+//
+// Токен ходит ЗАГОЛОВКОМ Authorization: Bearer <idToken> (REST RTDB принимает
+// и легаси-параметр ?auth= в URL, и этот заголовок), не параметром ?auth=:
+// URL запроса оседает в логах серверов, прокси и истории браузера, заголовок —
+// нигде из них не остаётся (аудит секретов, задача 3.1).
+//
+// Ответ 401 «токен просрочен» (INVALID_ID_TOKEN и родня) — не отказ правил,
+// а протухший id-токен: часы устройства врут или страница спала дольше часа.
+// Такой ответ лечится здесь же: forceRefreshAuthToken() меняет refresh-токен
+// на свежую пару, и ИСХОДНЫЙ запрос повторяется один раз с новым токеном.
+// «Permission denied» (правила не пускают) и повторный 401 после refresh
+// обновлением не лечатся — это уже честный sync:denied.
+function authedFetch(url, options, token) {
   const guard = syncGuard();
   const request = Object.assign({}, options, { signal: guard.signal });
-  return fetch(fullUrl, request).then(function (response) {
-    // 401/403 — это не «нет связи», а «нас сюда не пускают»: правила базы
-    // привязаны к auth.uid владельца, и устройство без входа (или с потерянной
-    // сессией) получит отказ всегда. Без сигнала снаружи это выглядело бы
-    // вечной сетевой ошибкой, поэтому событие ставится здесь, в единственной
-    // обёртке: его видят и GET, и PUT, и бэкапы. 5xx сюда не входит — совет
-    // «проверьте вход» при сбое сервера значил бы соврать.
-    if (response.status === 401 || response.status === 403) {
-      deniedStatus = response.status;
-      bus.emit('sync:denied', { status: response.status });
-    } else if (response.ok) {
-      deniedStatus = 0;
+  if (token) {
+    // Чужие заголовки вызова (X-Firebase-ETag, Content-Type) сохраняются:
+    // Bearer добавляется к ним, а не вместо них.
+    request.headers = Object.assign({}, (options && options.headers) || {});
+    request.headers['Authorization'] = 'Bearer ' + token;
+  }
+  return fetch(url, request).finally(guard.cancel);
+}
+
+// Протух ли токен по этому ответу. Тело читается с клона, чтобы сам ответ
+// остался читаемым для вызывающих; в песочницах без Response.clone тело
+// читается напрямую — тела не-ok ответов вызывающие всё равно не читают.
+// Формы ошибки обе легальны: RTDB REST пишет {"error": "строка"},
+// identitytoolkit — {"error": {"message": "…"}}.
+async function isExpiredTokenResponse(response) {
+  if (!response || response.status !== 401) return false;
+  let message = '';
+  try {
+    const probe = typeof response.clone === 'function' ? response.clone() : response;
+    const body = await probe.json();
+    const error = body && body.error;
+    message = typeof error === 'string' ? error : (error && error.message) || '';
+  } catch (e) {
+    return false; // тело не читается — ответ остаётся обычным отказом
+  }
+  return /INVALID_ID_TOKEN|TOKEN_EXPIRED|EXPIRED|INVALID_AUTH_TOKEN/i.test(message);
+}
+
+// Книга отказов по правам — только на ПОСЛЕДНЕМ ответе запроса: если 401
+// вылечился обновлением токена и повтор удался, наружу не уходит ни
+// sync:denied, ни deniedStatus.
+//
+// 401/403 — это не «нет связи», а «нас сюда не пускают»: правила базы
+// привязаны к auth.uid владельца, и устройство без входа (или с потерянной
+// сессией) получит отказ всегда. Без сигнала снаружи это выглядело бы
+// вечной сетевой ошибкой, поэтому событие ставится здесь, в единственной
+// обёртке: его видят и GET, и PUT, и бэкапы. 5xx сюда не входит — совет
+// «проверьте вход» при сбое сервера значил бы соврать.
+function noteDenied(response) {
+  if (response.status === 401 || response.status === 403) {
+    deniedStatus = response.status;
+    bus.emit('sync:denied', { status: response.status });
+  } else if (response.ok) {
+    deniedStatus = 0;
+  }
+}
+
+async function fetchWithTimeout(url, options) {
+  const token = await getAuthToken();
+  const response = await authedFetch(url, options, token);
+
+  // Протухший id-токен: обновить пару токенов и повторить ИСХОДНЫЙ запрос
+  // один раз. Повтор оплачивается только новым токеном: refresh не удался
+  // (мёртвый refresh-токен, нет сети) — наружу уходит первый ответ как есть,
+  // а при 4xx-отказе обмена firebase-auth сам разлогинит и сообщит событием.
+  // Ровно один повтор: ответ повтора дальше не проверяется — иначе упорный
+  // 401 зациклил бы refresh.
+  if (token && await isExpiredTokenResponse(response)) {
+    const freshToken = await forceRefreshAuthToken();
+    if (freshToken) {
+      const retried = await authedFetch(url, options, freshToken);
+      noteDenied(retried);
+      return retried;
     }
-    return response;
-  }).finally(guard.cancel);
+  }
+  noteDenied(response);
+  return response;
 }
 // Идёт обмен с сервером. Свои же сохранения в этот момент не должны ставить
 // встречную отправку: loadQaza() зовёт saveQaza(), а syncToCloud() зовёт

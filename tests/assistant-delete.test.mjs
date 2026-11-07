@@ -9,21 +9,21 @@
 //     перерисовки не даёт «удалить не то»;
 //   * у узлов, которых в истории нет (приветствие, «Печатает…», пузырь
 //     ошибки), индекса нет — и удалять их нельзя;
-//   * подтверждение — нижний лист приложения (styles/sheets.css), а не
-//     confirm() и не централизованная модалка; внутри только «Удалить» и
-//     «Отмена»;
+//   * подтверждение — компактный попап возле пузыря (смена 2026-11-07,
+//     прежняя шторка #assistant-delete-sheet перекрывала таб-бар), а не
+//     confirm(); позиционирование и подложка — tests/assistant-popup.test.mjs;
 //   * удаление из середины не отправляет модели контекст, начинающийся с
 //     assistant-реплики (правило — в requestTail, описано в коде);
-//   * текст реплики не становится разметкой ни в пузыре, ни в листе:
+//   * текст реплики не становится разметкой ни в пузыре, ни в попапе:
 //     XSS не внесён;
 //   * history key — device-local (js/data/storage.js), синхронизация других
 //     разделов не затрагивается: ни одного вызова шины и чужих ключей.
 //
 // Fake DOM здесь полнее, чем в assistant.test.mjs: нужны closest, атрибуты,
-// hidden у шторки и делегирование жеста по ленте. Всплытие события fake не
-// моделирует — поэтому «долгое нажатие по пузырю» проверяется вызовом
-// обработчика ленты с target-ом пузыря, а живое всплытие — ручная
-// браузерная проверка.
+// body (попап вставляется туда из JS) и делегирование жеста по ленте.
+// Всплытие события fake не моделирует — поэтому «долгое нажатие по пузырю»
+// проверяется вызовом обработчика ленты с target-ом пузыря, а живое всплытие
+// — ручная браузерная проверка.
 
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
@@ -48,10 +48,21 @@ function makeNode(doc, tag) {
     textContent: '',
     hidden: false,
     type: '',
+    // Попап позиционируется инлайн-стилями: top/left ставит JS
+    style: {},
+    // Размер/позиция узла: попап и пузыри меряются getBoundingClientRect
+    rect: { top: 0, left: 0, width: 120, height: 44 },
+    getBoundingClientRect() { return node.rect; },
     _events: {},
     appendChild(child) {
       node.children.push(child);
       child.parentNode = node;
+      return child;
+    },
+    removeChild(child) {
+      const i = node.children.indexOf(child);
+      if (i >= 0) node.children.splice(i, 1);
+      child.parentNode = null;
       return child;
     },
     setAttribute(name, value) { node.attrs[name] = String(value); },
@@ -61,6 +72,11 @@ function makeNode(doc, tag) {
     hasAttribute(name) { return Object.prototype.hasOwnProperty.call(node.attrs, name); },
     addEventListener(type, fn) {
       (node._events[type] || (node._events[type] = [])).push(fn);
+    },
+    removeEventListener(type, fn) {
+      const list = node._events[type] || [];
+      const i = list.indexOf(fn);
+      if (i >= 0) list.splice(i, 1);
     },
     fire(type) {
       const handlers = node._events[type] || [];
@@ -99,8 +115,8 @@ function makeDoc() {
     querySelectorAll() { return []; },
     querySelector() { return null; },
     addEventListener() {},
+    removeEventListener() {},
     createTextNode(text) { return { text: String(text) }; },
-    body: { classList: { add() {}, remove() {}, contains() { return false; } } },
     // closest по классу: идём по цепочке родителей, как живой Element.closest
     closestFrom(node, selector) {
       const cls = String(selector || '').replace(/^\./, '');
@@ -127,15 +143,6 @@ function makeDoc() {
   doc.chat = chat;
   byId['assistant-chat'] = chat;
 
-  const sheet = makeNode(doc, 'div');
-  sheet.hidden = true;
-  byId['assistant-delete-sheet'] = sheet;
-  doc.sheet = sheet;
-
-  const confirmBtn = makeNode(doc, 'button');
-  byId['assistant-delete-confirm'] = confirmBtn;
-  doc.confirmBtn = confirmBtn;
-
   const input = makeNode(doc, 'textarea');
   input.value = '';
   byId['assistant-input'] = input;
@@ -150,7 +157,19 @@ function makeDoc() {
   const toast = makeNode(doc, 'div');
   byId.toast = toast;
   doc.toast = toast;
+
+  // Попап и его подложка создаются из JS и вставляются в body
+  doc.body = makeNode(doc, 'body');
   return doc;
+}
+
+// Узлы попапа в fake-body (смена 2026-11-07: шторки больше нет)
+function popupOf(doc) {
+  return doc.body.children.find((n) => n.className === 'assistant-delete-popup') || null;
+}
+
+function backdropOf(doc) {
+  return doc.body.children.find((n) => n.className === 'assistant-delete-backdrop') || null;
 }
 
 function bindDoc(sandbox, doc) {
@@ -160,15 +179,15 @@ function bindDoc(sandbox, doc) {
 
 // Проводка как в js/app.js (init/bindEvents в песочнице не запускается:
 // document.addEventListener там no-op): лента слушает долгое нажатие через
-// bindAssistantChatLongPress, подтверждение — confirmAssistantDelete.
-// Соответствие этой проводки разметке закрепляет статическая проверка ниже
+// bindAssistantChatLongPress. Кнопку «Удалить» попапа вручную НЕ подключаем:
+// слушатель confirmAssistantDelete вешает сам модуль при создании попапа.
+// Соответствие живой проводке в app.js закрепляет статическая проверка ниже
 function wire(app, doc) {
   doc.timers = makeFakeTimers();
   app.context.bindAssistantChatLongPress(doc.chat, {
     scheduleTimer: doc.timers.schedule,
     cancelTimer: doc.timers.cancel,
   });
-  doc.confirmBtn.addEventListener('click', app.context.confirmAssistantDelete);
   return doc;
 }
 
@@ -262,7 +281,7 @@ test('delete: приветствие, «Печатает…» и пузырь о
   assert.equal(bubbles(doc)[0].hasAttribute('data-msg-index'), false,
     'у приветствия удалять нечего');
   longPressOn(doc, bubbles(doc)[0]);
-  assert.equal(doc.sheet.hidden, true, 'долгое нажатие по приветствию лист не открывает');
+  assert.equal(popupOf(doc), null, 'долгое нажатие по приветствию попап не открывает');
 
   // Ошибка хода к API: пузырь есть, реплики в истории нет
   assert.equal(app.context.onAssistantSubmit('вопрос'), true);
@@ -354,7 +373,7 @@ test('delete: невалидный индекс и уже удалённая р�
     'повторное удаление того же места ничего не вырезает');
 });
 
-test('delete: долгое нажатие открывает лист, а не удаляет сразу', () => {
+test('delete: долгое нажатие открывает попап, а не удаляет сразу', () => {
   const app = loadApp();
   const doc = bindDoc(app.sandbox, makeDoc());
   wire(app, doc);
@@ -366,12 +385,14 @@ test('delete: долгое нажатие открывает лист, а не �
   // Делегирование: слушатель жеста висит на ленте, target — пузырь
   longPressOn(doc, bubbles(doc)[1]);
 
-  assert.equal(doc.sheet.hidden, false, 'открылся лист подтверждения');
+  assert.ok(popupOf(doc), 'открылся попап подтверждения');
+  assert.ok(backdropOf(doc), 'подложка ловит клик вне попапа');
+  assert.equal(app.context.isAssistantDeletePopupOpen(), true);
   assert.deepEqual(stored(app.sandbox).map(m => m.content), ['спроси', 'отвечу'],
     'без подтверждения ничего не удалено');
 });
 
-test('delete: быстрый тап по пузырю лист не открывает', () => {
+test('delete: быстрый тап по пузырю попап не открывает', () => {
   const app = loadApp();
   const doc = bindDoc(app.sandbox, makeDoc());
   wire(app, doc);
@@ -379,13 +400,13 @@ test('delete: быстрый тап по пузырю лист не открыв
   app.context.renderHistory();
 
   tapOn(doc, bubbles(doc)[0]);   // тап по пузырю — не жест удаления
-  assert.equal(doc.sheet.hidden, true, 'лист закрыт');
+  assert.equal(popupOf(doc), null, 'попапа нет');
   assert.equal(doc.timers.pendingCount(), 0, 'таймер жеста снят отпуском');
   assert.equal(app.context.removeHistoryAt(0), true,
     'а долгое нажатие по тому же пузырю — открыло бы');
 });
 
-test('delete: «Удалить» в листе вырезает реплику и закрывает шторку', () => {
+test('delete: «Удалить» в попапе вырезает реплику и закрывает попап', () => {
   const app = loadApp();
   const doc = bindDoc(app.sandbox, makeDoc());
   wire(app, doc);
@@ -396,45 +417,57 @@ test('delete: «Удалить» в листе вырезает реплику �
   ]);
   app.context.renderHistory();
   longPressOn(doc, bubbles(doc)[1]);
-  assert.equal(doc.sheet.hidden, false);
+  assert.ok(popupOf(doc));
 
-  // Подтверждение — кнопка листа (в app.js на ней confirmAssistantDelete)
-  assert.equal(app.context.confirmAssistantDelete(), true);
-  assert.equal(doc.sheet.hidden, true, 'лист закрыт после подтверждения');
+  // Подтверждение — кнопка попапа: слушатель confirmAssistantDelete на ней
+  // вешает сам модуль при создании (та же цепочка, что была у листа)
+  const confirmBtn = popupOf(doc).children.find((c) => c.tagName === 'button');
+  assert.ok(confirmBtn, 'внутри кнопка «Удалить»');
+  assert.equal(confirmBtn.textContent, 'Удалить');
+  confirmBtn.fire('click');
+  assert.equal(popupOf(doc), null, 'попап закрыт после подтверждения');
   assert.deepEqual(stored(app.sandbox).map(m => m.content), ['q1', 'q2']);
 });
 
-test('delete: «Отмена» и закрытие листа ничего не удаляют и индекс снимают', () => {
+test('delete: клик по подложке и close-функция ничего не удаляют, индекс снимают', () => {
   const app = loadApp();
   const doc = bindDoc(app.sandbox, makeDoc());
   wire(app, doc);
   seeded(app, [{ role: 'user', content: 'q1' }, { role: 'assistant', content: 'a1' }]);
   app.context.renderHistory();
   longPressOn(doc, bubbles(doc)[0]);
-  assert.equal(doc.sheet.hidden, false);
+  assert.ok(popupOf(doc));
 
-  app.context.closeAssistantDeleteSheet();
-  assert.equal(doc.sheet.hidden, true);
+  app.context.closeAssistantDeletePopup();
+  assert.equal(popupOf(doc), null, 'попап снят с body');
+  assert.equal(backdropOf(doc), null, 'и подложка снята');
   assert.deepEqual(stored(app.sandbox).map(m => m.content), ['q1', 'a1']);
   // Подтверждение после закрытия: индекс снят close-обработчиком, удалять нечего
   assert.equal(app.context.confirmAssistantDelete(), false,
-    'открытый ранее индекс не пережил закрытие листа');
+    'открытый ранее индекс не пережил закрытие попапа');
+  assert.deepEqual(stored(app.sandbox).map(m => m.content), ['q1', 'a1']);
+
+  // Повторное открытие и закрытие кликом по подложке
+  longPressOn(doc, bubbles(doc)[0]);
+  assert.ok(popupOf(doc));
+  backdropOf(doc).fire('click');
+  assert.equal(app.context.isAssistantDeletePopupOpen(), false, 'тап мимо попапа закрывает');
   assert.deepEqual(stored(app.sandbox).map(m => m.content), ['q1', 'a1']);
 });
 
-test('delete: лист закрывается по Escape-слою и на смене экрана — состояние не залипает', () => {
+test('delete: попап закрывается на смене экрана — состояние не залипает', () => {
   const app = loadApp();
   const doc = bindDoc(app.sandbox, makeDoc());
   wire(app, doc);
   seeded(app, [{ role: 'user', content: 'q1' }]);
   app.context.renderHistory();
   longPressOn(doc, bubbles(doc)[0]);
-  assert.equal(app.context.isAssistantDeleteSheetOpen(), true);
+  assert.equal(app.context.isAssistantDeletePopupOpen(), true);
 
-  app.context.closeAssistantDeleteSheet();
-  assert.equal(app.context.isAssistantDeleteSheetOpen(), false);
+  app.context.closeAssistantDeletePopup();
+  assert.equal(app.context.isAssistantDeletePopupOpen(), false);
   assert.equal(app.context.confirmAssistantDelete(), false,
-    'закрытый лист не оставляет висящего индекса для следующего подтверждения');
+    'закрытый попап не оставляет висящего индекса для следующего подтверждения');
 });
 
 test('delete: индекс не устаревает после перерисовки при запросе в полёте', async () => {
@@ -476,7 +509,7 @@ test('delete: реплика не записана (квота) — индекс
   assert.equal(bubblesNow[0].hasAttribute('data-msg-index'), false,
     'несостоявшейся записи не выдаём индекс');
   longPressOn(doc, bubblesNow[0]);
-  assert.equal(doc.sheet.hidden, true, 'и лист по такому пузырю не открывается');
+  assert.equal(popupOf(doc), null, 'и попап по такому пузырю не открывается');
 });
 
 /* --- контекст запроса ---------------------------------------------------- */
@@ -558,7 +591,7 @@ test('delete: удаление не задевает другие разделы
 
 /* --- XSS ----------------------------------------------------------------- */
 
-test('delete: текст реплики не становится разметкой ни в пузыре, ни в листе', () => {
+test('delete: текст реплики не становится разметкой ни в пузыре, ни в попапе', () => {
   const app = loadApp();
   const doc = bindDoc(app.sandbox, makeDoc());
   wire(app, doc);
@@ -575,18 +608,19 @@ test('delete: текст реплики не становится разметк
   assert.ok(!node.children.some(c => c.tagName === 'img'),
     'из текста не родится разметка: ни img, ни чего-либо ещё');
 
-  // Лист открывается долгим нажатием по враждебному пузырю и не исполняет текст
+  // Попап открывается долгим нажатием по враждебному пузырю и не исполняет текст
   longPressOn(doc, node);
-  assert.equal(doc.sheet.hidden, false, 'лист открыт жестом');
-  assert.ok(!doc.sheet.children.some(c => c.tagName === 'img'),
-    'в листе не появилось детей-разметки');
+  const popup = popupOf(doc);
+  assert.ok(popup, 'попап открыт жестом');
+  assert.ok(!popup.children.some(c => c.tagName === 'img'),
+    'в попапе не появилось детей-разметки');
   const serialized = JSON.stringify(stored(app.sandbox));
   assert.ok(serialized.includes('&lt;') === false, 'в хранилище текст не экранирован дважды');
 });
 
 /* --- разметка и стили ---------------------------------------------------- */
 
-test('delete: в разметке — нижний лист приложения, а не модалка и не confirm()', () => {
+test('delete: подтверждение — попап из JS, а не confirm() и не разметка шторки', () => {
   const app = loadApp();
   const doc = bindDoc(app.sandbox, makeDoc());
   wire(app, doc);
@@ -599,62 +633,53 @@ test('delete: в разметке — нижний лист приложения
   longPressOn(doc, bubbles(doc)[0]);
   assert.deepEqual(plain(called), [], 'нативный confirm не использован');
 
-  const sheet = app.sandbox.document.getElementById('assistant-delete-sheet');
-  assert.equal(sheet.hidden, false, 'подтверждение — в шторке');
+  const popup = popupOf(doc);
+  assert.ok(popup, 'подтверждение — попап возле пузыря');
+  // Диалог озвучен для скринридера: имя живёт в aria-label, заголовка нет
+  assert.equal(popup.attrs.role, 'dialog');
+  assert.equal(popup.attrs['aria-label'], 'Удалить сообщение?');
 });
 
 // --- Проводка и разметка: поведение выше проверяется на ручном wire(), этот
 // тест закрепляет, что живой app.js и index.html подключены тем же манером
 // (иначе тесты зелёные, а в браузере жест ничего не делает)
 
-test('delete: app.js вешает долгое нажатие на ленту, подтверждение и закрытие листа', () => {
+test('delete: app.js вешает долгое нажатие на ленту и гасит попап слоями', () => {
   const app = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
   assert.match(app, /bindAssistantChatLongPress/, 'проводка жеста импортирована');
   assert.match(app,
     /getElementById\('assistant-chat'\)[\s\S]{0,120}bindAssistantChatLongPress\(assistantChat\)/,
     'жест делегирован ленте, а не каждому пузырю');
   assert.ok(!app.includes('onAssistantChatClick'), 'обработчик крестика убран из app.js');
-  assert.match(app,
-    /getElementById\('assistant-delete-confirm'\)[\s\S]{0,160}addEventListener\('click', confirmAssistantDelete\)/,
-    'кнопка «Удалить» подтверждена обработчиком');
-  assert.match(app, /data-assistant-delete-close/,
-    'подложка и «Отмена» листа подключены');
-  // Escape-слой и уход с экрана: шторка не должна переживать переход
-  assert.match(app, /getElementById\('assistant-delete-sheet'\)[\s\S]{0,140}closeAssistantDeleteSheet\(\)/,
-    'Escape гасит лист удаления');
-  assert.match(app, /closeLevelSheet\(\);[\s\S]{0,240}closeAssistantDeleteSheet\(\);/,
-    'смена экрана закрывает лист вместе с остальными шторками');
+  // Кнопку «Удалить» подключает сам модуль при создании попапа: в app.js
+  // её проводки больше нет (и не должно появиться)
+  assert.ok(!app.includes('assistant-delete-confirm'),
+    'app.js не ищет кнопку попапа в разметке — она создаётся из JS');
+  assert.ok(!app.includes('data-assistant-delete-close'),
+    'закрывателей шторки в app.js больше нет');
+  // Escape-слой и уход с экрана: попап не должен переживать ни нажатие,
+  // ни переход
+  assert.match(app, /isAssistantDeletePopupOpen\(\)[\s\S]{0,120}closeAssistantDeletePopup\(\)/,
+    'Escape гасит попап удаления верхним слоем');
+  assert.match(app, /closeLevelSheet\(\);[\s\S]{0,240}closeAssistantDeletePopup\(\);/,
+    'смена экрана закрывает попап вместе с остальными окнами');
+  assert.ok(!app.includes('assistant-delete-sheet') && !app.includes('AssistantDeleteSheet'),
+    'шторка удалена из app.js без переименованных остатков');
 });
 
-test('delete: разметка листа — шторка вне формы ассистента, внутри только кнопки', () => {
+test('delete: разметка без шторки — попап создаёт JS с ролью диалога', () => {
   const html = readIndexHtml();
-  const sheetStart = html.indexOf('<div id="assistant-delete-sheet"');
-  assert.ok(sheetStart >= 0, 'лист удаления есть в разметке');
-  const sheetEnd = html.indexOf('</div>\n\n<!-- Тост', sheetStart);
-  const sheet = html.slice(sheetStart, sheetEnd > 0 ? sheetEnd : sheetStart + 1400);
-  assert.match(sheet, /class="sheet"/, 'это слой шторки (styles/sheets.css)');
-  assert.match(sheet, /role="dialog"/);
-  assert.match(sheet, /aria-modal="true"/);
-  assert.match(sheet, /aria-label="Удалить сообщение\?"/,
-    'заголовка в листе нет — имя диалога живёт в aria-label');
-  assert.ok(!/assistant-delete-preview|assistant-delete-role|assistant-delete-title/.test(sheet),
-    'превью и заголовок убраны: внутри только «Удалить» и «Отмена»');
-  const buttons = sheet.match(/<button\b/g) || [];
-  assert.equal(buttons.length, 2, 'ровно две кнопки');
-  assert.match(sheet, /id="assistant-delete-confirm"[^>]*class="btn btn-danger"/,
-    '«Удалить» — деструктивный стиль проекта (layout.css)');
-  assert.match(sheet, /data-assistant-delete-close/);
-  // Лист обязан лежать ВНЕ #assistant-form: кнопка внутри формы отправляла бы
-  // реплику вместе с подтверждением удаления
-  const formStart = html.indexOf('<form id="assistant-form"');
-  const formEnd = html.indexOf('</form>', formStart);
-  assert.ok(formStart >= 0 && formEnd > formStart, 'форма ассистента найдена');
-  assert.ok(sheetStart > formEnd, 'лист вне #assistant-form');
-  // Подтверждение — не нативный confirm: в разметке он не нужен
-  assert.ok(!/onclick="confirm\(/.test(sheet), 'инлайнового confirm() нет');
+  assert.ok(!html.includes('assistant-delete-sheet'),
+    'шторка #assistant-delete-sheet вычищена из index.html');
+  assert.ok(!html.includes('data-assistant-delete-close'),
+    'закрыватели шторки вычищены из index.html');
+  // Ровно один module-скрипт: точка входа не потерялась при чистке разметки
+  assert.match(html, /<script type="module" src="js\/app\.js"><\/script>/);
+  // Тост после бывшего места шторки жив: чистка не задела соседей
+  assert.match(html, /<div id="toast" role="status" hidden><\/div>/);
 });
 
-test('delete: пузырь и лист описаны стилями без новых цветов', () => {
+test('delete: пузырь и попап описаны стилями без новых цветов', () => {
   const css = readFileSync(new URL('../styles/assistant.css', import.meta.url), 'utf8');
   assert.ok(!css.includes('.assistant-msg-del'), 'стили крестика вычищены');
   // Жест долгого нажатия не должен перехватываться системой
@@ -662,9 +687,9 @@ test('delete: пузырь и лист описаны стилями без но
   assert.ok(msgRule, 'правило пузыря найдено');
   assert.match(msgRule[0], /user-select:\s*none/, 'текст пузыря не выделяется');
   assert.match(msgRule[0], /-webkit-touch-callout:\s*none/, 'iOS не зовёт свою плашку');
-  // Кнопки листа — во всю ширину панели, как в остальных шторках
-  assert.match(css, /#assistant-delete-sheet \.btn\s*\{\s*width: 100%/,
-    'кнопки листа во всю ширину');
+  // Шторки больше нет, попап описан своими классами
+  assert.ok(!css.includes('assistant-delete-sheet'), 'CSS шторки вычищен');
+  assert.match(css, /\.assistant-delete-popup\s*\{/, 'карточка попапа описана');
   // Цвета — только токены проекта
   const section = css.slice(css.indexOf('Удаление одной реплики'));
   assert.ok(section.length > 0, 'секция удаления найдена');

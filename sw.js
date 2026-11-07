@@ -1,4 +1,14 @@
-// v49: синхронизация — plannerV1 уехал из корневого снимка на выделенный
+// v50: синхронизация — авто-refresh id-токена: 401 INVALID_ID_TOKEN -> ровно
+// один securetoken-обмен -> повтор запроса с новыми токенами; битый
+// refresh-токен -> полный разлогин (js/data/firebase-auth.js, js/sync/sync.js);
+// токен теперь в заголовке Authorization: Bearer вместо ?auth= в URL.
+// Чат ИИ: шторка удаления заменена компактным попапом у пузыря — долгое
+// нажатие, позиционирование от getBoundingClientRect (js/ui/assistant-view.js,
+// index.html, styles/assistant.css). CSP: frame-ancestors 'none' в мете и в
+// заголовке хостинга (index.html, firebase.json). Правило прежнее: любой
+// изменившийся в main файл из ASSETS обязан уйти в новое имя кэша, иначе
+// устройство крутит старые байты.
+// (v49: синхронизация — plannerV1 уехал из корневого снимка на выделенный
 // узел -planner (js/sync/core.js, js/sync/sync.js: свой CAS-контур с If-Match
 // и миграция legacy-данных; корневой PUT старого клиента больше не может
 // стереть Матрицу), четыре раздела qaza/prayer/fast/schedule завернуты в
@@ -22,7 +32,7 @@
 // (v46 — правка текстовая (в комментарии js/data/matrix.js:771 перепутались
 // алфавиты), v45 — четыре файла после v44, v44 — восемь файлов аудита,
 // v43 — транспорт plannerV1, v42 — пересобранная вёрстка Матрицы.)
-const CACHE = 'youplanner-v49';
+const CACHE = 'youplanner-v50';
 // Иконки — все из manifest.json: отсутствующая в кэше иконка ломала бы
 // офлайн-установку PWA (аудит 2026-10-31: icon-512.png не кэшировался)
 const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon-512.png', './icon.svg',

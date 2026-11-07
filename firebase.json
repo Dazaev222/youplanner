@@ -1,5 +1,18 @@
 {
   "database": {
     "rules": "database.rules.local.json"
+  },
+  "hosting": {
+    "headers": [
+      {
+        "source": "/**",
+        "headers": [
+          {
+            "key": "Content-Security-Policy",
+            "value": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' blob: data:; font-src 'self' https://fonts.gstatic.com; connect-src https://youplanner-5c2f5-default-rtdb.firebaseio.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://api.neuraldeep.ru; worker-src 'self'; manifest-src 'self'; base-uri 'self'; object-src 'none'; form-action 'none'; frame-ancestors 'none'"
+          }
+        ]
+      }
+    ]
   }
 }

@@ -1,19 +1,22 @@
 // Долгое нажатие на пузырь чата ассистента вместо крестика (задача 3.1,
 // смена 2026-11-06). Крестик «✕» убран из пузырей: на телефоне он съедал
-// тап-цель и замусоривал ленту. Удаление теперь — жест: удержание пузыря
-// 450 мс открывает нижний лист приложения (styles/sheets.css), внутри только
-// «Удалить» и «Отмена», удаление зовёт ту же removeHistoryAt.
+// тап-цель и замусоривал ленту. Удаление — жест: удержание пузыря 450 мс
+// открывает подтверждение. Смена 2026-11-07: вместо нижней шторки —
+// КОМПАКТНЫЙ ПОПАП возле пузыря (шторка выезжала «красной полосой» на весь
+// низ и перекрывала таб-бар), внутри одна кнопка «Удалить», удаление зовёт
+// ту же removeHistoryAt. Позиционирование и подложка —
+// tests/assistant-popup.test.mjs.
 //
 // Что фиксируют проверки:
 //   * createLongPressDetector — чистая логика с инъекцией таймеров и событий:
 //     удержание 450 мс открывает, сдвиг больше 10px отменяет (скролл),
 //     ранний отпуск отменяет (тап), мышь ведётся тем же детектором;
 //   * проводка на ленте (bindAssistantChatLongPress): долгое нажатие по
-//     пузырю с индексом открывает лист, а «Удалить» в листе вырезает ту
+//     пузырю с индексом открывает попап, а «Удалить» в попапе вырезает ту
 //     самую реплику — существующей функцией, с тем же id;
 //   * пузыри без индекса (приветствие, «Печатает…», пузырь ошибки) молчат;
 //   * contextmenu в пузырях гасится: системное меню не перехватывает жест;
-//   * крестика больше нет нигде: ни в js, ни в CSS.
+//   * крестика и шторки больше нет нигде: ни в js, ни в CSS, ни в разметке.
 //
 // Fake DOM — по образцу assistant-delete.test.mjs: всплытие не моделируется,
 // fireOn(child, type) зовёт слушателей ленты с target-ом дочернего узла,
@@ -188,10 +191,21 @@ function makeNode(doc, tag) {
     textContent: '',
     hidden: false,
     type: '',
+    // Попап позиционируется инлайн-стилями: top/left ставит JS
+    style: {},
+    // Размер/позиция узла: попап меряется после вставки в DOM
+    rect: { top: 0, left: 0, width: 120, height: 44 },
+    getBoundingClientRect() { return node.rect; },
     _events: {},
     appendChild(child) {
       node.children.push(child);
       child.parentNode = node;
+      return child;
+    },
+    removeChild(child) {
+      const i = node.children.indexOf(child);
+      if (i >= 0) node.children.splice(i, 1);
+      child.parentNode = null;
       return child;
     },
     setAttribute(name, value) { node.attrs[name] = String(value); },
@@ -201,6 +215,11 @@ function makeNode(doc, tag) {
     hasAttribute(name) { return Object.prototype.hasOwnProperty.call(node.attrs, name); },
     addEventListener(type, fn) {
       (node._events[type] || (node._events[type] = [])).push(fn);
+    },
+    removeEventListener(type, fn) {
+      const list = node._events[type] || [];
+      const i = list.indexOf(fn);
+      if (i >= 0) list.splice(i, 1);
     },
     fire(type) {
       const handlers = node._events[type] || [];
@@ -237,8 +256,8 @@ function makeDoc() {
     querySelectorAll() { return []; },
     querySelector() { return null; },
     addEventListener() {},
+    removeEventListener() {},
     createTextNode(text) { return { text: String(text) }; },
-    body: { classList: { add() {}, remove() {}, contains() { return false; } } },
     // closest по классу: идём по цепочке родителей, как живой Element.closest
     closestFrom(node, selector) {
       const cls = String(selector || '').replace(/^\./, '');
@@ -268,15 +287,6 @@ function makeDoc() {
   doc.chat = chat;
   byId['assistant-chat'] = chat;
 
-  const sheet = makeNode(doc, 'div');
-  sheet.hidden = true;
-  byId['assistant-delete-sheet'] = sheet;
-  doc.sheet = sheet;
-
-  const confirmBtn = makeNode(doc, 'button');
-  byId['assistant-delete-confirm'] = confirmBtn;
-  doc.confirmBtn = confirmBtn;
-
   const input = makeNode(doc, 'textarea');
   input.value = '';
   byId['assistant-input'] = input;
@@ -287,18 +297,31 @@ function makeDoc() {
   const toast = makeNode(doc, 'div');
   byId.toast = toast;
   doc.toast = toast;
+
+  // Попап и его подложка создаются из JS и вставляются в body
+  doc.body = makeNode(doc, 'body');
   return doc;
 }
 
-// Проводка как в js/app.js: жест на ленте с фейковыми часами, подтверждение —
-// кнопкой листа. Живая проводка app.js закрепляется статической проверкой ниже
+// Узлы попапа в fake-body (смена 2026-11-07: шторки больше нет)
+function popupOf(doc) {
+  return doc.body.children.find((n) => n.className === 'assistant-delete-popup') || null;
+}
+
+function backdropOf(doc) {
+  return doc.body.children.find((n) => n.className === 'assistant-delete-backdrop') || null;
+}
+
+// Проводка как в js/app.js: жест на ленте с фейковыми часами. Кнопку «Удалить»
+// попапа вручную НЕ подключаем: слушатель confirmAssistantDelete вешает сам
+// модуль при создании попапа. Живая проводка app.js закрепляется статической
+// проверкой ниже
 function wire(app, doc, timers) {
   app.sandbox.document = doc;   // приложение должно видеть fake DOM, а не дефолт
   app.context.bindAssistantChatLongPress(doc.chat, {
     scheduleTimer: timers.schedule,
     cancelTimer: timers.cancel,
   });
-  doc.confirmBtn.addEventListener('click', app.context.confirmAssistantDelete);
   return doc;
 }
 
@@ -322,7 +345,7 @@ function bubbles(doc) {
   return doc.chat.children.slice();
 }
 
-test('longpress: удержание пузыря открывает лист, ничего не удаляя', () => {
+test('longpress: удержание пузыря открывает попап, ничего не удаляя', () => {
   const app = loadApp();
   const doc = makeDoc();
   doc.timers = makeFakeTimers();
@@ -334,12 +357,13 @@ test('longpress: удержание пузыря открывает лист, н
   app.context.renderHistory();
 
   longPressOn(doc, bubbles(doc)[1]);
-  assert.equal(doc.sheet.hidden, false, 'лист открыт долгим нажатием');
+  assert.ok(popupOf(doc), 'попап открыт долгим нажатием');
+  assert.equal(app.context.isAssistantDeletePopupOpen(), true);
   assert.deepEqual(stored(app.sandbox).map(m => m.content), ['спроси', 'отвечу'],
     'до подтверждения история целая');
 });
 
-test('longpress: «Удалить» в листе зовёт существующую функцию с тем же id', () => {
+test('longpress: «Удалить» в попапе зовёт существующую функцию с тем же id', () => {
   const app = loadApp();
   const doc = makeDoc();
   doc.timers = makeFakeTimers();
@@ -353,12 +377,15 @@ test('longpress: «Удалить» в листе зовёт существую�
 
   // Жест по ВТОРОМУ пузырю (индекс 1, реплика «a1»)
   longPressOn(doc, bubbles(doc)[1]);
-  assert.equal(doc.sheet.hidden, false);
-  doc.confirmBtn.fire('click');   // кнопка «Удалить» листа, как в app.js
+  const popup = popupOf(doc);
+  assert.ok(popup);
+  const confirmBtn = popup.children.find((c) => c.tagName === 'button');
+  assert.ok(confirmBtn, 'внутри кнопка «Удалить»');
+  confirmBtn.fire('click');   // слушатель на ней вешает сам модуль
 
   assert.deepEqual(stored(app.sandbox).map(m => m.content), ['q1', 'q2'],
     'вырезана именно a1 — пузырь и реплика сошлись индексом');
-  assert.equal(doc.sheet.hidden, true, 'лист закрыт после удаления');
+  assert.equal(popupOf(doc), null, 'попап закрыт после удаления');
 });
 
 test('longpress: пузыри без индекса (приветствие) жест игнорируют', () => {
@@ -371,11 +398,11 @@ test('longpress: пузыри без индекса (приветствие) ж�
 
   assert.equal(bubbles(doc).length, 1);
   longPressOn(doc, bubbles(doc)[0]);
-  assert.equal(doc.sheet.hidden, true, 'удалять нечего — лист не открыт');
+  assert.equal(popupOf(doc), null, 'удалять нечего — попап не открыт');
   assert.equal(doc.timers.pendingCount(), 0, 'и таймер не ставился');
 });
 
-test('longpress: быстрый тап по пузырю не открывает лист', () => {
+test('longpress: быстрый тап по пузырю не открывает попап', () => {
   const app = loadApp();
   const doc = makeDoc();
   doc.timers = makeFakeTimers();
@@ -387,7 +414,7 @@ test('longpress: быстрый тап по пузырю не открывает
   doc.timers.advance(PRESS_MS - 1);
   doc.chat.fireOn(bubbles(doc)[0], 'touchend');
   doc.timers.advance(200);
-  assert.equal(doc.sheet.hidden, true, 'тап — не жест удаления');
+  assert.equal(popupOf(doc), null, 'тап — не жест удаления');
   assert.equal(doc.timers.pendingCount(), 0, 'таймер снят отпуском');
   assert.deepEqual(stored(app.sandbox).map(m => m.content), ['q1'],
     'история целая');
@@ -405,11 +432,11 @@ test('longpress: скролл (сдвиг больше порога) отмен�
   doc.timers.advance(100);
   doc.chat.fireOn(bubbles(doc)[0], 'touchmove', touch(0, 40));  // палец уехал
   doc.timers.advance(PRESS_MS);
-  assert.equal(doc.sheet.hidden, true, 'прокрутка не открывает лист');
+  assert.equal(popupOf(doc), null, 'прокрутка не открывает попап');
   assert.deepEqual(stored(app.sandbox).map(m => m.content), ['q1']);
 });
 
-test('longpress: мышь по пузырю тоже открывает лист', () => {
+test('longpress: мышь по пузырю тоже открывает попап', () => {
   const app = loadApp();
   const doc = makeDoc();
   doc.timers = makeFakeTimers();
@@ -419,7 +446,7 @@ test('longpress: мышь по пузырю тоже открывает лист
 
   doc.chat.fireOn(bubbles(doc)[0], 'mousedown', mouse(3, 3));
   doc.timers.advance(PRESS_MS);
-  assert.equal(doc.sheet.hidden, false, 'долгое нажатие мышью работает');
+  assert.ok(popupOf(doc), 'долгое нажатие мышью работает');
 });
 
 test('longpress: contextmenu в пузыре гасится, вне пузыря — живёт', () => {
@@ -466,24 +493,35 @@ test('longpress: app.js вешает жест на ленту, а не на ка
     /getElementById\('assistant-chat'\)[\s\S]{0,120}bindAssistantChatLongPress\(assistantChat\)/,
     'жест делегирован ленте');
   assert.ok(!app.includes('onAssistantChatClick'), 'обработчик крестика убран из app.js');
-  assert.match(app,
-    /getElementById\('assistant-delete-confirm'\)[\s\S]{0,160}addEventListener\('click', confirmAssistantDelete\)/,
-    'кнопка «Удалить» листа по-прежнему подтверждена обработчиком');
+  // Кнопку «Удалить» подключает сам модуль при создании попапа — проводки
+  // прежнего листа (getElementById + data-assistant-delete-close) вычищены
+  assert.ok(!app.includes('assistant-delete-confirm'),
+    'app.js не подключает кнопку попапа — она создаётся из JS');
+  assert.ok(!app.includes('data-assistant-delete-close'),
+    'закрывателей шторки в app.js больше нет');
 });
 
-test('longpress: в разметке листа только «Удалить» и «Отмена»', () => {
+test('longpress: шторки в разметке нет, попап создаёт JS с одной кнопкой', () => {
   const html = readIndexHtml();
-  const sheetStart = html.indexOf('<div id="assistant-delete-sheet"');
-  assert.ok(sheetStart >= 0, 'лист удаления есть в разметке');
-  const sheetEnd = html.indexOf('</div>\n\n<!-- Тост', sheetStart);
-  const sheet = html.slice(sheetStart, sheetEnd > 0 ? sheetEnd : sheetStart + 1400);
-  const buttons = sheet.match(/<button\b/g) || [];
-  assert.equal(buttons.length, 2, 'внутри только две кнопки');
-  assert.match(sheet, /id="assistant-delete-confirm"[^>]*class="btn btn-danger"/,
-    '«Удалить» — деструктивный стиль проекта');
-  assert.match(sheet, />Удалить<\/button>/);
-  assert.match(sheet, /data-assistant-delete-close[^>]*>Отмена</,
-    '«Отмена» закрывает лист');
-  assert.ok(!/assistant-delete-preview|assistant-delete-role|assistant-delete-title/.test(sheet),
-    'превью и заголовок убраны: пузырь виден под подложкой шторки');
+  assert.ok(!html.includes('assistant-delete-sheet'),
+    'шторка #assistant-delete-sheet вычищена из index.html');
+  assert.ok(!html.includes('data-assistant-delete-close'),
+    'закрыватели шторки вычищены из index.html');
+
+  // Единственная кнопка попапа рождается в JS: долгое нажатие → попап с
+  // ровно одной «Удалить» (никаких полос на весь экран)
+  const app = loadApp();
+  const doc = makeDoc();
+  doc.timers = makeFakeTimers();
+  wire(app, doc, doc.timers);
+  seeded(app, [{ role: 'user', content: 'q1' }]);
+  app.context.renderHistory();
+  longPressOn(doc, bubbles(doc)[0]);
+  const popup = popupOf(doc);
+  assert.ok(popup, 'попап открыт жестом');
+  const buttons = popup.children.filter((c) => c.tagName === 'button');
+  assert.equal(buttons.length, 1, 'внутри ровно одна кнопка');
+  assert.equal(buttons[0].textContent, 'Удалить');
+  assert.equal(popup.children.length, 1,
+    'других узлов нет: закрытие — клик по подложке, «Отмены» не нужно');
 });

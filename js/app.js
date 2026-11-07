@@ -17,8 +17,8 @@ import { STORAGE_KEYS } from './data/storage.js';
 import { SYNC_STATUS_MS, clearSyncPending, syncPending } from './sync/core.js';
 import { deniedStatus, flushPendingSync, markCloudReady, scheduleSync, settleHabitsAfterSync, syncFromCloud, syncToCloud } from './sync/sync.js';
 import {
-  bindAssistantChatLongPress, closeAssistantKeyModal, confirmAssistantDelete,
-  closeAssistantDeleteSheet, onAssistantChipClick, onAssistantClear,
+  bindAssistantChatLongPress, closeAssistantDeletePopup, closeAssistantKeyModal,
+  isAssistantDeletePopupOpen, onAssistantChipClick, onAssistantClear,
   onAssistantFormSubmit, onAssistantImageClear, onAssistantImagePick,
   onAssistantInputInput, onAssistantInputKeydown, onAssistantKeyCancel,
   onAssistantKeySave, onAssistantModelChange, onAssistantPdfClear,
@@ -703,22 +703,14 @@ export function bindEvents() {
   if (assistantChips) assistantChips.addEventListener('click', onAssistantChipClick);
 
   // Удаление одной реплики (задача 3.1): долгое нажатие на пузырь открывает
-  // нижний лист подтверждения. Жест делегирован ленте — один слушатель на
-  // контейнер, а не по обработчику на каждом пузыре (лента перерисовывается
-  // целиком на каждое изменение истории)
+  // компактный попап возле пузыря (смена 2026-11-07: шторка выезжала красной
+  // полосой на весь низ и перекрывала таб-бар). Жест делегирован ленте — один
+  // слушатель на контейнер, а не по обработчику на каждом пузыре (лента
+  // перерисовывается целиком на каждое изменение истории). Кнопку «Удалить»
+  // и подложку подключает сам попап при создании: app.js о нём больше ничего
+  // не знает, кроме close/is-функций для Escape и смены экрана
   const assistantChat = document.getElementById('assistant-chat');
   if (assistantChat) bindAssistantChatLongPress(assistantChat);
-
-  const assistantDeleteConfirm = document.getElementById('assistant-delete-confirm');
-  if (assistantDeleteConfirm) {
-    assistantDeleteConfirm.addEventListener('click', confirmAssistantDelete);
-  }
-
-  // Подложка и «Отмена» листа удаления — тем же манером, что у попапа уровня
-  const assistantDeleteClosers = document.querySelectorAll('[data-assistant-delete-close]');
-  for (let i = 0; i < assistantDeleteClosers.length; i++) {
-    assistantDeleteClosers[i].addEventListener('click', closeAssistantDeleteSheet);
-  }
 
   const assistantKeySave = document.getElementById('assistant-key-save');
   if (assistantKeySave) assistantKeySave.addEventListener('click', onAssistantKeySave);
@@ -915,12 +907,13 @@ export function bindEvents() {
     syncFromCloud();
   });
 
-  // Escape разбирает окна строго по слоям, ОДНО окно на нажатие: панель
-  // статистики, модалка ключа ассистента, модалка привычки, шторка уровня —
-  // в порядке «верхнее первым». Раньше модалка привычки закрывалась без
-  // return, и одно нажатие снимало и её, и шторку уровня под ней, а модалка
-  // ключа ассистента жила своим обработчиком и закрывалась параллельно с
-  // остальными. Теперь порядок единый: каждое нажатие гасит ровно верхний слой.
+  // Escape разбирает окна строго по слоям, ОДНО окно на нажатие: попап
+  // удаления реплики, панель статистики, модалка ключа ассистента, модалка
+  // привычки, шторка уровня — в порядке «верхнее первым». Раньше модалка
+  // привычки закрывалась без return, и одно нажатие снимало и её, и шторку
+  // уровня под ней, а модалка ключа ассистента жила своим обработчиком и
+  // закрывалась параллельно с остальными. Теперь порядок единый: каждое
+  // нажатие гасит ровно верхний слой.
   document.addEventListener('keydown', function (event) {
     if (event.key !== 'Escape') return;
 
@@ -929,6 +922,13 @@ export function bindEvents() {
     // ровно один слой и одним нажатием, поэтому проверять его надо раньше
     // остального — иначе Escape снял бы и лист, и панель под ним разом.
     if (handleMatrixEscape()) return;
+
+    // Попап удаления реплики ассистента — верхний слой (выше шторок):
+    // гасится первым, как и положено верхнему окну
+    if (isAssistantDeletePopupOpen()) {
+      closeAssistantDeletePopup();
+      return;
+    }
 
     // Панель статистики — верхний слой и в цепочке проверяется первой:
     // она висит поверх таб-бара, и Escape обязан снять сначала её
@@ -954,14 +954,6 @@ export function bindEvents() {
     const levelSheet = document.getElementById('level-sheet');
     if (levelSheet && !levelSheet.hidden) {
       closeLevelSheet();
-      return;
-    }
-
-    // Лист подтверждения удаления сообщения — та же шторка: z-index ниже
-    // попапа уровня, поэтому проверяется после него (верхний слой первым)
-    const deleteSheet = document.getElementById('assistant-delete-sheet');
-    if (deleteSheet && !deleteSheet.hidden) {
-      closeAssistantDeleteSheet();
       return;
     }
 
@@ -1154,10 +1146,9 @@ export function switchAppView(name) {
   closeStatsMenu();
   closeLevelSheet();
   closeAssistantKeyModal();
-  // Лист удаления сообщения — модалка экрана ассистента: программный переход
-  // без этого оставил бы висящую шторку поверх нового раздела с чужим
-  // подтверждением внутри
-  closeAssistantDeleteSheet();
+  // Попап удаления реплики — окно экрана ассистента: программный переход
+  // без этого оставил бы его висеть поверх нового раздела
+  closeAssistantDeletePopup();
   closeModal();
 
   // Вход в раздел запоминает, откуда вошли, — туда «Назад» из хаба и вернёт
