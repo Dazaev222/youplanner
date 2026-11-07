@@ -251,7 +251,8 @@ export function loadQazaLog() {
 // Запись ключа. Журнал не чистится по датам и не обрезается: ограничения
 // размера нет, как у истории уразы (§5).
 function saveQazaLog(log) {
-  if (!log || !validQazaLogDate(log.since)) return;
+  // Контракт boolean, как у отказа хранилища ниже: невалидный журнал — false
+  if (!log || !validQazaLogDate(log.since)) return false;
 
   if (!safeSetItem(QAZA_LOG_KEY, JSON.stringify({
     version: QAZA_LOG_VERSION,

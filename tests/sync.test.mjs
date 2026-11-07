@@ -84,9 +84,11 @@ test('вызов во время обмена доезжает повторны�
   await first;
   await new Promise((resolve) => setTimeout(resolve, 20));
 
-  // Два обмена, и в каждом два чтения узла: первое — внутри бэкапа,
-  // второе — повторная сверка непосредственно перед PUT (B.2).
-  assert.equal(fetchImpl.stats.mainGets(), 4,
+  // Два обмена. Первый несёт бэкап с чтением узла данных; второй идёт после
+  // успешной копии и пропускает бэкап по троттлингу (Г2) — чтений больше
+  // нет, PUT уходит по текущему lastCloudEtag. Контрольный GET перед PUT
+  // убран ещё в Г1: гонку B.2 закрывает условная запись (412).
+  assert.equal(fetchImpl.stats.mainGets(), 1,
     'повторный обмен после очереди не состоялся');
   assert.equal(fetchImpl.stats.mainPuts(), 2);
 });
@@ -170,8 +172,9 @@ test('ключ задан: все firebaseio-обмены уходят с ?auth=
       'заголовок Authorization вернулся (RTDB его отвергает): ' + c.url);
   }
   // Фильтры счётчиков по подстроке firebaseio не должны заметить auth-серверы.
-  // Чтений два: бэкап плюс повторная сверка перед PUT (B.2), оба с токеном.
-  assert.equal(fetchImpl.stats.mainGets(), 2);
+  // Чтение одно — бэкап: контрольный GET перед PUT убран (Г1), гонку B.2
+  // закрывает условная запись (412).
+  assert.equal(fetchImpl.stats.mainGets(), 1);
   assert.equal(fetchImpl.stats.mainPuts(), 1);
 });
 

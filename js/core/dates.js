@@ -1,3 +1,7 @@
+// Миллисекунды в сутках для разниц дат (Date.UTC, метки времени). Календарные
+// дни из таких разниц достают целым округлением, а не накоплением миллисекунд:
+// в зонах с переводом часов сутки бывают не ровно 24 часа.
+export const DAY_MS = 86400000;
 // Date → 'YYYY-MM-DD' по локальным компонентам. UTC-сериализация запрещена
 // (даёт сдвиг на день), поэтому дата собирается из getFullYear/getMonth/getDate.
 export function toISODate(d) {
@@ -58,4 +62,16 @@ export function getMonthDatesToToday(year, month) {
     dates.push(toISODate(new Date(year, month, day)));
   }
   return dates;
+}
+// Русское склонение слова «день» при числе: 1 и 21 — день, 2–4 и 22–24 —
+// дня, 0, 5–20 и 11–14 — дней. Жило тремя копиями (матрица, ассистент,
+// ураза) с одним правилом — сведено сюда, чтобы формы на разных экранах
+// не разъезжались.
+export function pluralDays(n) {
+  const mod100 = Math.abs(n) % 100;
+  const mod10 = mod100 % 10;
+  if (mod100 >= 11 && mod100 <= 14) return 'дней';
+  if (mod10 === 1) return 'день';
+  if (mod10 >= 2 && mod10 <= 4) return 'дня';
+  return 'дней';
 }

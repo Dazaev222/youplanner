@@ -399,17 +399,18 @@ test('syncToCloudNow: снимок сервера новее — PUT уезжа�
   assert.equal(app.run('globalThis.__applied'), 1, 'sync:applied не эмитился на слиянии');
 });
 
-// ── B.2: повторный GET непосредственно перед PUT ────────────────────────────
+// ── B.2: гонка между первым GET и PUT закрывается условной записью ──────────
 // Гонка двух устройств: между первым GET (внутри backupCloudSnapshot) и PUT
-// другое устройство успевает отправить свой снимок — PUT без повторной сверки
-// затирает его безвозвратно. Ожидание: перед PUT ещё один GET; если снимок
-// изменился, слияние повторяется со свежим снимком, и наверх уезжает уже
-// объединение с чужой правкой.
+// другое устройство успевает отправить свой снимок — безусловный PUT стёр бы
+// его безвозвратно. Контрольный GET перед PUT убран (Г1): гонку ловит сервер —
+// PUT с устаревшим If-Match получает 412, цикл перечитывает снимок, сливает
+// его (слияние в ветке 412) и повторяет PUT, наверх уезжает уже объединение
+// с чужой правкой.
 
-test('syncToCloudNow: снимок изменился после первого GET — слияние повторяется, PUT несёт свежее', async () => {
+test('syncToCloudNow: чужой PUT между нашим GET и PUT — 412, слияние в ветке 412, повторный PUT несёт свежее', async () => {
   const oldSnapshot = baseCloud();
   const freshSnapshot = baseCloud();
-  // Чужой PUT успел между нашими двумя GET: метка свежее, раздел records
+  // Чужой PUT успел между нашим GET и нашим PUT: метка свежее, раздел records
   // получил день, которого не было в первом снимке
   const freshTs = CLOUD_TS + 1000;
   freshSnapshot.updatedAt = freshTs;
@@ -418,28 +419,53 @@ test('syncToCloudNow: снимок изменился после первого 
   });
   freshSnapshot.records['2026-10-26'] = { h3: true };
 
+  // Модель сервера — как makeCasServer в planner-sync.test.mjs: GET отдаёт
+  // ETag, PUT с чужим If-Match → 412. Чужая запись применяется при первом
+  // PUT, чтобы наш GET прошёл по старому ETag, а условный PUT получил 412.
+  const state = { snapshot: oldSnapshot, etag: 'etag-1', etagSeq: 1, raceApplied: false, statuses: [] };
   const calls = [];
-  let mainGetIndex = 0;
   const fetchImpl = function (url, opts) {
     const options = opts || {};
     const method = options.method || 'GET';
-    calls.push({ url: String(url), method, body: options.body });
+    const headers = options.headers || {};
+    calls.push({ url: String(url), method, headers, body: options.body });
     if (method === 'GET' && String(url).includes('backups')) {
       return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve([]); } });
     }
     if (method === 'GET') {
-      mainGetIndex += 1;
-      const snapshot = mainGetIndex === 1 ? oldSnapshot : freshSnapshot;
-      return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve(snapshot); } });
+      const etag = state.etag;
+      return Promise.resolve({
+        ok: true, status: 200,
+        headers: { get: function (name) { return String(name).toLowerCase() === 'etag' ? etag : null; } },
+        json: function () { return Promise.resolve(state.snapshot); },
+      });
     }
+    if (String(url).includes('backups')) {
+      return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve({}); } });
+    }
+    // PUT корня: сначала отрабатывает чужой писатель (гонка), затем
+    // условная запись по If-Match — как настоящий RTDB-REST
+    if (!state.raceApplied) {
+      state.raceApplied = true;
+      state.snapshot = freshSnapshot;
+      state.etagSeq += 1;
+      state.etag = 'etag-' + state.etagSeq;
+    }
+    const match = headers['If-Match'];
+    if (match && match !== state.etag) {
+      state.statuses.push(412);
+      return Promise.resolve({ ok: false, status: 412, json: function () { return Promise.resolve({ error: 'conflict' }); } });
+    }
+    state.snapshot = JSON.parse(options.body);
+    state.etagSeq += 1;
+    state.etag = 'etag-' + state.etagSeq;
+    state.statuses.push(200);
     return Promise.resolve({ ok: true, status: 200, json: function () { return Promise.resolve({}); } });
   };
-  fetchImpl.mainPut = function () {
-    for (let i = 0; i < calls.length; i++) {
-      const call = calls[i];
-      if (call.method === 'PUT' && call.url.includes('firebaseio.com') && !call.url.includes('backups')) return call;
-    }
-    return null;
+  fetchImpl.mainPuts = function () {
+    return calls.filter(function (c) {
+      return c.method === 'PUT' && c.url.includes('firebaseio.com') && !c.url.includes('backups');
+    });
   };
   fetchImpl.mainGetCount = function () {
     return calls.filter(function (c) {
@@ -455,13 +481,24 @@ test('syncToCloudNow: снимок изменился после первого 
 
   await app.context.syncToCloudNow();
 
-  assert.equal(fetchImpl.mainGetCount(), 2, 'повторный GET перед PUT не состоялся');
-  const put = fetchImpl.mainPut();
-  assert.ok(put, 'PUT не состоялся');
-  const body = JSON.parse(put.body);
+  // Контрольного GET перед PUT больше нет: основной GET один, второй —
+  // перечитывание в ветке 412
+  assert.equal(fetchImpl.mainGetCount(), 2, 'ожидается GET бэкапа и перечитывание после 412');
+  const puts = fetchImpl.mainPuts();
+  assert.equal(puts.length, 2, 'ожидается 412 на первом PUT и повторная попытка после слияния');
+  assert.deepEqual(state.statuses, [412, 200], 'сервер должен был ответить 412, затем 200');
+  assert.ok(puts[0].headers['If-Match'], 'первый PUT пошёл без If-Match при известном ETag');
+  assert.notEqual(puts[1].headers['If-Match'], puts[0].headers['If-Match'],
+    'повторный PUT обязан пойти по свежему ETag');
+  const body = JSON.parse(puts[1].body);
   assert.deepEqual(Object.keys(body.records).sort(),
     ['2026-10-20', '2026-10-25', '2026-10-26'],
-    'PUT должен нести слияние со свежим снимком: день 2026-10-26 приехал вторым GET и не должен быть затёрт');
+    'повторный PUT должен нести слияние со свежим снимком: день 2026-10-26 приехал перечитыванием после 412 и не должен быть затёрт');
+  // Обе правки живы: чужой день в принятом сервером снимке и локально
+  assert.ok(state.snapshot.records['2026-10-26'], 'чужая правка затёрта принятым снимком');
+  const localRecords = JSON.parse(app.sandbox.localStorage.getItem('youplanner.records'));
+  assert.deepEqual(Object.keys(localRecords).sort(), ['2026-10-20', '2026-10-25', '2026-10-26'],
+    'слияние ветки 412 не применено локально');
 });
 
 test('syncToCloudNow: сервер не новее — слияния нет, PUT уходит как раньше', async () => {

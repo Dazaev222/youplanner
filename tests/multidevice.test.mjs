@@ -422,12 +422,15 @@ test('два устройства: публикация А доезжает ск
   assert.ok(callsWithAuth(server.dataCalls, aNew.idToken).some(function (c) { return c.status === 200; }),
     'повтор с новым токеном не состоялся');
 
-  // Ровно один успешный planner-PUT и один корневой PUT; бэкап не ходил (узел был пуст)
+  // Ровно один успешный planner-PUT и один корневой PUT; бэкап не ходил (узел был пуст).
+  // Без контрольного GET (Г1) 401 середины полёта падает на сам planner-PUT:
+  // в dataCalls две записи — попытка с 401 и её повтор с новым токеном, но это
+  // один и тот же запрос транспорта, успешных публикаций одна.
   const plannerPuts = server.dataCalls.filter(function (c) {
     return c.method === 'PUT' && c.url.indexOf('-planner') !== -1;
   });
-  assert.equal(plannerPuts.length, 1);
-  assert.equal(plannerPuts[0].status, 200);
+  assert.equal(plannerPuts.filter(function (c) { return c.status === 200; }).length, 1);
+  assert.equal(plannerPuts[plannerPuts.length - 1].status, 200);
   const rootPuts = server.dataCalls.filter(function (c) {
     return c.method === 'PUT' && c.url.indexOf('firebaseio.com') !== -1 &&
       c.url.indexOf('-planner') === -1 && c.url.indexOf('-backups') === -1;

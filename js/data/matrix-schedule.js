@@ -17,7 +17,7 @@
    проходит через `new Date('YYYY-MM-DD')` и никогда не сериализуется в UTC.
    Перевод часов не сдвигает ни срок, ни длительность all-day. */
 
-import { isDateLike, parseISODate, toISODate } from '../core/dates.js';
+import { DAY_MS, isDateLike, parseISODate, pluralDays, toISODate } from '../core/dates.js';
 
 export const SCHEDULE_VERSION = 1;
 
@@ -122,7 +122,7 @@ function jsonClone(value, depth) {
 
 function ordinalOfDay(iso) {
   const d = parseISODate(iso);
-  return Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000);
+  return Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / DAY_MS);
 }
 
 // Прибавить календарные дни/месяцы/годы без помощи Date-арифметики с
@@ -264,13 +264,7 @@ function momentOf(schedule, which) {
 
 /* --- Длительность --------------------------------------------------------- */
 
-function daysCountWords(n) {
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) return 'день';
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'дня';
-  return 'дней';
-}
+// Склонение «день / дня / дней» — общее (core/dates.js, pluralDays)
 
 function minutesLabel(total) {
   const hours = Math.floor(total / 60);
@@ -293,7 +287,7 @@ export function scheduleDuration(schedule) {
   if (days < 1) return none;
 
   if (schedule.allDay) {
-    return { kind: 'allDay', days, minutes: null, label: days + ' ' + daysCountWords(days) };
+    return { kind: 'allDay', days, minutes: null, label: days + ' ' + pluralDays(days) };
   }
 
   const from = momentOf(schedule, 'start');

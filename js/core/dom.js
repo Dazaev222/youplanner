@@ -162,3 +162,45 @@ export function debounce(fn, wait) {
 
   return debounced;
 }
+
+// Таймаут-гард сетевого запроса: пара «сигнал + cancel», ms — предел
+// ожидания, свой у каждого слоя (синхронизация 20 с, auth 30 с, ассистент
+// 60 с). Жило тремя копиями (syncGuard, authTimeoutGuard, timeoutGuard
+// в assistant-media) с одним правилом — сведено сюда; модуль ничего
+// не импортирует, поэтому циклов с data/ и sync/ не возникает.
+// AbortSignal.timeout появился в Safari только в 15.4, и вызов на старых
+// iPhone кидал TypeError — каждый запрос мгновенно падал; ручной контроллер
+// работает везде, поэтому сигналом служит он. Таймер возвращается вместе
+// с сигналом: без cancel() короткий успешный запрос оставлял бы за собой
+// живой таймер до истечения таймаута. Песочницы без Abort API (юнит-тесты,
+// старые движки) ходят без сигнала: отсутствие таймаута лучше падения
+// каждого запроса. timedOut() различает истёкший таймаут: в ручной ветке
+// fetch отвергается AbortError (не TimeoutError), и без этого флага таймаут
+// на старых Safari выдавался за «нет связи».
+export function timeoutGuard(ms) {
+  if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) {
+    return {
+      signal: AbortSignal.timeout(ms),
+      cancel: function () {},
+      timedOut: function () { return false; },
+    };
+  }
+  if (typeof AbortController === 'undefined') {
+    return {
+      signal: undefined,
+      cancel: function () {},
+      timedOut: function () { return false; },
+    };
+  }
+  let fired = false;
+  const controller = new AbortController();
+  const timer = setTimeout(function () {
+    fired = true;
+    controller.abort();
+  }, ms);
+  return {
+    signal: controller.signal,
+    cancel: function () { clearTimeout(timer); },
+    timedOut: function () { return fired; },
+  };
+}

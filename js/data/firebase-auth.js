@@ -35,6 +35,7 @@
 // обменять refresh-токен на новый и повторить запрос один раз.
 
 import { bus } from '../core/bus.js';
+import { timeoutGuard } from '../core/dom.js';
 
 // Web API Key web-приложения Firebase. Владелец вписывает ключ из Firebase
 // Console (Project settings → General): ключ web-приложений не секрет —
@@ -112,33 +113,12 @@ export function resetAuthForTests() {
   refreshInFlight = null;
 }
 
-// Тот же маленький guard, что timeoutGuard в js/ui/assistant-view.js и
-// syncGuard в js/sync/sync.js: AbortSignal.timeout появился в Safari только
-// в 15.4, и вызов на старых iPhone кидал TypeError. Локальная копия,
-// а не импорт: оба оригинала живут в своих слоях (ui и sync), и тянуть
-// auth-механику к ним — неверное направление зависимостей.
-function authTimeoutGuard(ms) {
-  if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) {
-    return { signal: AbortSignal.timeout(ms), cancel: function () {} };
-  }
-  // Песочницы без Abort API (юнит-тесты, старые движки) ходят без сигнала:
-  // отсутствие таймаута лучше падения каждого запроса
-  if (typeof AbortController === 'undefined') {
-    return { signal: undefined, cancel: function () {} };
-  }
-  const controller = new AbortController();
-  const timer = setTimeout(function () { controller.abort(); }, ms);
-  return {
-    signal: controller.signal,
-    cancel: function () { clearTimeout(timer); },
-  };
-}
-
 // POST к одному из двух auth-доменов. Обычный fetch, НЕ fetchWithTimeout
 // синка: та единственная обёртка — для данных, и она сама зовёт
-// getAuthToken(), отсюда вышло бы зацикливание.
+// getAuthToken(), отсюда вышло бы зацикливание. Гард — общий сетевой
+// (js/core/dom.js), таймаут свой: AUTH_TIMEOUT_MS = 30 с.
 function authPost(url, body) {
-  const guard = authTimeoutGuard(AUTH_TIMEOUT_MS);
+  const guard = timeoutGuard(AUTH_TIMEOUT_MS);
   return fetch(url, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

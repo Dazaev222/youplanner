@@ -34,7 +34,7 @@ import {
   plannerObserveVersions,
 } from './storage.js';
 import { safeSetItem } from '../core/storage.js';
-import { addDays, isDateLike, parseISODate, toISODate } from '../core/dates.js';
+import { DAY_MS, addDays, isDateLike, parseISODate, toISODate } from '../core/dates.js';
 import {
   SCHEDULE_VERSION,
   cloneSchedule,
@@ -464,7 +464,7 @@ export function saveTasks(tasks) {
 // 86400000: в зоне с переводом часов «срок через двое суток» давал бы 2.04
 // или 1.96 суток, и порог срочности скакал бы вместе с календарём.
 function dayNumber(d) {
-  return Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / 86400000);
+  return Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / DAY_MS);
 }
 
 export function isUrgent(task, today) {
@@ -618,7 +618,7 @@ function daySpan(fromIso, toIso) {
   const a = parseISODate(fromIso);
   const b = parseISODate(toIso);
   return Math.round((Date.UTC(b.getFullYear(), b.getMonth(), b.getDate())
-    - Date.UTC(a.getFullYear(), a.getMonth(), a.getDate())) / 86400000);
+    - Date.UTC(a.getFullYear(), a.getMonth(), a.getDate())) / DAY_MS);
 }
 
 // Candidate + список конфликтов (Б6.6): решение о подтверждении принимает

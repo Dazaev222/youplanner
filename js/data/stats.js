@@ -55,7 +55,8 @@ export function loadStatsPeriod(category) {
 // Пишет одно поле, остальные пять не трогает. Значение вне списка не
 // пишется — как и у единственного периода до этой правки
 export function saveStatsPeriod(category, period) {
-  if (STATS_PERIODS.indexOf(period) === -1) return;
+  // Контракт boolean, как у отказа хранилища ниже: невалидный период — false
+  if (STATS_PERIODS.indexOf(period) === -1) return false;
   const periods = readStatsPeriods();
   periods[category] = period;
   return safeSetItem(STATS_PERIOD_KEY, JSON.stringify(periods));

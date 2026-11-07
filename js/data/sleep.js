@@ -390,15 +390,17 @@ export function saveSleepRecord(sleep) {
   return safeSetItem(SLEEP_KEY, JSON.stringify(sleep));
 }
 export function saveSleep(sleep) {
-  if (!sleep || typeof sleep !== 'object') return;
-  if (sleepTimeMinutes(sleep.bed) === null) return;
-  if (sleepTimeMinutes(sleep.wake) === null) return;
+  // Контракт boolean, как у saveSleepRecord ниже: невалидный вход — false,
+  // вызывающий проверяет фальшивость результата
+  if (!sleep || typeof sleep !== 'object') return false;
+  if (sleepTimeMinutes(sleep.bed) === null) return false;
+  if (sleepTimeMinutes(sleep.wake) === null) return false;
   const fall = sleepFallMinutes(sleep.fall);
-  if (fall === null) return;
-  if (sleepTimeMinutes(sleep.actualWake) === null) return;
+  if (fall === null) return false;
+  if (sleepTimeMinutes(sleep.actualWake) === null) return false;
   if (!Number.isInteger(sleep.sleepMin) ||
-      sleep.sleepMin < 0 || sleep.sleepMin >= SLEEP_MAX_MINUTES) return;
-  if (sleepDurationMinutes(sleep.bed, fall, sleep.actualWake) !== sleep.sleepMin) return;
+      sleep.sleepMin < 0 || sleep.sleepMin >= SLEEP_MAX_MINUTES) return false;
+  if (sleepDurationMinutes(sleep.bed, fall, sleep.actualWake) !== sleep.sleepMin) return false;
 
   // Пара realWake/realSleepMin: фактический подъём. Правила те же, что у пары
   // actualWake/sleepMin: смешанные состояния (одно задано, другое нет) —
@@ -406,13 +408,13 @@ export function saveSleep(sleep) {
   // и сходиться с sleepDurationMinutes(bed, fall, realWake)
   const realWake = sleep.realWake !== undefined ? sleep.realWake : null;
   const realSleepMin = sleep.realSleepMin !== undefined ? sleep.realSleepMin : null;
-  if (realWake !== null && sleepTimeMinutes(realWake) === null) return;
-  if (realWake === null && realSleepMin !== null) return;
+  if (realWake !== null && sleepTimeMinutes(realWake) === null) return false;
+  if (realWake === null && realSleepMin !== null) return false;
   if (realWake !== null) {
-    if (realSleepMin === null) return;
+    if (realSleepMin === null) return false;
     if (!Number.isInteger(realSleepMin) ||
-        realSleepMin < 0 || realSleepMin >= SLEEP_MAX_MINUTES) return;
-    if (sleepDurationMinutes(sleep.bed, fall, realWake) !== realSleepMin) return;
+        realSleepMin < 0 || realSleepMin >= SLEEP_MAX_MINUTES) return false;
+    if (sleepDurationMinutes(sleep.bed, fall, realWake) !== realSleepMin) return false;
   }
 
   // Признак исключения — только true. Прочее значение (строка, число)

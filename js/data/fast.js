@@ -1,5 +1,5 @@
 import { bus } from '../core/bus.js';
-import { toISODate } from '../core/dates.js';
+import { pluralDays, toISODate } from '../core/dates.js';
 import { safeSetItem } from '../core/storage.js';
 import { markSectionWritten } from './storage.js';
 // Ключ свой, отдельный от каза-намазов: счётчики независимы (§5).
@@ -70,7 +70,8 @@ export function loadFast() {
 // Запись ключа. Остаток приводится к целому и неотрицательному ещё раз:
 // счётчик не может уйти в минус, откуда бы значение ни пришло.
 export function saveFast(fast) {
-  if (!fast || !Number.isFinite(fast.remaining)) return;
+  // Контракт boolean, как у отказа хранилища ниже: невалидный вход — false
+  if (!fast || !Number.isFinite(fast.remaining)) return false;
 
   if (!safeSetItem(FAST_KEY, JSON.stringify({
     version: FAST_VERSION,
@@ -149,19 +150,9 @@ export function parseFastInput(text, mode) {
 
   return value;
 }
-// Склонение «день / дня / дней»: 1 и 21 — день, 2–4 и 22–24 — дня,
-// 0, 5–20 и 11–14 — дней
+// Подпись остатка уразы; склонение «день / дня / дней» — общее (core/dates.js)
 export function fastRemainingLabel(n) {
-  const mod100 = Math.abs(n) % 100;
-  const mod10 = mod100 % 10;
-
-  let word;
-  if (mod100 >= 11 && mod100 <= 14) word = 'дней';
-  else if (mod10 === 1) word = 'день';
-  else if (mod10 >= 2 && mod10 <= 4) word = 'дня';
-  else word = 'дней';
-
-  return 'Ураза: осталось ' + n + ' ' + word;
+  return 'Ураза: осталось ' + n + ' ' + pluralDays(n);
 }
 // Сводка уразы за период одним проходом по истории (§5): значения по дням,
 // суммы «Возмещено» и «Добавлено» и начало истории. Правило раньше жило

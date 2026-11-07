@@ -208,8 +208,9 @@ export function loadPrayer() {
 export function savePrayer(prayer) {
   const lat = Number(prayer && prayer.lat);
   const lng = Number(prayer && prayer.lng);
-  if (!isFinite(lat) || !isFinite(lng)) return;
-  if (lat < -89.8 || lat > 89.8 || lng < -180 || lng > 180) return;
+  // Контракт boolean, как у отказа хранилища ниже: невалидный вход — false
+  if (!isFinite(lat) || !isFinite(lng)) return false;
+  if (lat < -89.8 || lat > 89.8 || lng < -180 || lng > 180) return false;
 
   if (!safeSetItem(PRAYER_KEY, JSON.stringify({
     lat: lat,

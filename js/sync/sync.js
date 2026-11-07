@@ -16,9 +16,10 @@ import {
   MATRIX_STORAGE_KEY, materializePlannerTasks, plannerLoadOrBuildEnvelope, plannerOwnerUid,
 } from '../data/matrix.js';
 import { rollbackStagedKeys, safeSetItem } from '../core/storage.js';
+import { timeoutGuard } from '../core/dom.js';
 // Ядро sync-слоя: константы Firebase, флаги состояния и валидаторы снимка
 // (слито из data/sync.js, sync/state.js и sync/validators.js, этап Y2)
-import { BACKUP_LIMIT, FIREBASE_BACKUPS_URL, FIREBASE_PLANNER_URL, FIREBASE_URL, SYNC_DEBOUNCE_MS, SYNC_TS_KEY, clearSyncPending, hasData, markSyncPending, normalizing, saveNormalized, syncPending, syncTs, validCloudArchive, validCloudFast, validCloudHabits, validCloudPrayer, validCloudQaza, validCloudQazaLog, validCloudRecords, validCloudSchedule, validCloudSleep, validCloudTombstones } from './core.js';
+import { BACKUP_LIMIT, BACKUP_MIN_INTERVAL_MS, FIREBASE_BACKUPS_URL, FIREBASE_PLANNER_URL, FIREBASE_URL, SYNC_DEBOUNCE_MS, SYNC_TS_KEY, clearSyncPending, hasData, markSyncPending, normalizing, saveNormalized, syncPending, syncTs, validCloudArchive, validCloudFast, validCloudHabits, validCloudPrayer, validCloudQaza, validCloudQazaLog, validCloudRecords, validCloudSchedule, validCloudSleep, validCloudTombstones } from './core.js';
 import {
   mergeCloudIntoLocal, mergeTombstonesById, mergePlannerV1, normalizePlannerV1,
   plannerCanonicalJson, sectionEnvelopeWins, unwrapSection,
@@ -27,29 +28,10 @@ import { refreshAuthToken, getAuthToken, hasSessionRefreshToken } from '../data/
 export let syncTimer = null;
 // Сетевой таймаут обменов. Без него зависшее соединение (сеть отдаёт TCP,
 // но не отвечает) держит syncExchange открытым вечно: правки встают в
-// очередь и не уезжают, пока страница не перезагружена. Ручной контроллер,
-// а не AbortSignal.timeout: тот появился в Safari только в 15.4, и вызов
-// на старых iPhone кидал TypeError (см. js/ui/assistant-view.js).
+// очередь и не уезжают, пока страница не перезагружена. Сам гард — общий
+// для сети проекта (Safari < 15.4 без AbortSignal.timeout и песочницы без
+// Abort API учтены там): js/core/dom.js, timeoutGuard.
 const SYNC_TIMEOUT_MS = 20000;
-// Таймаут обмена. В fallback-ветке (Safari < 15.4) таймер создаётся вручную,
-// поэтому возвращается пара «сигнал + отмена»: без clearTimeout короткий
-// успешный обмен оставлял бы за собой живой таймер до 20 с.
-function syncGuard() {
-  if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) {
-    return { signal: AbortSignal.timeout(SYNC_TIMEOUT_MS), cancel: function () {} };
-  }
-  // Песочницы без Abort API (юнит-тесты, старые движки) ходят без сигнала:
-  // отсутствие таймаута лучше падения каждого обмена
-  if (typeof AbortController === 'undefined') {
-    return { signal: undefined, cancel: function () {} };
-  }
-  const controller = new AbortController();
-  const timer = setTimeout(function () { controller.abort(); }, SYNC_TIMEOUT_MS);
-  return {
-    signal: controller.signal,
-    cancel: function () { clearTimeout(timer); },
-  };
-}
 // Последний отказ по правам: 0 — его не было, иначе 401 или 403. Ставится в
 // fetchWithTimeout и снимается любым успешным ответом, чтобы «доступ
 // запрещён» не висел после первого же удачного обмена. Нужен наружу (js/app.js)
@@ -85,7 +67,7 @@ export let deniedStatus = 0;
 // «Permission denied» (правила не пускают) и повторный 401 после refresh
 // обновлением не лечатся — это уже честный sync:denied.
 function authedFetch(url, options, token) {
-  const guard = syncGuard();
+  const guard = timeoutGuard(SYNC_TIMEOUT_MS);
   let requestUrl = url;
   if (token) {
     requestUrl = url + (url.indexOf('?') === -1 ? '?' : '&') +
@@ -611,7 +593,9 @@ export async function syncToCloudNow() {
   const ts = Date.now();
 
   // Сначала копия, потом запись: сбой копирования данные всё равно отправит.
-  // Заодно оттуда берётся предыдущий узел — он нужен телу запроса.
+  // Заодно оттуда берётся предыдущий узел — он нужен телу запроса. Копия
+  // троттлится (Г2): в пропущенные обмены приходит null — пред-PUT слияния
+  // не будет, гонку с чужой записью закрывает 412-ветка условной записи.
   let previous = null;
   try {
     previous = await backupCloudSnapshot();
@@ -630,32 +614,18 @@ export async function syncToCloudNow() {
     applyMergedFromCloud(previous);
   }
 
-  // Вторая гонка того же обмена (B.2): между первым GET и PUT устройство B
-  // может отправить свой снимок — PUT без повторной сверки стёр бы правки B
-  // безвозвратно. Поэтому непосредственно перед PUT — ещё один GET; снимок
-  // изменился (метка updatedAt или байты JSON) — слияние повторяется со
-  // свежим снимком, и наверх уезжает уже объединение с чужой правкой.
-  // Однократного повтора достаточно: обмен инициируется кнопкой или
-  // дебаунсом 1,5 с, окно гонки — миллисекунды, а каждый лишний круг —
-  // лишняя секунда задержки и лишний шанс новой гонки.
-  let fresh = null;
-  try {
-    fresh = await fetchCloudNode();
-  } catch (e) {
-    // Повторное чтение не удалось: PUT уходит как раньше, по первому снимку —
-    // это прежнее поведение обмена, слияние выше уже защитило от старой гонки
-    fresh = null;
-  }
-  if (fresh && snapshotDiffers(fresh, previous)) {
-    const freshTs = Number(fresh.updatedAt) || 0;
-    if (freshTs > syncTs()) {
-      applyMergedFromCloud(fresh);
-    }
-    // Тело PUT строится по последнему виденному снимку: запасной путь
-    // «серверные привычки при пустом локальном списке» должен видеть
-    // свежий сервер, а не тот, что был двумя запросами назад
-    previous = fresh;
-  }
+  // Вторая гонка того же обмена (B.2): между первым GET (внутри
+  // backupCloudSnapshot) и PUT устройство B может отправить свой снимок.
+  // Раньше непосредственно перед PUT делали ещё один GET со слиянием
+  // («контрольный GET»), но гонку он не закрывал — между его чтением и
+  // записью оставалось своё окно (см. комментарий у fetchCloudNode: «второй
+  // GET без CAS» гонку не закрывает). Гонку закрывает условная запись: PUT
+  // ниже несёт If-Match по lastCloudEtag первого GET, чужая запись между GET
+  // и PUT отвечает 412, и цикл перечитывает сервер, сливает его (слияние
+  // в ветке 412 — осознанно: сливать нужно только реально изменившийся
+  // сервер) и повторяет PUT уже объединением. Контрольный GET убран (Г1):
+  // обмен экономит сетевой круг, а защита сверяется сервером, а не на глаз
+  // клиента.
 
   // Состояние планировщика публикуется в выделенный узел ДО корневого PUT:
   // это единственная копия Матрицы, которой старомодный клиент не владеет,
@@ -689,7 +659,10 @@ export async function syncToCloudNow() {
   try {
     let response = null;
     for (let attempt = 0; attempt < PLANNER_CAS_ATTEMPTS; attempt++) {
-      const putHeaders = { 'Content-Type': 'application/json' };
+      // X-Firebase-ETag у PUT: RTDB возвращает ETag в ответе только на
+      // запросах с этим заголовком — он нужен для обновления lastCloudEtag
+      // после успеха (ниже)
+      const putHeaders = { 'Content-Type': 'application/json', 'X-Firebase-ETag': 'true' };
       if (lastCloudEtag) putHeaders['If-Match'] = lastCloudEtag;
       response = await fetchWithTimeout(FIREBASE_URL + '.json', {
         method: 'PUT',
@@ -711,6 +684,13 @@ export async function syncToCloudNow() {
       // неподтверждённой попытки остаются в outbox до удачного CAS
     }
     if (response && response.ok) {
+      // lastCloudEtag обновляется и от успешного PUT: сервер отвечает меткой
+      // записанного значения. Без метки в ответе (заглушечный транспорт,
+      // тесты) остаётся метка от GET — её достаточно, сервер не менялся.
+      // Актуальная метка спасает следующий обмен от лишнего 412, если его
+      // первый GET не удался и PUT пойдёт по последней известной метке.
+      const putEtag = readResponseEtag(response);
+      if (putEtag) lastCloudEtag = putEtag;
       // Метка времени — та же safe-запись, что и весь проект: сырой setItem
       // внутри этого try бросок квоты превращал бы успешный PUT в мнимый
       // сетевой сбой (catch ниже считает сетью любой бросок).
@@ -724,16 +704,6 @@ export async function syncToCloudNow() {
     // и syncBody перестаёт беречь серверные привычки при пустом локальном списке.
     cloudReachable = false;
   }
-}
-// Отличаются ли два снимка сервера. Метка updatedAt — быстрый путь: чужой PUT
-// всегда пишет свою метку. Совпадение меток (два устройства уложились в одну
-// миллисекунду) проверяется побайтово: содержимое могло разойтись при равной
-// метке, а лишнее слияние дешевле потерянной правки.
-function snapshotDiffers(a, b) {
-  const aTs = Number(a && a.updatedAt) || 0;
-  const bTs = Number(b && b.updatedAt) || 0;
-  if (aTs !== bTs) return true;
-  return JSON.stringify(a) !== JSON.stringify(b);
 }
 // Тело PUT. Привычки берём локальные — кроме одного случая: сверка ни разу
 // не дошла до сервера, а список у нас пуст. Пустой список здесь значит
@@ -1121,8 +1091,8 @@ function applyMergedFromCloud(previous) {
 }
 // Обычное чтение узла данных без копии в бэкапы. Возвращает объект снимка
 // или null, если узел пуст; при ошибке сети бросает — вызывающий решает,
-// критична ли ему ошибка (backupCloudSnapshot глотает, повторный GET перед
-// PUT в syncToCloudNow переводит обмен в прежний односнимочный режим).
+// критична ли ему ошибка (backupCloudSnapshot глотает, цикл 412 в
+// syncToCloudNow при отказе перечитывания выходит без повторного PUT).
 // Токен и таймаут — в общей обёртке fetchWithTimeout.
 //
 // ETag: GET запрашивает метку заголовком X-Firebase-ETag (ТЗ §1.4.2).
@@ -1132,6 +1102,10 @@ function applyMergedFromCloud(previous) {
 // замечает это отказом 412. Сервер без ETag (старый заглушечный транспорт,
 // тесты) — If-Match не шлётся, PUT остаётся безусловным, как раньше.
 let lastCloudEtag = null;
+// Момент последней успешной копии в узел бэкапов (Г2), null — копии в этой
+// сессии ещё не было. Переменная модульная, не в хранилище: после загрузки
+// страницы свежая копия снимается сразу, а не ждёт конца интервала.
+let lastBackupAt = null;
 
 function readResponseEtag(response) {
   if (!response || !response.headers || typeof response.headers.get !== 'function') return null;
@@ -1155,11 +1129,18 @@ async function fetchCloudNode() {
 // копировать нечего. Узел бэкапов — соседний корень (FIREBASE_BACKUPS_URL),
 // а не ребёнок данных: иначе PUT основного узла стирал бы копии (см. выше).
 // Возвращает предыдущий узел: не вышло записать копию — отправку это
-// не отменяет, и узел всё равно нужен вызывающему.
-// Два чтения — снимок данных и список бэкапов — независимы и ходят
-// параллельно: раньше они были последовательными, и каждое сохранение
-// платило тремя сетевыми кругами вместо двух (GET+GET → PUT).
+// не отменяет, и узел всё равно нужен вызывающему. Троттлинг (Г2): чаще
+// раза за BACKUP_MIN_INTERVAL_MS возвращается null сразу, без запросов.
+// Чтения последовательны: сначала снимок данных, затем список бэкапов и
+// запись копии (GET+GET → PUT), каждый запрос ждёт предыдущего. Снимок
+// нужен и копии, и вызывающему, поэтому он идёт первым.
 export async function backupCloudSnapshot() {
+  // Гейт стоит внутри, а не у вызова в syncToCloudNow: через эту функцию
+  // идут все обмены — стартовая синхронизация, ручная кнопка, flushPendingSync
+  // — и правило троттлинга для всех одно.
+  if (lastBackupAt !== null && Date.now() - lastBackupAt < BACKUP_MIN_INTERVAL_MS) {
+    return null;
+  }
   try {
     const previous = await fetchCloudNode();
     if (!previous) return null;
@@ -1178,11 +1159,14 @@ export async function backupCloudSnapshot() {
       const list = await backupsResponse.json();
       const items = Array.isArray(list) ? list : [];
       items.unshift(snapshot);
-      await fetchWithTimeout(FIREBASE_BACKUPS_URL + '.json', {
+      const copyResponse = await fetchWithTimeout(FIREBASE_BACKUPS_URL + '.json', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(items.slice(0, BACKUP_LIMIT)),
       });
+      // Метка троттлинга — только после успешного PUT списка: сорвавшаяся
+      // копия не глушит следующие попытки, следующая отправка повторит.
+      if (copyResponse && copyResponse.ok) lastBackupAt = Date.now();
     } catch (e) {
       // не вышло записать копию — данные всё равно отправит syncToCloudNow
     }

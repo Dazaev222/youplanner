@@ -1,3 +1,4 @@
+import { DAY_MS } from '../core/dates.js';
 import { escapeHtml, pad2, setHidden, showToast } from '../core/dom.js';
 import { PRAYER_LABELS, PRAYER_MADHHABS, PRAYER_MADHHAB_LABELS, PRAYER_METHODS, PRAYER_METHOD_DEFAULT, PRAYER_METHOD_LABELS, PRAYER_ORDER, PRAYER_SHADOW, PRAYER_WINDOWS, loadPrayer, prayerDateISO, prayerMinutes, prayerRound, prayerTimes, savePrayer } from '../data/prayer.js';
 // Раскрыт ли полный список. Живёт только в интерфейсе и сбрасывается при
@@ -61,7 +62,7 @@ export function prayerViewState() {
   if (!times) return null;
 
   const tomorrow = prayerTimes(
-    prayerDateISO(new Date(now.getTime() + 86400000)),
+    prayerDateISO(new Date(now.getTime() + DAY_MS)),
     saved.lat, saved.lng, saved.madhhab, saved.method) || {};
 
   const nowMin = prayerMinutes(now);

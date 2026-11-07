@@ -1,3 +1,20 @@
+// v55 (v54 -> v55): набор гипотез Г1–Г5 (аудит сети и дубликатов).
+// Г1: контрольный GET перед корневым PUT убран — гонку B.2 закрывает
+// условная запись (If-Match → 412 → перечитывание → слияние → повтор),
+// корневой PUT несёт X-Firebase-ETag, lastCloudEtag обновляется и от
+// ответа успешного PUT. Г2: бэкап-снимок не чаще раза за
+// BACKUP_MIN_INTERVAL_MS = 5 минут (метка — только после успешного PUT
+// списка копий). Г3: дубли выведены в общие функции — pluralDays
+// (core/dates.js), midnightArcMinutes (records.js), timeoutGuard
+// (core/dom.js, таймауты слоёв прежние: 20/30/60 с). Г4: магические числа
+// в именованные константы (DAY_MS, PROGRESS_CACHE_LIMIT, MOBILE_MAX_WIDTH_PX,
+// геометрия капли таб-бара; для минут суток переиспользован существующий
+// MINUTES_PER_DAY из matrix-schedule.js).
+// Г5: boolean-контракт save-функций (prayer/fast/sleep — ранние выходы
+// возвращают false), св-гард same-origin в network-first кэше (чужие
+// origin-ответы в офлайн-копию не кладутся), 'online' → scheduleSync —
+// при возвращении сети pending-правки уходят сразу. Состав ASSETS
+// не менялся — только содержимое перечисленных файлов.
 // v54 (v53 -> v54): КОРЕНЬ 401 найден живым E2E — RTDB REST отвечает
 // 401 «Unauthorized request.» на Authorization: Bearer с Firebase ID-токеном
 // (валидность доказана успешным securetoken-обменом), ID-токен он признаёт
@@ -76,7 +93,7 @@
 // (v46 — правка текстовая (в комментарии js/data/matrix.js:771 перепутались
 // алфавиты), v45 — четыре файла после v44, v44 — восемь файлов аудита,
 // v43 — транспорт plannerV1, v42 — пересобранная вёрстка Матрицы.)
-const CACHE = 'youplanner-v54';
+const CACHE = 'youplanner-v55';
 // Иконки — все из manifest.json: отсутствующая в кэше иконка ломала бы
 // офлайн-установку PWA (аудит 2026-10-31: icon-512.png не кэшировался)
 const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon-512.png', './icon.svg',
@@ -160,7 +177,11 @@ self.addEventListener('fetch', function (e) {
       url.endsWith('.js') || url.endsWith('.css')) {
     e.respondWith(
       fetch(e.request).then(function (resp) {
-        if (resp && resp.ok) {
+        // Кэш — офлайн-копия собственного деплоя, чужие ответы в него не
+        // кладём: cross-origin скрипты/стили (CDN, счётчики) прошли бы resp.ok
+        // и распухали бы кэш чужими байтами. Firebase-домены отфильтрованы
+        // выше по URL; здесь гард по origin запроса.
+        if (resp && resp.ok && new URL(url).origin === self.location.origin) {
           const copy = resp.clone();
           // Запись в кэш — побочный эффект мимо respondWith: без waitUntil
           // SW может уснуть до её завершения, и офлайн-копия не обновится

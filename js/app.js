@@ -466,6 +466,20 @@ export function bindEvents() {
     statsRowHabits.addEventListener('click', function () { switchAppView('stats-habits'); });
   }
 
+  const statsRowMatrix = document.getElementById('stats-row-matrix');
+  if (statsRowMatrix) {
+    statsRowMatrix.addEventListener('click', function () { switchAppView('matrix'); });
+  }
+
+  // Матрица: «Назад» перерисовывается вместе с экраном, поэтому ловится
+  // делегированием на статичной секции — слушатель навешивается один раз
+  const matrixView = document.getElementById('matrix-view');
+  if (matrixView) {
+    matrixView.addEventListener('click', function (event) {
+      if (event.target.closest('#matrix-back')) switchAppView('main');
+    });
+  }
+
   const statsHabitsBack = document.getElementById('stats-habits-back');
   if (statsHabitsBack) {
     statsHabitsBack.addEventListener('click', function () { switchAppView('stats'); });
@@ -1390,6 +1404,12 @@ function initMatrixReminders() {
    граф импортов останется однонаправленным. */
 
 bus.on('data:changed', scheduleSync);
+// Сеть вернулась — недоезжавшие правки уходят сразу, не ждут следующей
+// правки или дебаунса: pending-разделы копились, пока соединение лежало.
+// Тоста «офлайн» нет и при потере сети: офлайн-first режим осознанный,
+// приложение работает на локальных данных, и возвращение связи — тихий
+// фон, а не событие для человека.
+window.addEventListener('online', function () { scheduleSync(); });
 // Правка матрицы пересобирает очередь напоминаний: снятое «выполнено»,
 // архивация или новое время обязаны отменить прежний pending-момент (Б5.7).
 // Своё событие вместо data:changed — раздел не синхронизируется, и поднимать
@@ -1634,6 +1654,16 @@ export const LIQUID_SWITCH_BUTTON_SELECTOR = LIQUID_SWITCH_SELECTORS
   })
   .join(', ');
 
+// Геометрия «капли» таб-бара и общего индикатора переключателей — подобрана
+// под стили; менять только вместе с css. Таб-бар: капля-пилюля с собственными
+// габаритами; остальные переключатели: индикатор на всю кнопку с отступами.
+const TAB_PILL_MAX_WIDTH_PX = 60;
+const TAB_PILL_WIDTH_INSET_PX = 12;
+const TAB_PILL_HEIGHT_PX = '36px';
+const TAB_PILL_TOP_PX = '14px';
+const INDICATOR_INSET_PX = 8;
+const INDICATOR_TOP_PX = 4;
+
 function moveIndicator(container) {
   if (!container || container.hidden) return;
 
@@ -1649,8 +1679,8 @@ function moveIndicator(container) {
   if (containerRect.width <= 0 || containerRect.height <= 0) return;
 
   if (container.id === 'tab-bar') {
-    const maxPillWidth = 60;
-    const pillWidth = Math.max(0, Math.min(maxPillWidth, buttonRect.width - 12));
+    const pillWidth = Math.max(0,
+      Math.min(TAB_PILL_MAX_WIDTH_PX, buttonRect.width - TAB_PILL_WIDTH_INSET_PX));
 
     const relativeLeft =
       (buttonRect.left - containerRect.left) +
@@ -1660,8 +1690,8 @@ function moveIndicator(container) {
     const clampedLeft = Math.max(0, Math.min(relativeLeft, maxLeft));
 
     indicator.style.width = pillWidth + 'px';
-    indicator.style.height = '36px';
-    indicator.style.top = '14px';
+    indicator.style.height = TAB_PILL_HEIGHT_PX;
+    indicator.style.top = TAB_PILL_TOP_PX;
     indicator.style.transform =
       'translate3d(' + clampedLeft + 'px, 0, 0)';
   } else {
@@ -1670,8 +1700,8 @@ function moveIndicator(container) {
     const buttonWidth = Math.max(0, Math.min(buttonRect.width, maxWidth));
 
     indicator.style.width = buttonWidth + 'px';
-    indicator.style.height = 'calc(100% - 8px)';
-    indicator.style.top = '4px';
+    indicator.style.height = 'calc(100% - ' + INDICATOR_INSET_PX + 'px)';
+    indicator.style.top = INDICATOR_TOP_PX + 'px';
     indicator.style.transform =
       'translate3d(' + Math.max(0, rawLeft) + 'px, 0, 0)';
   }

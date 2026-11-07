@@ -26,6 +26,7 @@
 // последние 20 реплик; генерацию ограничивают temperature и max_tokens
 // из персонализации.
 
+import { pluralDays } from '../core/dates.js';
 import { showErrorToast, showToast } from '../core/dom.js';
 import { FAST_KEY } from '../data/fast.js';
 import { PRAYER_KEY } from '../data/prayer.js';
@@ -140,16 +141,6 @@ export function readAssistantPersona() {
     // хранилище недоступно или JSON битый — работают дефолты по каждому полю
     return normalizeAssistantPersona({});
   }
-}
-
-// Русское склонение слова «день» для подписи слайдера и заголовка снимка:
-// диапазон слайдера 2..30, но «2 дней» читать стыдно.
-function assistantPluralDays(n) {
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) return 'день';
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'дня';
-  return 'дней';
 }
 
 export function readAssistantApiKey() {
@@ -663,7 +654,7 @@ function buildContext(contextDays) {
   if (records) {
     const windowDays = lastDays(records, days);
     if (windowDays.length) {
-      parts.push('Записи за ' + days + ' ' + assistantPluralDays(days) + ':\n'
+      parts.push('Записи за ' + days + ' ' + pluralDays(days) + ':\n'
         + windowDays.join('\n'));
     }
   }
@@ -1030,7 +1021,7 @@ function formatAssistantRangeValue(field) {
   const value = Number(field.value);
   switch (field.getAttribute('data-format')) {
     case 'days':
-      return value + ' ' + assistantPluralDays(value);
+      return value + ' ' + pluralDays(value);
     case 'temperature':
       return String(value);
     case 'tokens':

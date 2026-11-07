@@ -57,6 +57,10 @@ function loadSw(options) {
       },
       skipWaiting() {},
       clients: { claim() {} },
+      // В браузере location у сервис-воркера есть всегда: св-гард кэша
+      // сверяет origin ответа с self.location.origin (Г5). Тестовые URL
+      // живут на том же origin — свои ответы кэшируются, как до гарда
+      location: { origin: 'https://app.test' },
     },
     caches: {
       open: () => Promise.resolve({
@@ -69,6 +73,9 @@ function loadSw(options) {
     },
     fetch: opts.fetchImpl || (() => Promise.reject(new Error('нет сети (тест)'))),
     console,
+    // URL — браузерный глобал, vm-контекст его не даёт: св-гард кэша (Г5)
+    // строит URL запроса ради origin. Настоящий host-URL, не заглушка
+    URL,
   };
 
   const context = vm.createContext(sandbox);
@@ -140,6 +147,19 @@ test('F9: успешный ответ уходит в браузер и клад
   assert.equal(sw.puts[0].url, PAGE.url);
   assert.equal(sw.puts[0].response.cloned, true, 'в кэш кладётся clone(), а не сам ответ');
   assert.notEqual(sw.puts[0].response, fresh);
+});
+
+test('F9: ответ с чужого origin проходит в браузер, но в кэш не кладётся', async () => {
+  const foreign = makeResponse({
+    ok: true, status: 200, url: 'https://cdn.example.org/lib.js', tag: 'чужой 200',
+  });
+  const sw = loadSw({ fetchImpl: () => Promise.resolve(foreign) });
+
+  const { response } = await runFetch(sw, {
+    url: 'https://cdn.example.org/lib.js', method: 'GET',
+  }).settle();
+  assert.equal(response, foreign, 'чужой ответ браузеру отдаётся как есть');
+  assert.equal(sw.puts.length, 0, 'чужой origin офлайн-копию деплоя не засоряет');
 });
 
 test('F9: офлайн (fetch отклонён) — отдаётся кэш, как и раньше', async () => {

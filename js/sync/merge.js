@@ -99,8 +99,8 @@ function plannerJsonSafe(value, depth) {
 }
 
 // Каноническая JSON-строка со SORTED ключами: байтовое сравнение снимков
-// (snapshotDiffers в sync.js, повторные доставки, round-trip backup) не
-// должно зависеть от порядка вставки.
+// (повторные доставки, round-trip backup) не должно зависеть от порядка
+// вставки.
 export function plannerCanonicalJson(value) {
   const safe = plannerJsonSafe(value, 0);
   return JSON.stringify(safe === undefined ? null : safe);

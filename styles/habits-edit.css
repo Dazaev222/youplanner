@@ -71,6 +71,13 @@
   border-top: 1px solid var(--border);
 }
 
+/* Раскрытие строки — и на ПК, и на телефоне: поля правки и «Удалить»
+   доступны на обеих платформах. Краш-тест 3: is-open ставился, а тело
+   оставалось display:none — правило раскрытия жило только в mobile.css */
+.habit-row-edit.is-open .habit-row-body {
+  display: block;
+}
+
 .habit-row-body label {
   display: block;
   margin-bottom: 8px;

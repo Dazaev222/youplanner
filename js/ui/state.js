@@ -31,8 +31,10 @@ export const appState = {
 };
 
 // Порог тот же, что у медиа-запроса в стилях: ширина узкого телефона
+export const MOBILE_MAX_WIDTH_PX = 700;
+
 export function isMobileView() {
-  return window.matchMedia('(max-width: 700px)').matches;
+  return window.matchMedia('(max-width: ' + MOBILE_MAX_WIDTH_PX + 'px)').matches;
 }
 
 // Переключаемые значения, общие для нескольких модулей интерфейса.

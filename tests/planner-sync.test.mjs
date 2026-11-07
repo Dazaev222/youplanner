@@ -68,8 +68,9 @@ test('normalizePlannerV1: канонизация с сортировкой кл�
   });
   assert.equal(result.ok, true);
   assert.equal(result.unsupported, false);
-  // ключи верхнего уровня и полей — поCanonical-порядку: байтовое сравнение
-  // снимков (snapshotDiffers в sync.js) не должно зависеть от порядка вставки
+  // ключи верхнего уровня и полей — в каноническом порядке: байтовое
+  // сравнение снимков (CAS If-Match → 412, повторные доставки) не должно
+  // зависеть от порядка вставки
   assert.deepEqual(Object.keys(result.snapshot.entries), ['a', 'b']);
   assert.deepEqual(Object.keys(result.snapshot.entries.a.fields), ['notes', 'title']);
   assert.deepEqual(result.snapshot.settings, {});

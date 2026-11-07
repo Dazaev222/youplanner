@@ -35,6 +35,11 @@ export const FIREBASE_PLANNER_URL = 'https://youplanner-5c2f5-default-rtdb.fireb
 export const SYNC_TS_KEY = 'youplanner.sync.ts';
 // Сколько версий держим в узле бэкапов (FIREBASE_BACKUPS_URL)
 export const BACKUP_LIMIT = 10;
+// Минимальная пауза между копиями в узел бэкапов (Г2): копия — самая тяжёлая
+// часть обмена (GET списка снимков и PUT списка целиком), аудит мерил
+// 3-7 МБ трафика на галочку. Дебаунс слепляет серию тапов в один PUT, но
+// частые отметки всё равно платили бы копированием дерева на каждый обмен.
+export const BACKUP_MIN_INTERVAL_MS = 5 * 60 * 1000;
 // Отправка после правки откладывается: серия тапов по клеткам даёт один PUT
 export const SYNC_DEBOUNCE_MS = 1500;
 // Сколько держится надпись о ручной синхронизации

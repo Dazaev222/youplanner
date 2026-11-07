@@ -24,7 +24,7 @@
 // остаются в assistant-view.js: там делегированные события, каталог моделей
 // и updateAssistantControls, который передаётся сюда колбэком.
 
-import { handleNetworkError, showErrorToast, showToast } from '../core/dom.js';
+import { handleNetworkError, showErrorToast, showToast, timeoutGuard } from '../core/dom.js';
 import { compressImage } from '../data/image.js';
 
 // --- HTTP-клиент -------------------------------------------------------------
@@ -55,34 +55,6 @@ function friendlyError(status) {
     return 'Сервис нейросети сейчас недоступен (ошибка ' + status + '). Попробуйте позже.';
   }
   return 'Сервис вернул неожиданный ответ (ошибка ' + status + ').';
-}
-
-// AbortSignal.timeout появился в Safari только в 15.4: на старых iPhone
-// его вызов кидал TypeError, и каждый запрос мгновенно падал в «Нет связи».
-// Ручной контроллер работает везде, поэтому подстраховываем им. Таймер
-// возвращается вместе с сигналом: короткий ответ иначе оставлял бы его
-// жить до истечения таймаута. timedOut() различает истёкший таймаут:
-// в ручной ветке fetch отвергается AbortError (не TimeoutError), и без
-// этого флага таймаут на старых Safari выдавался за «нет связи».
-function timeoutGuard(ms) {
-  if (typeof AbortSignal !== 'undefined' && AbortSignal.timeout) {
-    return {
-      signal: AbortSignal.timeout(ms),
-      cancel: function () {},
-      timedOut: function () { return false; },
-    };
-  }
-  let fired = false;
-  const controller = new AbortController();
-  const timer = setTimeout(function () {
-    fired = true;
-    controller.abort();
-  }, ms);
-  return {
-    signal: controller.signal,
-    cancel: function () { clearTimeout(timer); },
-    timedOut: function () { return fired; },
-  };
 }
 
 // Проверка ключа на допустимость в HTTP-заголовке. fetch принимает значения

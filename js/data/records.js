@@ -2,6 +2,8 @@ import { bus } from '../core/bus.js';
 import { addDays, toISODate } from '../core/dates.js';
 import { safeSetItem } from '../core/storage.js';
 import { STORAGE_KEYS } from './storage.js';
+// Длина суток в минутах — общая константа матричного расписания (1440)
+import { MINUTES_PER_DAY } from './matrix-schedule.js';
 // Привычки с уровнями: у них запись — объект { value, level }, а у привычки
 // есть необязательное время time (§1.1). Id из спеки трекера, как у каза.
 export const SPORT_HABIT_ID = 'h7';
@@ -202,6 +204,15 @@ function habitTimeMinutes(time) {
   if (hours > 23 || minutes > 59) return null;
   return hours * 60 + minutes;
 }
+// Дуга между отметкой и назначенным моментом, идущая через полночь:
+// дополнение прямой дуги до полных суток. Окно уровня ±LEVEL_WINDOW_MIN
+// живёт на короткой из двух дуг и может пересекать полночь — при
+// time = '23:30' отметка в 00:15 ближе по ночной дуге (45 минут), чем
+// линейно (1395). Этой же дугой живёт habitMarkDate (§4): у одного окна
+// обе функции обязаны считать границу одинаково (§11aa, В1).
+function midnightArcMinutes(minutes, plan) {
+  return MINUTES_PER_DAY - Math.abs(minutes - plan);
+}
 // Уровень по времени отметки: 'on-time' — в окне ±60 минут от назначенного,
 // 'late' — вне окна, null — время у привычки не задано (§1.6). При null
 // граница поля не красится вовсе.
@@ -211,13 +222,8 @@ export function habitLevelByTime(habit, now) {
   if (plan === null) return null;
 
   const minutes = now.getHours() * 60 + now.getMinutes();
-  // Окно вокруг назначенного момента может переходить через полночь: при
-  // time = '23:30' отметка в 00:15 ближе по короткой дуге (45 минут), чем
-  // линейно (1395). Расстояние берём меньшее из двух — тем же правилом живёт
-  // habitMarkDate (§4), иначе две функции одного окна расходятся (§11aa, В1).
   const forward = Math.abs(minutes - plan);
-  const around = 1440 - forward;
-  const distance = Math.min(forward, around);
+  const distance = Math.min(forward, midnightArcMinutes(minutes, plan));
   return distance <= LEVEL_WINDOW_MIN ? LEVEL_ON_TIME : LEVEL_LATE;
 }
 // День, к которому относится отметка (§4). time = '23:30', отметка в 00:15 —
@@ -231,11 +237,13 @@ export function habitMarkDate(habit, date, now) {
   const plan = habitTimeMinutes(habit.time);
   if (plan === null) return date;
 
-  // Сколько минут от назначенного момента до полуночи плюс сколько прошло
-  // после неё — расстояние по часовой стрелке через границу суток
-  const beforeMidnight = 24 * 60 - plan;
-  const afterMidnight = now.getHours() * 60 + now.getMinutes();
-  if (beforeMidnight + afterMidnight > LEVEL_WINDOW_MIN) return date;
+  // Вчерашний день — только ночной хвост окна: отметка легла после полуночи,
+  // а назначенный момент был вечером, и ночная дуга от плана до отметки
+  // (midnightArcMinutes) не длиннее окна. Отметка позже плана тем же днём
+  // ему не принадлежит — ей отвечает прямая дуга, а не эта
+  const minutes = now.getHours() * 60 + now.getMinutes();
+  if (minutes >= plan) return date;
+  if (midnightArcMinutes(minutes, plan) > LEVEL_WINDOW_MIN) return date;
 
   return toISODate(addDays(now, -1));
 }
@@ -273,6 +281,9 @@ export function writeHabitEntry(habit, date, value, level) {
 // объекта нельзя — ключ собирается из полей, которые calcProgress реально
 // читает (id, type, goal), плюс версии данных записей и периода.
 const progressCache = new Map();
+// Потолок памяти кэша: на длинной сессии привычек и периодов много, карте
+// распухать нельзя; само вычисление дешёвое, потеря кэша безболезненна
+const PROGRESS_CACHE_LIMIT = 1000;
 
 // Сигнатура периода для ключа кэша. Массивы дат пересоздаются каждым
 // рендером, сравнение по ссылке даёт 0% попаданий; все источники —
@@ -409,9 +420,7 @@ export function calcProgress(habit, dates) {
 
   const value = calcProgressUncached(habit, dates);
 
-  // Потолок памяти: на длинной сессии привычек и периодов много, карте
-  // распухать нельзя; само вычисление дешёвое, потеря кэша безболезненна
-  if (progressCache.size > 1000) progressCache.clear();
+  if (progressCache.size > PROGRESS_CACHE_LIMIT) progressCache.clear();
   progressCache.set(key, { version: recordsVersion, value: value });
 
   return value;

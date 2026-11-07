@@ -32,7 +32,7 @@
    (см. commitTasks): при переполненной квоте «Добавлено» поверх несостояв-
    шейся записи было бы ложью интерфейса о сохранности данных. */
 
-import { addDays, parseISODate, toISODate } from '../core/dates.js';
+import { DAY_MS, addDays, parseISODate, pluralDays, toISODate } from '../core/dates.js';
 import { bus } from '../core/bus.js';
 import { showErrorToast, showToast } from '../core/dom.js';
 import {
@@ -186,20 +186,13 @@ function quadrantById(id) {
   return null;
 }
 
-// «2 дня», «5 дней», «21 день» — русская форма, а не «2 дней».
-function pluralDays(n) {
-  const mod10 = n % 10;
-  const mod100 = n % 100;
-  if (mod10 === 1 && mod100 !== 11) return 'день';
-  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'дня';
-  return 'дней';
-}
-
+// «2 дня», «5 дней», «21 день» — русская форма, а не «2 дней»: общее
+// склонение в core/dates.js.
 function dueLabel(task, now) {
   if (!task.due) return '';
   const due = new Date(task.due + 'T00:00:00');
   const startOfToday = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const days = Math.round((due - startOfToday) / 86400000);
+  const days = Math.round((due - startOfToday) / DAY_MS);
   let text;
   if (days < 0) text = 'просрочено';
   else if (days === 0) text = 'сегодня';
@@ -539,6 +532,13 @@ function renderGrid(host, now) {
 
   const head = el('div', 'matrix-head');
   head.appendChild(el('h2', 'matrix-title', 'Матрица Эйзенхауэра'));
+  // «Назад» для ПК: таб-бар на десктопе скрыт (router.js), а вход в матрицу —
+  // из хаба статистики и «Меню». На телефоне из матрицы выходят таб-баром,
+  // поэтому кнопка гасится мобильным запросом (как #qaza-back)
+  const back = el('button', 'btn btn-secondary', '← Назад');
+  back.type = 'button';
+  back.id = 'matrix-back';
+  head.appendChild(back);
   if (overdue) {
     head.appendChild(el('p', 'matrix-alert', 'Просрочено задач: ' + overdue));
   }
@@ -1363,7 +1363,7 @@ function calDayGap(fromIso, toIso) {
   const b = parseISODate(toIso);
   if (!a || !b || Number.isNaN(a.getTime()) || Number.isNaN(b.getTime())) return 0;
   return Math.round((Date.UTC(b.getFullYear(), b.getMonth(), b.getDate())
-    - Date.UTC(a.getFullYear(), a.getMonth(), a.getDate())) / 86400000);
+    - Date.UTC(a.getFullYear(), a.getMonth(), a.getDate())) / DAY_MS);
 }
 
 function newReminderId() {
