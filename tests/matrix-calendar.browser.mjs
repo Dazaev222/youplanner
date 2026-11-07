@@ -284,7 +284,9 @@ try {
     });
 
     await step('настоящее поле времени: 09:30 → 10:15 = 45 мин', async () => {
-      await page.locator('.matrix-cal-day').first().click();
+      // Создание не позволяет прошедшие дни (is-past не кликабелен), поэтому
+      // шаг берёт сегодняшний день, а не первый день месяца.
+      await page.locator('.matrix-cal-day.is-today').click();
       await page.locator('.matrix-mode-btn[data-mode="timed"]').click();
       await page.locator('input[type="time"][data-endpoint="start"]').fill('09:30');
       await page.locator('input[type="time"][data-endpoint="end"]').fill('10:15');
@@ -413,7 +415,9 @@ try {
       await page.waitForSelector('.matrix-sheet.is-composer', { timeout: 5000 });
       await page.locator('.matrix-attr[aria-label="Срок исполнения"]').click();
       await page.waitForSelector('.matrix-sheet.is-date', { timeout: 5000 });
-      await page.locator('.matrix-cal-day').nth(3).click();
+      // Создание не позволяет прошедшие дни (is-past не кликабелен): берём
+      // сегодняшний день, а не четвёртое число месяца.
+      await page.locator('.matrix-cal-day.is-today').click();
       await page.locator('.matrix-mode-btn[data-mode="timed"]').click();
       await page.locator('.matrix-reminder-row').click();
       await page.waitForSelector('.matrix-sheet.is-reminder', { timeout: 5000 });

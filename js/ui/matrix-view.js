@@ -1268,6 +1268,7 @@ let calIssues = [];          // ошибки последней проверки
 let calFields = {};          // код поля → узел, чтобы фокусить первый неверный
 let calHours = null;         // введённые часы: «весь день» → «часы» вернёт их
 let calMonthCursor = null;   // первое число месяца в сетке дней
+let calHadStartDate = false; // лист открыт для ЗАПИСАННОЙ задачи: прошедшие дни ей разрешены
 
 const WEEKDAYS = ['пн', 'вт', 'ср', 'чт', 'пт', 'сб', 'вс'];
 
@@ -1463,6 +1464,14 @@ function openDateSheet(options) {
     legacyDue: task ? task.due : draft.due,
   }).schedule;
   calTarget = task ? { mode: 'task', id: task.id } : { mode: 'draft' };
+  // Режим листа узнаётся по ЦЕЛИ открытия, а не по startDate: черновик новой
+  // задачи может дожить до второго открытия листа с уже выбранной датой
+  // («Готово» -> «Продолжить редактирование») — это всё ещё создание, и
+  // прошедшие дни для него закрыты. Записанная задача (mode 'task') не
+  // ограничена: её владелец вправе двигать по прошедшим дням. Флаг снимается
+  // один раз здесь, а не пересчитывается по клику: после первого выбора дата
+  // появилась бы в копии, и блокировка молча отключилась бы посреди сеанса.
+  calHadStartDate = calTarget.mode === 'task';
   calEndpoint = 'start';
   calNotice = '';
   calIssues = [];
@@ -1508,6 +1517,7 @@ function closeDateSheet() {
   calNotice = '';
   calIssues = [];
   calFields = {};
+  calHadStartDate = false;
   refreshComposer();
 }
 
@@ -1612,8 +1622,16 @@ function calDayGrid() {
     const isEnd = !!endIso && iso === endIso;
     const picked = (isStart && (calEndpoint === 'start' || isEnd))
       || (isEnd && calEndpoint === 'end');
+    // Прошедший день закрыт только при создании (calHadStartDate ставится при
+    // открытии листа): класс серит день и глушит клик в CSS, aria-disabled
+    // объясняет запрет скринридеру, а guard в calPickDay страхует обход
+    // pointer-events. Сегодняшний день — не прошедший и остаётся активным;
+    // в режиме правки старой задачи класса нет вовсе. Обе даты в форме
+    // YYYY-MM-DD, поэтому строковое сравнение совпадает с календарным.
+    const isPast = !calHadStartDate && iso < todayIso;
     const cell = el('button', 'matrix-cal-day'
       + (iso === todayIso ? ' is-today' : '')
+      + (isPast ? ' is-past' : '')
       + (picked ? ' is-selected' : '')
       + (isStart ? ' is-range-start' : '')
       + (isEnd ? ' is-range-end' : '')
@@ -1624,6 +1642,7 @@ function calDayGrid() {
     // читает cell как «4 ноября». Принадлежность границе — title и класс, а
     // не дописанное в подпись слово, которое ломало бы сопоставление дня.
     cell.setAttribute('aria-label', iso);
+    if (isPast) cell.setAttribute('aria-disabled', 'true');
     if (isStart || isEnd) {
       cell.title = iso + (isStart && isEnd ? ' — начало и конец'
         : isStart ? ' — начало' : ' — конец');
@@ -1835,6 +1854,16 @@ function calRepeatBlock() {
 /* --- Правка копии --------------------------------------------------------- */
 
 function calPickDay(isoDate) {
+  // Создание задачи не начинается в прошлом: у черновика новой задачи не было
+  // startDate к открытию листа (calHadStartDate), и любой день раньше
+  // сегодняшнего для неё закрыт — копия не меняется, лист объясняет отказ
+  // тостом проекта. Правка существующей задачи не ограничена: владелец
+  // вправе двигать старую задачу по прошедшим дням. Guard дублирует CSS
+  // (pointer-events:none), потому что клик может прийти и с клавиатуры.
+  if (!calHadStartDate && isoDate < toISODate(today())) {
+    showToast('Нельзя создать задачу в прошлом');
+    return;
+  }
   if (!calendarDraft.startDate && !calendarDraft.endDate) {
     calendarDraft.startDate = isoDate;
     calendarDraft.endDate = isoDate;

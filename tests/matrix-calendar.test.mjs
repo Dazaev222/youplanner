@@ -1120,3 +1120,116 @@ test('Б7 «Каждый месяц» не подсвечен для прави�
   assert.equal(hasClass(monthPresetAgain, 'is-current'), true,
     'для правила «по числу» пресет «Каждый месяц» — текущий');
 });
+
+/* ========================================================================= */
+/* Создание в прошлом — при создании задачи прошедшие дни не выбираются      */
+/* ========================================================================= */
+
+/* Режим листа определяется по наличию startDate у черновика К МОМЕНТУ
+   открытия: у новой задачи её нет — прошедшие дни закрыты; у существующей
+   startDate уже стоит (возможно в прошлом) — владелец вправе двигать старую
+   задачу. Флаг снимается при открытии, а не по клику, иначе после первого
+   выбора дата появилась бы в черновике и блокировка молча отключилась. */
+
+function navMonth(dom, forward) {
+  const nav = findByClass(dom.host, 'matrix-cal-nav')
+    .filter(n => hasClass(n, 'is-next') === !!forward)[0];
+  assert.ok(nav, 'кнопка навигации по месяцам на месте');
+  nav.fire('click');
+}
+
+test('Создание: клик по вчерашнему дню не меняет черновик и показывает тост', (t) => {
+  const app = loadApp();
+  const dom = installMatrixDom(app);
+  openComposer(app, dom, 'q2');
+  openCalendar(app, dom);
+
+  clickDay(dom, iso(-1));
+  ready(dom); // «Готово» после заблокированного клика применить нечего
+
+  assert.equal(draft(app).schedule.startDate, null,
+    'прошедший день не записался в startDate черновика');
+  assert.equal(draft(app).schedule.endDate, null, 'endDate тоже не тронут');
+  assert.equal(dom.toast.hidden, false, 'тост показан');
+  assert.equal(dom.toast.textContent, 'Нельзя создать задачу в прошлом');
+});
+
+test('Создание: сегодня и завтра выбираются как раньше', (t) => {
+  const app = loadApp();
+  const dom = installMatrixDom(app);
+  openComposer(app, dom, 'q2');
+  openCalendar(app, dom);
+
+  clickDay(dom, iso(0)); // сегодня заполняет обе границы пустого интервала
+  clickDay(dom, iso(1)); // завтра — активная граница «окончание»
+  ready(dom);
+
+  const after = draft(app);
+  assert.equal(after.schedule.startDate, iso(0), 'сегодняшний день выбран');
+  assert.equal(after.schedule.endDate, iso(1), 'завтрашний день выбран');
+  assert.equal(dom.toast.hidden, true, 'для допустимых дней тост не показывается');
+});
+
+test('Правка: у задачи с прошедшей startDate прошедший день остаётся кликабельным', (t) => {
+  const app = loadApp();
+  const dom = installMatrixDom(app);
+  const created = app.context.createTask({
+    title: 'Старая',
+    priority: 2,
+    schedule: { allDay: true, startDate: iso(-5), endDate: iso(-4) },
+  });
+  app.context.saveTasks([created]);
+  app.context.renderMatrixView();
+
+  findByClass(dom.screen, 'matrix-task-schedule')[0].fire('click');
+  clickDay(dom, iso(-7)); // двигаем начало старой задачи ещё дальше в прошлое
+  ready(dom);
+
+  const stored = app.context.loadTasks()[0];
+  assert.equal(stored.id, created.id, 'правится та же задача, не создана новая');
+  assert.equal(stored.schedule.startDate, iso(-7), 'прошедший день применился');
+  assert.equal(stored.schedule.endDate, iso(-4), 'окончание сохранено');
+  assert.equal(dom.toast.hidden, true, 'блокировка создания не срабатывает в режиме правки');
+});
+
+test('Разметка: в режиме создания прошедшие дни серые, в режиме правки — нет', (t) => {
+  const app = loadApp();
+  const dom = installMatrixDom(app);
+
+  // Режим создания: в прошлом месяце все дни до сегодняшнего заблокированы…
+  openComposer(app, dom, 'q2');
+  openCalendar(app, dom);
+  navMonth(dom, false);
+  let days = findByClass(dom.host, 'matrix-cal-day');
+  assert.ok(days.length >= 28, 'сетка прошлого месяца отрисована');
+  assert.equal(days.filter(n => !hasClass(n, 'is-past')).length, 0,
+    'в прошлом месяце у всех дней есть блокирующий класс is-past');
+  assert.ok(days.every(n => n.getAttribute('aria-disabled') === 'true'),
+    'прошедшие дни помечены aria-disabled');
+
+  // …а сегодняшний день в текущем месяце остаётся активным.
+  navMonth(dom, true);
+  const todayCell = findByClass(dom.host, 'matrix-cal-day')
+    .filter(n => n.getAttribute('aria-label') === iso(0))[0];
+  assert.ok(todayCell, 'сегодняшний день виден в сетке');
+  assert.equal(hasClass(todayCell, 'is-past'), false, 'сегодня не серый');
+  assert.notEqual(todayCell.getAttribute('aria-disabled'), 'true',
+    'сегодня не помечено aria-disabled');
+
+  // Режим правки: старая задача с прошедшей startDate — блокировки нет.
+  const app2 = loadApp();
+  const dom2 = installMatrixDom(app2);
+  const created = app2.context.createTask({
+    title: 'Старая',
+    priority: 2,
+    schedule: { allDay: true, startDate: iso(-5), endDate: iso(-4) },
+  });
+  app2.context.saveTasks([created]);
+  app2.context.renderMatrixView();
+  findByClass(dom2.screen, 'matrix-task-schedule')[0].fire('click');
+  navMonth(dom2, false);
+  days = findByClass(dom2.host, 'matrix-cal-day');
+  assert.ok(days.length >= 28, 'сетка прошлого месяца отрисована в режиме правки');
+  assert.equal(days.filter(n => hasClass(n, 'is-past')).length, 0,
+    'в режиме правки прошедшие дни не блокируются');
+});

@@ -1061,6 +1061,14 @@ body.matrix-sheet-open { overflow: hidden; }
   font-weight: 600;
 }
 
+/* Прошедший день в режиме создания задачи: выбрать его нельзя. День остаётся
+   в сетке и виден, но серый; pointer-events:none гасит и наведение, и клик,
+   а guard в calPickDay страхует клавиатурный выбор и отключённый CSS. */
+.matrix-cal-day.is-past {
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
 .matrix-cal-day.is-selected,
 .matrix-cal-day.is-selected.is-today {
   background: var(--accent);
