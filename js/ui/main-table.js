@@ -20,13 +20,36 @@ export function getWeekDates(weekStart) {
   for (let i = 0; i < 7; i++) dates.push(toISODate(addDays(weekStart, i)));
   return dates;
 }
+// Кэш массивов дат недели и месяца (приём captureMainSnapshot: даты не
+// зависят от данных записей, а строились заново на каждую строку таблицы).
+// Ключ — то, от чего массив зависит: неделя — её понедельник, месяц —
+// сегодняшний день. Первый читатель строит массив, остальные строки
+// таблицы, updateRowCircle и patchWeekCircle читают тот же массив.
+let weekDatesCache = { key: null, dates: [] };
+function cachedWeekDates() {
+  const weekStart = appState.weekStart;
+  const key = weekStart ? toISODate(weekStart) : null;
+  if (weekDatesCache.key !== key) {
+    weekDatesCache = { key: key, dates: key ? getWeekDates(weekStart) : [] };
+  }
+  return weekDatesCache.dates;
+}
+let monthDatesCache = { key: null, dates: [] };
+function cachedMonthDates() {
+  const now = new Date();
+  const key = toISODate(now);
+  if (monthDatesCache.key !== key) {
+    monthDatesCache = { key: key, dates: getMonthDatesToToday(now.getFullYear(), now.getMonth()) };
+  }
+  return monthDatesCache.dates;
+}
 // Прогресс привычки за отображаемую неделю. Знаменатель — дни недели от
 // начала ведения привычки (дни до первой записи из него выпадают), поэтому с
 // каждым новым понедельником круг естественно обнуляется.
 export function weekPercent(habit) {
   const weekStart = appState.weekStart;
   if (!weekStart) return 0;
-  return calcProgress(habit, getWeekDates(weekStart));
+  return calcProgress(habit, cachedWeekDates());
 }
 // Прогресс привычки за месяц: с 1-го числа по сегодня включительно — тот же
 // текущий месяц, что показывает «Статистика → Месяц» (stats.js), а не месяц
@@ -34,9 +57,7 @@ export function weekPercent(habit) {
 // понедельник недели выпадает в прошлый месяц, круг и статистика обязаны
 // называть одно число, а не два разных процента.
 export function monthPercent(habit) {
-  const now = new Date();
-  const dates = getMonthDatesToToday(now.getFullYear(), now.getMonth());
-  return calcProgress(habit, dates);
+  return calcProgress(habit, cachedMonthDates());
 }
 // Класс границы поля отметки по уровню записи (§1.5). Уровня нет — класс
 // не ставится, и поле остаётся с обычной рамкой --border.
@@ -631,9 +652,8 @@ export function captureMainSnapshot() {
   const circles = {};
   if (!dayView) {
     // Период один на все строки: массивы дат строятся один раз, а не по разу
-    // на привычку. weekPercent/monthPercent строят свои массивы внутри —
-    // на каждую сверку выходило 24 сборки дат (замер: 1.47 из 1.66 мс),
-    // теперь — две, дальше тёплые попадания в кэш calcProgress.
+    // на привычку (weekPercent/monthPercent читают свой кэш по ключу
+    // недели/дня — тот же приём), дальше тёплые попадания в кэш calcProgress.
     const weekStart = appState.weekStart;
     const weekPeriod = weekStart ? getWeekDates(weekStart) : [];
     // Месяц — текущий, тем же окном, что monthPercent и «Статистика → Месяц»

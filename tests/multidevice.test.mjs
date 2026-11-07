@@ -98,6 +98,9 @@ function makeMultiDeviceServer() {
     dataCalls: [],
     securetokenCalls: [],
     signUpCalls: [],
+    // Сетевая моргла для тестов релога: столько СЛЕДУЮЩИХ GET к узлам данных
+    // отклоняется как сетевой сбой (до auth-проверки, как в реальности)
+    failNextDataGets: 0,
   };
 
   // Новая пара токенов для аккаунта (uid, email)
@@ -168,6 +171,12 @@ function makeMultiDeviceServer() {
     state.calls.push({ url: u, method: method });
 
     if (u.indexOf('firebaseio.com') !== -1) {
+      // Сетевая моргла: транспорт лёг до auth-проверки — отклонение промиса,
+      // как у настоящего fetch без сети
+      if (method === 'GET' && state.failNextDataGets > 0) {
+        state.failNextDataGets -= 1;
+        return Promise.reject(new Error('сеть недоступна (тест)'));
+      }
       const token = tokenOf(u, headers);
       const cred = token ? state.idTokens.get(token) : null;
       let response;
@@ -492,4 +501,87 @@ test('два устройства: публикация А доезжает ск
     'ETag узлов изменился — сервер кто-то писал после отзыва сессии');
   assert.equal(server.nodes.planner.data.entries[taskId].fields.title.value, 'Переименовано на Б',
     'правка Б пропала с сервера');
+});
+
+// ── 3. Релог с протухшим кэшем: удалённая привычка не воскресает ────────────
+// Баг владельца (2026-11-07): устройство Б долго не синхронизировалось, его
+// локальный кэш всё ещё держит привычку, которую А успела удалить и
+// опубликовать. После релога первый обмен Б — отправка (кнопка/правка:
+// ownerSignIn в Настройках не перезапускает init, сверка могла моргнуть) —
+// и удалённая привычка возвращалась на сервер, а с ним и на А. Контракт:
+// надгробие выигрывает и на пути релога; кэш, противоречащий свежему
+// надгробию, выбрасывает привычку (clearStaleCache, js/sync/merge.js).
+test('релог с протухшим кэшем: удалённая на А привычка не возвращается ни у А, ни у Б', async () => {
+  const server = makeMultiDeviceServer();
+  const deviceA = loadApp({ fetchImpl: server.respond });
+  const deviceB = loadApp({ fetchImpl: server.respond });
+  deviceA.context.setFirebaseApiKey(KEY);
+  deviceB.context.setFirebaseApiKey(KEY);
+  await deviceA.context.ownerSignIn('owner@example.com', 'secret-pw');
+  await deviceB.context.ownerSignIn('owner@example.com', 'secret-pw');
+
+  const habitIds = function (app) {
+    return Array.from(app.context.loadHabits()).map(function (h) { return h.id; });
+  };
+
+  // ── Фаза 1: А заводит две привычки и публикует ──
+  const keeper = deviceA.context.addHabit({ name: 'Чтение', type: 'boolean' });
+  const deleted = deviceA.context.addHabit({ name: 'Бег', type: 'boolean' });
+  await deviceA.context.syncToCloudNow();
+  assert.deepEqual(server.nodes.root.data.habits.map(function (h) { return h.id; }),
+    [keeper.id, deleted.id], 'предусловие: списка А нет на сервере');
+
+  // ── Фаза 2: Б сверяется — на этот момент кэш Б свежий ──
+  const pulled = await deviceB.context.syncFromCloud();
+  assert.equal(pulled.reachable, true, 'предусловие: Б не смог свериться');
+  assert.deepEqual(habitIds(deviceB), [keeper.id, deleted.id]);
+  // Дальше Б «уходит в офлайн»: сервер уезжает вперёд, кэш Б — нет
+
+  // ── Фаза 3: А удаляет привычку и публикует; Б этого не видел ──
+  assert.equal(deviceA.context.removeHabit(deleted.id), true);
+  await deviceA.context.syncToCloudNow();
+  const afterDelete = server.nodes.root.data;
+  assert.deepEqual(afterDelete.habits.map(function (h) { return h.id; }),
+    [keeper.id], 'предусловие: удаление не доехало до сервера');
+  assert.ok(Number.isFinite(afterDelete.tombstones[deleted.id]),
+    'предусловие: надгробия нет на сервере');
+
+  // ── Фаза 4: релог Б — свежий экземпляр приложения, хранилище то же ──
+  // (приём «перезагрузки» из tests/firebase-auth.test.mjs: данные устройства
+  // переживают процесс, память модулей — нет). Кэш Б протух: привычка ещё в
+  // списке, надгробия он не видел, метка сверки старше серверной.
+  const reloggedB = loadApp({ fetchImpl: server.respond });
+  const dump = deviceB.sandbox.localStorage._dump();
+  Object.keys(dump).forEach(function (k) { reloggedB.sandbox.localStorage.setItem(k, dump[k]); });
+  reloggedB.context.setFirebaseApiKey(KEY);
+  await reloggedB.context.ownerSignIn('owner@example.com', 'secret-pw');
+  assert.deepEqual(habitIds(reloggedB), [keeper.id, deleted.id],
+    'предусловие: в кэше Б привычка ещё жива');
+  assert.equal(reloggedB.sandbox.localStorage.getItem('youplanner.tombstones'), null,
+    'предусловие: кэш Б не видел надгробия');
+
+  // ── Фаза 5: первый обмен после релога: сверка моргнула, отправка прошла ──
+  server.failNextDataGets = 1;
+  const failed = await reloggedB.context.syncFromCloud();
+  assert.equal(failed.reachable, false, 'предусловие: сверка не удалась');
+  // Отправка (кнопка или дебаунс правки) — единственный успешный контакт
+  // с сервером: уходит с ещё протухшим кэшем
+  await reloggedB.context.syncToCloudNow();
+
+  // ── Фаза 6: привычка не вернулась ни на сервер, ни у А, ни у Б ──
+  const finalRoot = server.nodes.root.data;
+  assert.deepEqual(finalRoot.habits.map(function (h) { return h.id; }),
+    [keeper.id], 'удалённая привычка уехала обратно на сервер с PUT Б');
+  assert.ok(Number.isFinite(finalRoot.tombstones[deleted.id]),
+    'надгробие стёрлось на сервере вместе с PUT Б');
+  const pulledA = await deviceA.context.syncFromCloud();
+  assert.equal(pulledA.reachable, true);
+  assert.deepEqual(habitIds(deviceA), [keeper.id],
+    'удалённая привычка вернулась на А со сверкой');
+  assert.ok(Number.isFinite(deviceA.context.loadTombstones()[deleted.id]),
+    'надгробие стёрлось на А');
+  assert.deepEqual(habitIds(reloggedB), [keeper.id],
+    'удалённая привычка осталась в списке Б после релога');
+  assert.ok(Number.isFinite(reloggedB.context.loadTombstones()[deleted.id]),
+    'надгробие не записалось на Б');
 });

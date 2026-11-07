@@ -13,7 +13,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  mergeCloudIntoLocal, mergeHabitsById, mergeTombstonesById, sectionTsOf,
+  clearStaleCache, mergeCloudIntoLocal, mergeHabitsById, mergeTombstonesById,
+  sectionTsOf,
 } from '../js/sync/merge.js';
 import { validCloudTombstones } from '../js/sync/core.js';
 import { TOMBSTONES_LIMIT } from '../js/data/habits.js';
@@ -139,6 +140,72 @@ test('mergeHabitsById: метка раздела новее надгробия �
   assert.deepEqual(mergeHabitsById([], [habit({ id: 'h9' })], true, opts).map(function (h) { return h.id; }), ['h9']);
   // Без надгробий — прежнее поведение
   assert.deepEqual(mergeHabitsById([], [habit({ id: 'h9' })], true).map(function (h) { return h.id; }), ['h9']);
+});
+
+// ── Надгробие поверх устаревшего кэша (релог, баг владельца 2026-11-07) ─────
+// Устройство долго не синхронизировалось: кэш держит привычку, а приехавший
+// снимок (он новее последней сверки — иначе слияния бы не было) уже содержит
+// надгробие. Раньше слияние оставляло привычку в списке, затем
+// pruneResolvedTombstones стирал «противоречащее» надгробие, и PUT возвращал
+// удалённую привычку на сервер. clearStaleCache выбрасывает такие привычки:
+// надгробие выигрывает и на пути релога.
+
+test('clearStaleCache: привычка с надгробием, которой нет на сервере, выбрасывается из кэша', () => {
+  const cache = [habit({ id: 'h1' }), habit({ id: 'h9', name: 'Из кэша' })];
+  assert.deepEqual(
+    clearStaleCache(cache, { h9: DELETE_TS }, [habit({ id: 'h1' })]).map(function (h) { return h.id; }),
+    ['h1'],
+    'кэш оставил привычку, которую сервер уже удалил');
+});
+
+test('clearStaleCache: привычка, ЕСТЬ на сервере, надгробием не выбрасывается', () => {
+  const cache = [habit({ id: 'h9', name: 'Локальная' })];
+  // Сервер снова держит h9: судьбу привычки решает совпадение id по
+  // правилам cloudWins, а не чистка кэша
+  assert.deepEqual(
+    clearStaleCache(cache, { h9: DELETE_TS }, [habit({ id: 'h9' })]).map(function (h) { return h.id; }),
+    ['h9']);
+  // Надгробия нет — кэш не трогается вовсе
+  assert.deepEqual(
+    clearStaleCache(cache, {}, []).map(function (h) { return h.id; }),
+    ['h9']);
+});
+
+test('clearStaleCache: мусорные входы не роняют функцию', () => {
+  assert.deepEqual(clearStaleCache(null, null, null), []);
+  assert.deepEqual(clearStaleCache('мусор', { h9: 5 }, null), []);
+  // Битая метка надгробия — не надгробие: привычка остаётся
+  assert.deepEqual(
+    clearStaleCache([habit({ id: 'h9' })], { h9: 'мусор' }, []).map(function (h) { return h.id; }),
+    ['h9']);
+});
+
+test('mergeHabitsById: надгробие поверх устаревшего кэша — привычка выбрасывается', () => {
+  const opts = { tombstones: { h9: DELETE_TS }, sectionTs: CLOUD_TS };
+  const merged = mergeHabitsById(
+    [habit({ id: 'h1' }), habit({ id: 'h9', name: 'Из кэша' })],
+    [habit({ id: 'h1' })],
+    true,
+    opts,
+  );
+  assert.deepEqual(merged.map(function (h) { return h.id; }), ['h1'],
+    'привычка из устаревшего кэша пережила слияние с надгробием');
+});
+
+test('mergeCloudIntoLocal: надгробие поверх устаревшего кэша выбрасывает привычку и хранит метку', () => {
+  const local = baseLocal();
+  // Кэш устройства: h9 ещё жива, удаления оно не видело
+  local.habits = [habit(), habit({ id: 'h9', name: 'Из кэша' })];
+  local.tombstones = {};
+  const cloud = baseCloud();
+  // Сервер новее последней сверки и уже удалил h9
+  cloud.habits = [habit()];
+  cloud.tombstones = { h9: DELETE_TS };
+  const merged = merge(local, cloud);
+  assert.deepEqual(merged.habits.map(function (h) { return h.id; }), ['h1'],
+    'надгробие не выбросило привычку из устаревшего кэша');
+  assert.deepEqual(merged.tombstones, { h9: DELETE_TS },
+    'надгробие потерялось в слиянии — привычка вернётся с этим PUT');
 });
 
 test('mergeCloudIntoLocal: удалил на устройстве A — привычка не возрождается из снимка', () => {

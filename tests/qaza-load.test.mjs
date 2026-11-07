@@ -15,6 +15,7 @@ import assert from 'node:assert/strict';
 import { loadApp } from './helpers/load-app.mjs';
 
 const QAZA_KEY = 'youplanner.qaza';
+const QAZA_LOG_KEY = 'youplanner.qaza.log'; // QAZA_LOG_KEY (js/data/qaza.js:49)
 
 // Стартовая очередь: 305+306+306+305+305 (см. DEFAULT_QAZA в qaza.js)
 const DEFAULT_TOTAL = 1527;
@@ -80,4 +81,65 @@ test('битый JSON не мешает облачному снимку пере
   const qaza = app.context.loadQaza(true);
   assert.equal(app.context.qazaTotalRemaining(qaza), 1000,
     'после применения читаются облачные данные, а не временный дефолт');
+});
+
+/* --- loadQazaLog: битое поле журнала не сбрасывает сам журнал -------------- */
+
+/* Журнал растёт годами (§5). Битый since не должен выглядеть как «журнала
+   нет»: append тогда молча пересоздаёт журнал с сегодняшним since и год
+   статистики каза стирается. Восстановление — как при заводе журнала первой
+   отметкой (appendQazaLog, js/data/qaza.js:251-259): since = самая ранняя
+   валидная запись. Порченые entries при валидном since — журнал с пустым
+   entries. null остаётся только для нет ключа / битого JSON / не-объекта. */
+
+// QAZA_LOG_VERSION (js/data/qaza.js:51). const из vm-песочницы не виден как
+// свойство контекста, поэтому литерал с комментарием-источником
+const LOG_VERSION = 1;
+
+test('битый since не сбрасывает журнал: записи сохраняются, since восстановлен', () => {
+  const app = loadApp();
+  app.sandbox.localStorage.setItem(QAZA_LOG_KEY, JSON.stringify({
+    version: LOG_VERSION,
+    since: 'garbage',
+    entries: [{ date: '2026-11-01', namaz: 'fajr', source: 'done' }],
+  }));
+
+  // Чтение само по себе не теряет журнал: since восстановлен по записи
+  const log = app.context.loadQazaLog();
+  assert.notEqual(log, null, 'битый since не должен выглядеть как «журнала нет»');
+  // Круг через JSON обязателен: объект из vm-песочницы чужой для deepEqual
+  assert.deepEqual(JSON.parse(JSON.stringify(log)), {
+    version: LOG_VERSION,
+    since: '2026-11-01',
+    entries: [{ date: '2026-11-01', namaz: 'fajr', source: 'done' }],
+  });
+
+  // Раньше append после битого since пересоздавал журнал с сегодняшним
+  // since и стирал прежние записи; теперь они на месте
+  assert.equal(app.context.appendQazaLog('zuhr', '2026-11-07', 'done'), true);
+  assert.deepEqual(JSON.parse(app.sandbox.localStorage.getItem(QAZA_LOG_KEY)), {
+    version: LOG_VERSION,
+    since: '2026-11-01',
+    entries: [
+      { date: '2026-11-01', namaz: 'fajr', source: 'done' },
+      { date: '2026-11-07', namaz: 'zuhr', source: 'done' },
+    ],
+  });
+});
+
+test('порченые entries при валидном since: журнал читается с пустым entries', () => {
+  const app = loadApp();
+  app.sandbox.localStorage.setItem(QAZA_LOG_KEY, JSON.stringify({
+    version: LOG_VERSION,
+    since: '2026-01-01',
+    entries: 'не массив',
+  }));
+
+  const log = app.context.loadQazaLog();
+  assert.notEqual(log, null, 'валидный since не должен выглядеть как «журнала нет»');
+  assert.deepEqual(JSON.parse(JSON.stringify(log)), {
+    version: LOG_VERSION,
+    since: '2026-01-01',
+    entries: [],
+  });
 });

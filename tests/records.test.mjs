@@ -375,3 +375,36 @@ test('defaultLevel: прошлый день не получает уровень
   assert.equal(ctx.defaultLevel(sport, 'yes', yesterday), null,
     'вчерашнее «да» без уровня, а не «опоздал к 07:00 сегодня»');
 });
+
+/* --- loadRecords: битый день (null) отбрасывается на границе чтения ------- */
+
+/* Хранилище может приехать с чужого устройства или старой версии с днём null
+   вместо объекта. Критерий дня тот же, что у validCloudRecords
+   (js/sync/core.js:100-101): день обязан быть объектом, не массивом. Без
+   отсева hasRecords и removeHabit падают на
+   Object.prototype.hasOwnProperty.call(null, ...) (js/data/habits.js:92, 281)
+   — ломаются отметка и удаление привычек. */
+
+test('loadRecords: null-день отбрасывается, hasRecords и removeHabit не падают', () => {
+  const { context: ctx, sandbox } = loadApp();
+  // Сев мимо loadRecords — как будто данные приехали из бэкапа или синка
+  sandbox.localStorage.setItem('youplanner.records', JSON.stringify({
+    '2026-01-01': null,
+    '2026-01-02': { h1: true },
+  }));
+
+  // Читаются только дни-объекты: null-день молча выброшен. Круг через JSON
+  // обязателен: объект из vm-песочницы чужой для deepEqual (см. sparkline.test.mjs)
+  assert.deepEqual(JSON.parse(JSON.stringify(ctx.loadRecords())),
+    { '2026-01-02': { h1: true } });
+
+  // Перебор дней больше не натыкается на null
+  assert.equal(ctx.hasRecords('h1'), true);
+  assert.equal(ctx.hasRecords('h2'), false);
+
+  // Удаление привычки вычищает h1 из единственного дня; опустевший день
+  // уходит целиком — на диске остаётся пустой объект
+  assert.equal(ctx.removeHabit('h1'), true);
+  assert.deepEqual(JSON.parse(sandbox.localStorage.getItem('youplanner.records')), {});
+  assert.equal(ctx.hasRecords('h1'), false);
+});

@@ -8,7 +8,7 @@ import { loadFast } from './data/fast.js';
 import { getOwnerAccount, ownerSignIn, ownerSignOut } from './data/firebase-auth.js';
 import { loadHabits } from './data/habits.js';
 import { migrateDropTasks } from './data/migrations.js';
-import { QAZA_HABIT_ID, kazaDayFor, loadQaza } from './data/qaza.js';
+import { QAZA_HABIT_ID, QAZA_LOG_KEY, QAZA_STORAGE_KEY, kazaDayFor, loadQaza } from './data/qaza.js';
 import { loadPrayer, prayerDateISO } from './data/prayer.js';
 import { invalidateRecordsCache } from './data/records.js';
 import { loadSchedule, SCHEDULE_TYPES } from './data/schedule.js';
@@ -175,6 +175,16 @@ export function init() {
   // вкладок, поэтому с write-through в текущей оно не конфликтует.
   window.addEventListener('storage', function (event) {
     if (event.key === null || event.key === STORAGE_KEYS.records) invalidateRecordsCache();
+    // Чужая запись qaza-разделов (другая вкладка) обязана попасть в память:
+    // иначе следующий локальный saveQaza перезатрёт её LWW-конвертом со
+    // свежим временем, и правка другой вкладки потеряется. Порядок тот же,
+    // что у sync:applied ниже: сначала состояние (skipSave — чтение не
+    // «правка»), затем guarded-перерисовка.
+    if (event.key === null || event.key === QAZA_STORAGE_KEY ||
+        event.key === QAZA_LOG_KEY) {
+      setQazaState(loadQaza(true));
+      renderAfterRemoteDataGuarded();
+    }
   });
 
   appState.habits = loadHabits();

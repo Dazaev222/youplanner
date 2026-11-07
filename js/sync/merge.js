@@ -590,6 +590,49 @@ export function mergeTombstonesById(localTombstones, cloudTombstones) {
   return merged;
 }
 
+// Чистит устаревший локальный кэш привычек: выбрасывает привычки, у которых
+// есть надгробие, а в серверном списке их нет. Случай «релог после долгого
+// офлайна» (баг владельца 2026-11-07): кэш устройства не видел удаления,
+// объявляет привычку живой, а приехавший снимок — он новее последней сверки,
+// иначе слияние не началось бы — уже содержит надгробие. Раньше слияние
+// оставляло привычку в списке, pruneResolvedTombstones стирал «противоречащее»
+// надгробие (js/data/habits.js), и PUT возвращал удалённую привычку на сервер:
+// удаление отменялось первым же обменом.
+// Метка раздела (sectionTs) здесь, в отличие от ветки extra ниже, не
+// участвует: метка раздела habits — время ПУБЛИКАЦИИ снимка (syncBody), она
+// всегда не старше его собственных надгробий, и guard «ts >= sectionTs»
+// сделал бы очистку мёртвым кодом. Привычка, ВЕРНУВШАЯСЯ на сервер (есть в
+// cloudHabits), не выбрасывается — её судьбу решает совпадение id по правилам
+// cloudWins, как раньше. Правка без сети (pending) не спасает привычку от
+// чужого надгробия: удаление — тоже правка, и спор решается в его пользу.
+export function clearStaleCache(localHabits, tombstones, cloudHabits) {
+  const list = Array.isArray(localHabits) ? localHabits : [];
+  const graves = tombstones && typeof tombstones === 'object' && !Array.isArray(tombstones)
+    ? tombstones
+    : {};
+  const cloud = Array.isArray(cloudHabits) ? cloudHabits : [];
+  const onServer = {};
+  for (let i = 0; i < cloud.length; i++) {
+    const habit = cloud[i];
+    if (habit && habit.id != null) onServer[habit.id] = true;
+  }
+  const kept = [];
+  for (let i = 0; i < list.length; i++) {
+    const habit = list[i];
+    // Элементы без id проходят дальше без разбора: их судьбу решает
+    // вызывающий (mergeHabitsById исключает их из результата как и раньше)
+    if (!habit || habit.id == null) {
+      kept.push(habit);
+      continue;
+    }
+    const ts = graves[habit.id];
+    const tombstoned = typeof ts === 'number' && Number.isFinite(ts);
+    if (tombstoned && !onServer[habit.id]) continue;
+    kept.push(habit);
+  }
+  return kept;
+}
+
 // Привычки: объединение по id. Порядок локального списка сохраняется,
 // чужие привычки дописываются в конец в своём порядке. Совпадающий id:
 // при cloudWins объект сервера, иначе локальный — список и так видел
@@ -613,10 +656,15 @@ export function mergeHabitsById(localHabits, cloudHabits, cloudWins, opts) {
   };
   const local = Array.isArray(localHabits) ? localHabits : [];
   const cloud = Array.isArray(cloudHabits) ? cloudHabits : [];
+  // Сначала чистка устаревшего кэша (см. clearStaleCache): надгробия здесь —
+  // объединение локальных и приехавших со снимком (tombstonesForMerge в
+  // mergeCloudIntoLocal), и привычка, удалённая на сервере позже нашей
+  // последней сверки, из списка выбрасывается
+  const alive = clearStaleCache(local, tombstones, cloud);
   const byId = {};
   const order = [];
-  for (let i = 0; i < local.length; i++) {
-    const habit = local[i];
+  for (let i = 0; i < alive.length; i++) {
+    const habit = alive[i];
     if (habit && habit.id != null && byId[habit.id] === undefined) {
       byId[habit.id] = habit;
       order.push(habit.id);

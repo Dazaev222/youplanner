@@ -814,6 +814,252 @@ test('401 Permission denied — правила, а не протухший то�
     'отказ правил разлогинил');
 });
 
+/* ---------- Медленный securetoken: auth-таймаут длиннее таймаута данных ----
+   Баг владельца (2026-11-07): на медленной сети обмен refresh-токена идёт
+   дольше, чем таймаут запросов ДАННЫХ (SYNC_TIMEOUT_MS, js/sync/sync.js), и
+   короткий auth-таймаут убивал запрос с «Fetch is aborted» раньше ответа
+   securetoken: refresh срывался, 401 оставался, синк падал в отказ.
+   Контракт: у авторизационных эндпоинтов (securetoken.googleapis.com,
+   identitytoolkit.googleapis.com) свой, УВЕЛИЧЕННЫЙ таймаут AUTH_TIMEOUT_MS
+   (js/data/firebase-auth.js), и он обязан быть ДЛИННЕЕ таймаута данных;
+   логика данных не меняется. Оба теста ниже берут числа из констант
+   приложения, а не из констант теста: пока AUTH_TIMEOUT_MS длиннее
+   SYNC_TIMEOUT_MS, интервал «между таймаутами» непуст. */
+
+// Ручные часы песочницы. setTimeout подменяется расписанием, которое двигает
+// только advance(): задержки ответов мока и таймауты обёрток оказываются на
+// одной шкале, и тест не ждёт реальных секунд. Контроллер — с настоящим
+// событием abort (как FakeController в timers.test.mjs): заглушка из
+// load-app.mjs только ставит флаг, и мок не узнал бы об отмене запроса.
+function fakeClock() {
+  const timers = new Map(); // id -> { fn, at }
+  let now = 0;
+  let nextId = 1;
+  function schedule(delayMs, fn) {
+    const id = nextId++;
+    timers.set(id, { fn: fn, at: now + (Number(delayMs) || 0) });
+    return id;
+  }
+  // Реальная макрозадача: вымывает микротаски vm-цепочек (очередь у
+  // песочницы и теста общая), чтобы следующие звенья успели создаться.
+  function flush() {
+    return new Promise(function (resolve) { setTimeout(resolve, 0); });
+  }
+  return {
+    now: function () { return now; },
+    // Отложенный ответ мока по той же шкале, что и таймауты обёрток.
+    schedule: schedule,
+    // Ставится сразу после loadApp, до первого сетевого вызова: guard'ы
+    // создаются лениво, при запросе, и подхватят подменённые таймеры.
+    install: function (app) {
+      app.sandbox.setTimeout = function (fn, delay) { return schedule(delay, fn); };
+      app.sandbox.clearTimeout = function (id) { timers.delete(id); };
+      app.sandbox.AbortController = class FakeController {
+        constructor() {
+          this.signal = {
+            aborted: false,
+            listeners: [],
+            addEventListener: function (type, fn) {
+              if (type === 'abort') this.listeners.push(fn);
+            },
+          };
+        }
+        abort() {
+          this.signal.aborted = true;
+          this.signal.listeners.forEach(function (fn) { fn(); });
+        }
+      };
+      // Без AbortSignal.timeout guard уходит в ветку ручного контроллера —
+      // ту же, что на старых iPhone (fallback в syncGuard/authTimeoutGuard).
+      app.sandbox.AbortSignal = {};
+    },
+    // Двигает фальшивое время вперёд на ms, по пути срабатывая все таймеры
+    // с истёкшим сроком — в порядке назначения их сроков.
+    advance: async function (ms) {
+      const deadline = now + ms;
+      for (;;) {
+        let dueId = null;
+        let dueAt = Infinity;
+        timers.forEach(function (t, id) {
+          if (t.at <= deadline && t.at < dueAt) { dueAt = t.at; dueId = id; }
+        });
+        if (dueId === null) break;
+        now = dueAt;
+        const t = timers.get(dueId);
+        timers.delete(dueId);
+        t.fn();
+        await flush();
+      }
+      now = deadline;
+      await flush();
+    },
+  };
+}
+
+// Сервер владельца, у которого securetoken «едет» state.delayMs фальшивого
+// времени. Данные: с токеном tok-owner — 401 протухшего токена, с tok-new —
+// 200. Ответ обмена разрешается по расписанию часов; abort, пришедший раньше,
+// отвергает запрос — так настоящий fetch реагирует на сигнал таймаута.
+function makeSlowSecuretokenServer(clock) {
+  const state = { delayMs: 0, dataCalls: [], securetokenCalls: [] };
+  const impl = function (url, opts) {
+    const u = String(url);
+    const headers = (opts && opts.headers) || {};
+    if (u.indexOf('firebaseio.com') !== -1) {
+      state.dataCalls.push({ url: u, headers: headers });
+      const bearer = headers && typeof headers.Authorization === 'string'
+        ? headers.Authorization.replace(/^Bearer\s+/i, '')
+        : '';
+      if (bearer === 'tok-new') return Promise.resolve(okJson({}));
+      return Promise.resolve({
+        ok: false,
+        status: 401,
+        json: function () { return Promise.resolve({ error: 'INVALID_ID_TOKEN' }); },
+      });
+    }
+    if (u.indexOf('securetoken.googleapis.com') !== -1) {
+      state.securetokenCalls.push({ url: u, body: opts && opts.body });
+      return new Promise(function (resolve, reject) {
+        clock.schedule(state.delayMs, function () {
+          resolve(okJson({ id_token: 'tok-new', refresh_token: 'r-new', expires_in: '3600' }));
+        });
+        const signal = opts && opts.signal;
+        if (signal && typeof signal.addEventListener === 'function') {
+          signal.addEventListener('abort', function () {
+            const error = new Error('Fetch is aborted');
+            error.name = 'AbortError';
+            reject(error);
+          });
+        }
+      });
+    }
+    if (u.indexOf('signInWithPassword') !== -1) {
+      return Promise.resolve(okJson({
+        kind: 'identitytoolkit#VerifyPasswordResponse',
+        idToken: 'tok-owner', refreshToken: 'r-owner', expiresIn: '3600',
+        localId: OWNER_UID, email: 'owner@example.com',
+      }));
+    }
+    return Promise.resolve(okJson({}));
+  };
+  impl.state = state;
+  return impl;
+}
+
+// Задержка «медленного» ответа securetoken: строго МЕЖДУ таймаутом данных и
+// auth-таймаутом. Пока AUTH_TIMEOUT_MS длиннее SYNC_TIMEOUT_MS, интервал
+// непуст; съедутся константы (auth не длиннее данных) — интервал пуст и тест
+// ниже падает. Это и есть ловимая им регрессия.
+function betweenTimeoutsMs(app) {
+  return Math.floor((app.run('SYNC_TIMEOUT_MS') + app.run('AUTH_TIMEOUT_MS')) / 2);
+}
+
+test('медленный securetoken (дольше таймаута данных): обмен доживает, запрос повторён с новым токеном', async () => {
+  const clock = fakeClock();
+  const server = makeSlowSecuretokenServer(clock);
+  const app = loadApp({ fetchImpl: server });
+  clock.install(app);
+  server.state.delayMs = betweenTimeoutsMs(app);
+  app.context.setFirebaseApiKey(KEY);
+  await app.context.ownerSignIn('owner@example.com', 'secret-pw');
+  app.run("globalThis.__expired = [];");
+  app.run("bus.on('sync:auth-expired', function (p) { globalThis.__expired.push(p && p.reason); });");
+  const state = server.state;
+
+  const pending = app.context.syncFromCloud();
+  // Макрозадача вымывает цепочку до первого честного ожидания: данные
+  // вернули 401, refresh начался, auth-guard стоит в расписании часов.
+  await new Promise(function (resolve) { setTimeout(resolve, 0); });
+
+  // Ответ securetoken приезжает на задержке между таймаутами: auth-guard
+  // (длиннее) ещё не звонит — обмен обязан дожить.
+  await clock.advance(state.delayMs);
+  const result = await pending;
+
+  assert.equal(result.reachable, true,
+    'медленный обмен сорвался: refresh не дожил до ответа securetoken');
+  assert.equal(state.securetokenCalls.length, 1,
+    'обменов refresh-токена: ' + state.securetokenCalls.length);
+  assert.ok(callsWithAuth(state.dataCalls, 'tok-owner').length >= 1,
+    'первый запрос с протухшим токеном не состоялся вовсе');
+  assert.ok(callsWithAuth(state.dataCalls, 'tok-new').length >= 1,
+    'запрос не повторён с НОВЫМ токеном');
+  assert.equal(app.sandbox.localStorage.getItem(AUTH_REFRESH_KEY), 'r-new',
+    'новый refresh-токен не записан на прежний ключ');
+  assert.equal(await app.context.getAuthToken(), 'tok-new',
+    'новый id-токен не в кэше: следующий обмен пойдёт со старым');
+  assert.equal(app.run('deniedStatus'), 0, 'вылеченный 401 залип в deniedStatus');
+  assert.deepEqual(Array.from(app.run('globalThis.__expired')), [],
+    'медленный, но успешный обмен разлогинил владельца');
+});
+
+// Контроль той же задержкой: таймаут ДАННЫХ работает как работал. Сервер
+// отвечает на data-запрос так же медленно (в зелёном состоянии — те же
+// 25 с: SYNC_TIMEOUT_MS + 5000), и обёртка данных обязана оборвать запрос
+// СВОИМ таймаутом, а не дождаться ответа.
+function makeHangingDataServer(clock) {
+  const state = { delayMs: 0, dataCalls: 0, answered: false };
+  const impl = function (url, opts) {
+    const u = String(url);
+    if (u.indexOf('signInWithPassword') !== -1) {
+      return Promise.resolve(okJson({
+        kind: 'identitytoolkit#VerifyPasswordResponse',
+        idToken: 'tok-owner', refreshToken: 'r-owner', expiresIn: '3600',
+        localId: OWNER_UID, email: 'owner@example.com',
+      }));
+    }
+    if (u.indexOf('firebaseio.com') === -1) {
+      return Promise.resolve(okJson({}));
+    }
+    state.dataCalls += 1;
+    return new Promise(function (resolve, reject) {
+      clock.schedule(state.delayMs, function () {
+        state.answered = true;
+        resolve(okJson({}));
+      });
+      const signal = opts && opts.signal;
+      if (signal && typeof signal.addEventListener === 'function') {
+        signal.addEventListener('abort', function () {
+          const error = new Error('Fetch is aborted');
+          error.name = 'AbortError';
+          reject(error);
+        });
+      }
+    });
+  };
+  impl.state = state;
+  return impl;
+}
+
+test('контроль: data-запрос с той же задержкой по-прежнему абортится обычным таймаутом', async () => {
+  const clock = fakeClock();
+  const server = makeHangingDataServer(clock);
+  const app = loadApp({ fetchImpl: server });
+  clock.install(app);
+  const dataMs = app.run('SYNC_TIMEOUT_MS');
+  server.state.delayMs = dataMs + 5000; // дольше обычного таймаута, как securetoken выше
+  app.context.setFirebaseApiKey(KEY);
+  await app.context.ownerSignIn('owner@example.com', 'secret-pw');
+
+  let settled = false;
+  const pending = app.context.syncFromCloud();
+  pending.then(function () { settled = true; }, function () { settled = true; });
+  await new Promise(function (resolve) { setTimeout(resolve, 0); });
+  assert.equal(server.state.dataCalls, 1, 'запрос данных не дошёл до сервера');
+
+  // За миг до обычного таймаута запрос всё ещё висит — и ответа сервера нет.
+  await clock.advance(dataMs - 1);
+  assert.equal(settled, false, 'запрос завершился ДО обычного таймаута');
+  assert.equal(server.state.answered, false, 'сервер успел ответить раньше таймаута');
+
+  // Обычный таймаут срабатывает: до ответа сервера (он был бы на delayMs) дело не дошло.
+  await clock.advance(1);
+  const result = await pending;
+  assert.equal(result.reachable, false, 'data-запрос не оборван обычным таймаутом');
+  assert.equal(server.state.answered, false,
+    'data-запрос завершился ответом сервера, а не обычным таймаутом');
+});
+
 // Вход по email/паролю падает с «Ключ Firebase-проекта не задан», если
 // FIREBASE_WEB_API_KEY пуст. Песочница тестов обнуляет ключ намеренно,
 // поэтому проверить настоящий исходник можно только снаружи: чтение файла, а

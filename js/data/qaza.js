@@ -213,23 +213,36 @@ export function validQazaLogEntries(entries) {
     return item.source === QAZA_SOURCE_DONE || item.source === QAZA_SOURCE_MANUAL;
   });
 }
-// Чтение журнала. null — единственный признак «журнала нет»: нет ключа,
-// битый JSON, не объект, since не дата или entries не массив. Записи при
-// чтении чистятся, а не отклоняются: из-за одной битой строки журнал
-// не теряется (§5). Как loadFast(), ничего не пишет.
+// Чтение журнала. null — признак «журнала нет»: нет ключа, битый JSON,
+// не объект (или восстановить нечего — ниже). Битое поле журнал не сбрасывает:
+// since не дата — берём самую раннюю валидную запись (как при заводе журнала
+// первой отметкой, appendQazaLog), entries не массив — читаем как пустой.
+// Записи при чтении чистятся, а не отклоняются: из-за одной битой строки
+// журнал не теряется (§5). Как loadFast(), ничего не пишет.
 export function loadQazaLog() {
   try {
     const raw = localStorage.getItem(QAZA_LOG_KEY);
     if (!raw) return null;
     const parsed = JSON.parse(raw);
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return null;
-    if (!validQazaLogDate(parsed.since)) return null;
-    if (!Array.isArray(parsed.entries)) return null;
+
+    const entries = validQazaLogEntries(parsed.entries);
+    let since = validQazaLogDate(parsed.since) ? parsed.since : null;
+
+    // Битый since восстанавливаем по самой ранней валидной записи: за дни
+    // до неё статистика всё равно читает h6 (§5). Восстановить не из чего —
+    // журнал пуст, «журнала нет»: null.
+    if (since === null) {
+      for (let i = 0; i < entries.length; i++) {
+        if (since === null || entries[i].date < since) since = entries[i].date;
+      }
+      if (since === null) return null;
+    }
 
     return {
       version: QAZA_LOG_VERSION,
-      since: parsed.since,
-      entries: validQazaLogEntries(parsed.entries),
+      since: since,
+      entries: entries,
     };
   } catch (e) {
     return null;

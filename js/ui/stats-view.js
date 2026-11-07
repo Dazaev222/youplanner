@@ -7,7 +7,7 @@ import { loadHabits } from '../data/habits.js';
 import { loadQazaLog, qazaDayCounts, qazaTotalRemaining } from '../data/qaza.js';
 import { calcProgress, loadRecords } from '../data/records.js';
 import { loadSleep, sleepAverageDurationMin, sleepAverageMinutes, sleepEntriesInPeriod, sleepFormatDuration, sleepMinutesByDay, sleepTimeLabel, sleepTimeMinutes, sleepWakeMinutes } from '../data/sleep.js';
-import { STATS_PERIOD_BOXES, habitBestStreak, habitCurrentStreak, habitMarked, habitMarkedDays, habitsAveragePercent, loadStatsPeriod, qazaStreak, statsPeriodDates } from '../data/stats.js';
+import { STATS_PERIOD_BOXES, habitCurrentStreak, habitsAveragePercent, loadStatsPeriod, qazaStreak, statsPeriodDates } from '../data/stats.js';
 import { ensureQazaState, getQazaState } from './qaza-view.js';
 
 // Дней в микро-тренде строки списка привычек. Две недели: за неделю линия
@@ -325,25 +325,46 @@ export function renderStatsHabitView() {
   const title = document.getElementById('stats-habit-title');
   if (title) title.textContent = habit.name;
 
+  // Один проход по датам: дневной прогресс считается один раз на день, из
+  // пар {date, value, marked} выводятся график, лучшая серия, счётчик
+  // отметок и клетки сетки. habitMarked — это «прогресс дня > 0»
+  // (js/data/stats.js:115-117), поэтому пары дают прежнюю разметку, но
+  // calcProgress зовётся один раз на день, а не четырьмя потребителями.
+  // Сводный процент периода — отдельный вызов: он не равен среднему
+  // дневных. habitCurrentStreak смотрит от сегодня назад (может выйти за
+  // период) и из пар не выводится.
+  const pairs = [];
+  let best = 0;
+  let run = 0;
+  let marks = 0;
+  for (let i = 0; i < dates.length; i++) {
+    const value = calcProgress(habit, [dates[i]]);
+    const marked = value > 0;
+    pairs.push({ date: dates[i], value: value, marked: marked });
+    run = marked ? run + 1 : 0;
+    if (run > best) best = run;
+    if (marked) marks++;
+  }
+
   const summary = document.getElementById('stats-habit-summary');
   if (summary) {
     summary.innerHTML = statsSummaryMarkup([
       ['average', 'Средний процент за период', Math.round(calcProgress(habit, dates)) + '%'],
       ['streak', 'Текущая серия, дней', String(habitCurrentStreak(habit, today))],
-      ['best', 'Лучшая серия за период, дней', String(habitBestStreak(habit, dates))],
-      ['marks', 'Всего отметок за период', String(habitMarkedDays(habit, dates).length)],
+      ['best', 'Лучшая серия за период, дней', String(best)],
+      ['marks', 'Всего отметок за период', String(marks)],
     ]);
   }
 
   const values = [];
-  for (let i = 0; i < dates.length; i++) values.push(calcProgress(habit, [dates[i]]));
+  for (let i = 0; i < pairs.length; i++) values.push(pairs[i].value);
 
   const chart = document.getElementById('stats-habit-chart');
   if (chart) chart.innerHTML = statsChartMarkup(values, 'Отметки по дням');
 
   const grid = document.getElementById('stats-habit-grid');
   if (grid) {
-    grid.innerHTML = statsHabitGridMarkup(habit, dates);
+    grid.innerHTML = statsHabitGridMarkup(pairs);
     // Свежие отметки лежат справа: без этого «Всё время» открывалось бы
     // на неделях пустоты, а сегодняшний край оставался за кадром
     grid.scrollLeft = grid.scrollWidth;
@@ -410,22 +431,22 @@ function setStatsValue(selector, value) {
 // Клетки одинаковые и заданы в пикселях, поэтому ширина сетки растёт вместе
 // с числом недель, а не подгоняется под экран: на телефоне её прокручивает
 // контейнер. Новых переменных палитры нет — цвета берёт §9
-function statsHabitGridMarkup(habit, dates) {
-  if (!dates || dates.length === 0) return '';
+function statsHabitGridMarkup(pairs) {
+  if (!pairs || pairs.length === 0) return '';
 
   const CELL = 10;
   const GAP = 2;
   const STEP = CELL + GAP;
 
   // Сдвиг первого дня от понедельника: 0 — понедельник, 6 — воскресенье
-  const offset = (parseISODate(dates[0]).getDay() + 6) % 7;
-  const weeks = Math.ceil((offset + dates.length) / 7);
+  const offset = (parseISODate(pairs[0].date).getDay() + 6) % 7;
+  const weeks = Math.ceil((offset + pairs.length) / 7);
 
   let cells = '';
-  for (let i = 0; i < dates.length; i++) {
+  for (let i = 0; i < pairs.length; i++) {
     const slot = offset + i;
     cells += '<rect class="stats-grid-day' +
-      (habitMarked(habit, dates[i]) ? ' is-on' : '') +
+      (pairs[i].marked ? ' is-on' : '') +
       '" x="' + Math.floor(slot / 7) * STEP + '" y="' + slot % 7 * STEP +
       '" width="' + CELL + '" height="' + CELL + '" rx="2"></rect>';
   }

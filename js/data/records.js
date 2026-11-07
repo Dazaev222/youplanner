@@ -68,7 +68,19 @@ export function loadRecords() {
       recordsCache = {};
       return recordsCache;
     }
-    recordsCache = parsed;
+    // День может приехать битым (null вместо объекта) с чужого устройства
+    // или из старой версии. Отсеваем по критерию дня validCloudRecords
+    // (js/sync/core.js:100-101): иначе перебор дней в hasRecords/removeHabit
+    // падает на hasOwnProperty.call(null, ...). Собираем новый объект —
+    // кэш-инвариант «тот же объект уходит в saveRecords» сохранён.
+    const days = {};
+    const dates = Object.keys(parsed);
+    for (let i = 0; i < dates.length; i++) {
+      const day = parsed[dates[i]];
+      if (!day || typeof day !== 'object' || Array.isArray(day)) continue;
+      days[dates[i]] = day;
+    }
+    recordsCache = days;
     return recordsCache;
   } catch (e) {
     recordsCache = {};
