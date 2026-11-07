@@ -255,9 +255,11 @@ async function main() {
 
   // ── 2. Переключение всех вкладок подряд ──────────────────────────────
   // Реальные пути ПК: кнопки шапки, строки настроек, строки хаба статистики,
-  // кнопки «Назад». Панель меню статистики и Матрица — только мобильные
-  // (styles/stats.css: #stats-menu display:none вне max-width:700px), они
-  // обходятся отдельным мобильным контекстом через таб-бар и гамбургер.
+  // кнопки «Назад». Панель меню статистики — только мобильная
+  // (styles/stats.css: #stats-menu display:none вне max-width:700px): она и
+  // Матрица через неё обходятся отдельным мобильным контекстом в 2б. Вход в
+  // Матрицу на ПК (строка в хабе статистики) проверяется жёстко ниже и в
+  // walk-обходе.
   await step('2а. Все вкладки ПК подряд: каждая отрисовывается, видимость/aria по реестру', async () => {
     const { context, page } = await newPage(browser, {
       // Ключ ассистента сеём заранее (как chaos): без него модалка ключа
@@ -330,6 +332,36 @@ async function main() {
       }
       if (close) { await close(); await page.waitForTimeout(80); }
     }
+
+    // Жёсткий вход в Матрицу на ПК (краш-тест 3, не обход): Настройки →
+    // «Статистика» → #stats-row-matrix. Walk выше гоняет экран по реестру,
+    // но ничего не знал о кнопке возврата: здесь контракт целиком — экран
+    // виден, «← Назад» реально видима (на телефоне её гасит mobile.css),
+    // клик по ней возвращает на главную
+    await page.click('#settings-btn');
+    await page.waitForSelector('#settings-view:not([hidden])', { timeout: 5000 });
+    await page.click('#settings-stats');
+    await page.waitForSelector('#stats-view:not([hidden])', { timeout: 5000 });
+    await page.click('#stats-row-matrix');
+    await page.waitForSelector('#matrix-view:not([hidden])', { timeout: 5000 });
+    const matrixBack = await page.evaluate(() => {
+      const back = document.getElementById('matrix-back');
+      return {
+        present: !!back,
+        visible: !!back && back.offsetWidth > 0 && back.offsetHeight > 0,
+        text: back ? back.textContent.trim() : '',
+      };
+    });
+    assert.ok(matrixBack.present && matrixBack.visible,
+      `«← Назад» Матрицы не видима на ПК: ${JSON.stringify(matrixBack)}`);
+    assert.equal(matrixBack.text, '← Назад',
+      `неожиданный текст кнопки возврата: "${matrixBack.text}"`);
+    expectScreen(await assertScreen(page, screens, 'matrix'), screens, 'matrix', 'main');
+    await page.screenshot({ path: join(TMP, 'user-crash-2a-matrix.png') });
+    await page.click('#matrix-back');
+    await page.waitForSelector('#main:not([hidden])', { timeout: 5000 });
+    expectScreen(await assertScreen(page, screens, 'main'), screens, 'main', 'main');
+
     await page.screenshot({ path: join(TMP, 'user-crash-2a-desktop.png') });
     assert.deepEqual(problems, [], `проблемы обхода вкладок ПК:\n  ${problems.join('\n  ')}`);
     assert.deepEqual(page.errorsCollected, [], `pageerror: ${page.errorsCollected.join(' | ')}`);
@@ -461,17 +493,16 @@ async function main() {
 
     // Часть Б — реальный путь удаления на ПК: Настройки → «Редактировать
     // привычки» → «+ Добавить привычку» открывает модалку со списком, у
-    // строки — своя кнопка «Удалить». (Аккордеон строк на экране «Привычки»
-    // на ПК не раскрывается: .habit-row-edit.is-open .habit-row-body
-    // показывается только в mobile.css — фиксируется ниже отдельной проверкой.)
+    // строки — своя кнопка «Удалить». Попутно — жёсткий PASS аккордеона
+    // на ПК (краш-тест 3): раньше правило раскрытия жило только в mobile.css
     dialogMode = 'accept';
     await page.click('#settings-btn');
     await page.click('#settings-edit-habits');
     await page.waitForSelector('#habits-edit-view:not([hidden])', { timeout: 5000 });
 
-    // Регрессия краш-теста 3: строка аккордеона на ПК обязана раскрываться
-    // целиком — is-open и видимым телом (правило раскрытия больше не только
-    // в mobile.css)
+    // Регрессия краш-теста 3 — жёстко: строка аккордеона на ПК обязана
+    // раскрываться целиком: .is-open, .habit-row-body display:block
+    // (styles/habits-edit.css:77-79), кнопка .edit-delete реально видима
     await page.locator('#habits-edit-list li.habit-row-edit')
       .filter({ hasText: 'Зухр' }).locator('.habit-row-head').click();
     await page.waitForTimeout(150);
@@ -479,16 +510,73 @@ async function main() {
       const row = Array.from(document.querySelectorAll('#habits-edit-list li.habit-row-edit'))
         .find((r) => (r.querySelector('.habit-row-name') || {}).textContent === 'Зухр');
       if (!row) return { found: false };
+      const body = row.querySelector('.habit-row-body');
+      const del = row.querySelector('.edit-delete');
       return {
         found: true,
         isOpen: row.classList.contains('is-open'),
-        bodyDisplay: getComputedStyle(row.querySelector('.habit-row-body')).display,
+        bodyDisplay: body ? getComputedStyle(body).display : null,
+        deleteVisible: !!del && del.offsetWidth > 0 && del.offsetHeight > 0,
       };
     });
-    if (accordionState.found && accordionState.isOpen && accordionState.bodyDisplay === 'none') {
-      console.warn('  WARN  регрессия: на ПК строка «Редактирования привычек» получает .is-open,'
-        + ' но .habit-row-body остаётся display:none — поля и «Удалить» аккордеона недостижимы');
-    }
+    assert.ok(accordionState.found, 'строка «Зухр» не нашлась в #habits-edit-list');
+    assert.equal(accordionState.isOpen, true,
+      'на ПК аккордеон не раскрылся: у строки нет .is-open');
+    assert.equal(accordionState.bodyDisplay, 'block',
+      `на ПК .habit-row-body = ${accordionState.bodyDisplay}, ждали block — ` +
+      'правило styles/habits-edit.css .habit-row-edit.is-open .habit-row-body не работает');
+    assert.ok(accordionState.deleteVisible,
+      'кнопка .edit-delete в раскрытой строке не видима на ПК (offsetWidth/offsetHeight = 0)');
+
+    // Регрессия на мобильном (390x844): базовое правило раскрытия не имело
+    // права сломать мобильное поведение — аккордеон открывается как раньше
+    const mctx = await browser.newContext({
+      viewport: { width: 390, height: 844 }, // ≤700px — мобильный режим
+      locale: 'ru-RU',
+    });
+    const mnet = netLog();
+    await mctx.route('**/*', (route) => {
+      const url = route.request().url();
+      if (url.startsWith(BASE)) return route.continue();
+      if (FIREBASE.test(url) || AUTH_HOSTS.test(url)) return mnet.fulfill(route, 200, 'null');
+      return route.abort();
+    });
+    await mctx.addInitScript(() => {
+      localStorage.setItem('youplanner.api_key', 'test-key-for-e2e');
+    });
+    const mpage = await mctx.newPage();
+    const merrors = [];
+    mpage.on('pageerror', (e) => merrors.push(String(e)));
+    await mpage.goto(`${BASE}/index.html`, { waitUntil: 'domcontentloaded' });
+    await mpage.waitForSelector('#day-cards .day-card', { timeout: 15000 });
+    await mpage.click('#tab-bar .tab-item[data-view="settings"]');
+    await mpage.waitForSelector('#settings-view:not([hidden])', { timeout: 5000 });
+    await mpage.click('#settings-edit-habits');
+    await mpage.waitForSelector('#habits-edit-view:not([hidden])', { timeout: 5000 });
+    await mpage.locator('#habits-edit-list li.habit-row-edit')
+      .filter({ hasText: 'Зухр' }).locator('.habit-row-head').click();
+    await mpage.waitForTimeout(150);
+    const mobileAccordion = await mpage.evaluate(() => {
+      const row = Array.from(document.querySelectorAll('#habits-edit-list li.habit-row-edit'))
+        .find((r) => (r.querySelector('.habit-row-name') || {}).textContent === 'Зухр');
+      if (!row) return { found: false };
+      const body = row.querySelector('.habit-row-body');
+      const del = row.querySelector('.edit-delete');
+      return {
+        found: true,
+        isOpen: row.classList.contains('is-open'),
+        bodyDisplay: body ? getComputedStyle(body).display : null,
+        deleteVisible: !!del && del.offsetWidth > 0 && del.offsetHeight > 0,
+      };
+    });
+    assert.ok(mobileAccordion.found, 'мобильный: строка «Зухр» не нашлась в #habits-edit-list');
+    assert.equal(mobileAccordion.isOpen, true, 'мобильный: аккордеон не раскрылся');
+    assert.equal(mobileAccordion.bodyDisplay, 'block',
+      `мобильный: .habit-row-body = ${mobileAccordion.bodyDisplay}, ждали block`);
+    assert.ok(mobileAccordion.deleteVisible,
+      'мобильный: кнопка .edit-delete в раскрытой строке не видима');
+    assert.deepEqual(merrors, [], `pageerror (мобильный аккордеон): ${merrors.join(' | ')}`);
+    await mctx.close();
 
     await page.click('#habits-edit-add');
     await page.waitForSelector('#habit-modal:not([hidden])', { timeout: 5000 });
