@@ -93,7 +93,7 @@
 // (v46 — правка текстовая (в комментарии js/data/matrix.js:771 перепутались
 // алфавиты), v45 — четыре файла после v44, v44 — восемь файлов аудита,
 // v43 — транспорт plannerV1, v42 — пересобранная вёрстка Матрицы.)
-const CACHE = 'youplanner-v55';
+const CACHE = 'youplanner-v56';
 // Иконки — все из manifest.json: отсутствующая в кэше иконка ломала бы
 // офлайн-установку PWA (аудит 2026-10-31: icon-512.png не кэшировался)
 const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon-512.png', './icon.svg',
