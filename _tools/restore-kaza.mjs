@@ -184,10 +184,23 @@ function databaseUrl(config) {
 
 // ── Сеть: те же разделы, что у приложения (authedFetch, sync.js) ────────────
 
+// Легаси-параметр аутентификации RTDB REST. Заголовок Authorization: Bearer
+// с id-токеном Firebase ЭТА база отклоняет (401 «Unauthorized request.»,
+// проверено 2026-11-07 GET'ом того же свежего токена: Bearer → 401,
+// ?auth= → 200), поэтому при 401 запрос повторяется параметром ?auth=.
+// Токен в URL оседает в логах серверов (аудит секретов, задача 3.1) —
+// поэтому параметр только запасной путь, а не основной.
+function withAuthParam(url, token) {
+  return url + (url.indexOf('?') === -1 ? '?' : '&') + 'auth=' + encodeURIComponent(token);
+}
+
 async function cloudGet(url, token, section) {
-  const response = await fetch(url + '/' + section + '.json', {
+  let response = await fetch(url + '/' + section + '.json', {
     headers: { Authorization: 'Bearer ' + token },
   });
+  if (response.status === 401) {
+    response = await fetch(url + '/' + section + '.json' + withAuthParam('', token));
+  }
   if (!response.ok) {
     throw new Error('Чтение раздела ' + section + ' не удалось (HTTP ' + response.status + ')');
   }
@@ -198,11 +211,18 @@ async function cloudGet(url, token, section) {
 // (корневой PUT приложения заменяет узел целиком, поэтому ему и нужен
 // отдельный узел бэкапов; здесь дети пишутся адресно).
 async function cloudPatch(url, token, payload) {
-  const response = await fetch(url + '/.json', {
+  let response = await fetch(url + '/.json', {
     method: 'PATCH',
     headers: { Authorization: 'Bearer ' + token, 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
+  if (response.status === 401) {
+    response = await fetch(url + '/.json' + withAuthParam('', token), {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+  }
   if (!response.ok) {
     const text = await response.text();
     throw new Error('Запись не удалась (HTTP ' + response.status + '): ' + text.slice(0, 300));
