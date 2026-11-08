@@ -133,10 +133,19 @@ export function exportData() {
   URL.revokeObjectURL(url);
 }
 
+// Потолок размера файла копии: файл больше квоты хранилища всё равно не
+// применился бы (запись отбилась бы по квоте), а FileReader до разбора
+// читал бы его целиком в строку. Проверка по file.size — ДО чтения.
+const BACKUP_FILE_MAX_BYTES = 5 * 1024 * 1024;
+
 // Импорт выбранного файла. Пока разбор не удался или пользователь не подтвердил
 // замену, текущие данные не трогаются.
 export function importData(file) {
   if (!file) return;
+  if (file.size > BACKUP_FILE_MAX_BYTES) {
+    alert('Файл слишком большой для импорта (лимит — 5 МБ).');
+    return;
+  }
 
   const reader = new FileReader();
   reader.onload = function () { onBackupRead(String(reader.result)); };

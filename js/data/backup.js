@@ -11,7 +11,7 @@ import { SLEEP_KEY, SLEEP_MAX_MINUTES, loadSleep, sleepDurationMinutes, sleepTim
 import { SECTION_WRITE_TS_KEY, STORAGE_KEYS, loadPlannerEnvelope, sectionWriteTsJson } from './storage.js';
 import { normalizePlannerV1 } from '../sync/merge.js';
 import { planPlannerApply } from '../sync/sync.js';
-import { hasData, validCloudArchive, validCloudSchedule } from '../sync/core.js';
+import { hasData, validCloudArchive, validCloudRecords, validCloudSchedule } from '../sync/core.js';
 import { rollbackStagedKeys } from '../core/storage.js';
 // Версия формата резервной копии. Растёт, если меняется состав полей файла:
 // версия 2 добавила раздел tasks, версия 3 — раздел prayer, версия 4 —
@@ -102,7 +102,14 @@ export function parseBackup(text) {
 
   if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
   if (!Array.isArray(data.habits)) return null;
-  if (!data.records || typeof data.records !== 'object' || Array.isArray(data.records)) return null;
+  // Записи проверяются тем же валидатором, что и облачный снимок:
+  // ключи-не-даты и дни-не-объекты роняют разбор целиком. Иначе мусор
+  // уехал бы в хранилище, а оттуда наверх (syncBody), и у ДРУГИХ устройств
+  // validCloudRecords отвергал бы раздел records целиком, пока мусор в
+  // ключах, — записи переставали бы съезжаться между устройствами.
+  // Некалендарные даты ('2026-02-30') пропускаются и здесь, и в снимке:
+  // импорт не строже синка.
+  if (!validCloudRecords(data.records)) return null;
   if (data.qaza !== undefined &&
       (!data.qaza || typeof data.qaza !== 'object' || Array.isArray(data.qaza))) return null;
   // Старый раздел задач отвергает файл целиком, до применения любых данных.
