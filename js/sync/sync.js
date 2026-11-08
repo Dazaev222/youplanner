@@ -483,16 +483,29 @@ export function serverSnapshotWins(serverTs, localTs, pending) {
 export function cloudSnapshotWins(serverTs) {
   return serverSnapshotWins(serverTs, syncTs(), syncPending);
 }
-// Снимок отвергнут, но привычек у нас нет вовсе — значит правка, которой
-// сервер ещё не видел, привычек не касалась: править было нечего. Берём
-// серверный список, иначе пустой уехал бы наверх и стёр серверный.
+// Снимок отвергнут, но привычек у нас нет вовсе — берём серверный список,
+// иначе пустой уехал бы наверх и стёр серверный. Исключение — привычки под
+// надгробиями: пустой список при живых метках значит «здесь их удалили, а
+// отправка ещё не ушла», и адопция отменила бы удаление молча, а
+// pruneResolvedTombstones стёр бы его след — следующая отправка опубликовала
+// бы «воскрешённый» список навсегда. То же правило, что у слияния
+// (mergeHabitsById): привычка с настоящим надгробием не привозится.
 function adoptServerHabitsIfLocalEmpty(data) {
   if (!Array.isArray(data.habits) || !hasData(data.habits)) return;
   if (hasData(loadHabits())) return;
-  localStorage.setItem(STORAGE_KEYS.habits, JSON.stringify(data.habits));
+  const tombstones = loadTombstones();
+  const habits = data.habits.filter(function (h) {
+    // Мусорная метка (не число) не блокирует: блокирует только настоящая —
+    // как в mergeHabitsById
+    const ts = h && h.id != null ? tombstones[h.id] : undefined;
+    return !(typeof ts === 'number' && Number.isFinite(ts));
+  });
+  if (!hasData(habits)) return;
+  localStorage.setItem(STORAGE_KEYS.habits, JSON.stringify(habits));
   // Привычки вернулись в список — их надгробия (если чудом остались)
   // больше не нужны: висящая метка блокировала бы привоз этой привычки
-  // на других устройствах
+  // на других устройствах. Надгробия непривезённых — след ещё не виденных
+  // сервером удалений — остаются.
   pruneResolvedTombstones();
   // Список только что сменился, а DOM остался прежним: обновление
   // состояния и перерисовку делает подписчик sync:applied (§11v)
