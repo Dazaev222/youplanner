@@ -175,6 +175,7 @@ async function main() {
   });
 
   let pageB, contextB;
+  let pageA, contextA;
   await step('2. Устройство B: снимок с сервера применяется (applyCloudData, метка встаёт)', async () => {
     const opened = await newPage(browser, 'B');
     contextB = opened.context; pageB = opened.page;
@@ -233,6 +234,115 @@ async function main() {
     await contextB.close();
   });
 
+  // ─── Qaza-секция: конверты цельных разделов {v, ts} (аудит P1-3) ───
+  // Конфликт целых разделов разрешается не слиянием, а правилом конверта:
+  // побеждает раздел с более новой меткой записи раздела (section-writes).
+  // Метки задаём явно (T1 < T2 < T3), а не часами приложения — иначе
+  // loadQaza() при загрузке страницы сдвинул бы метку на время загрузки.
+  const qazaBase = Date.now();
+  const T1 = qazaBase;
+  const T2 = qazaBase + 1000;
+  const T3 = qazaBase + 2000;
+  const qazaA = {
+    version: 3, cursor: 0,
+    remaining: { fajr: 10, zuhr: 20, asr: 30, maghrib: 40, isha: 50 },
+    history: [],
+  };
+  const qazaB = {
+    version: 3, cursor: 1,
+    remaining: { fajr: 11, zuhr: 21, asr: 31, maghrib: 41, isha: 51 },
+    history: [],
+  };
+  const qazaA2 = {
+    version: 3, cursor: 2,
+    remaining: { fajr: 99, zuhr: 88, asr: 77, maghrib: 66, isha: 55 },
+    history: [],
+  };
+
+  // Прямая запись локального состояния раздела и его метки записи
+  // (минуем saveQaza — она пометила бы раздел текущим временем).
+  async function setQazaLocal(page, qaza, writes) {
+    await page.evaluate(({ qazaJson, writesJson }) => {
+      localStorage.setItem('youplanner.qaza', qazaJson);
+      localStorage.setItem('youplanner.sync.section-writes', writesJson);
+    }, { qazaJson: JSON.stringify(qaza), writesJson: JSON.stringify(writes) });
+  }
+
+  async function readQazaLocal(page) {
+    return page.evaluate(() => {
+      const raw = localStorage.getItem('youplanner.qaza');
+      const qaza = raw && raw !== 'undefined' ? JSON.parse(raw) : null;
+      const writesRaw = localStorage.getItem('youplanner.sync.section-writes');
+      const writes = writesRaw && writesRaw !== 'undefined' ? JSON.parse(writesRaw) : {};
+      return { qaza, writes };
+    });
+  }
+
+  // Ручная отправка (push) из настроек. Фактическую доставку PUT сверяем с
+  // разделяемым состоянием мока, а не фиксированным таймаутом.
+  // Ждёт доставки PUT с ожидаемым конвертом в разделяемом состоянии мока.
+  // Возвращает true/false — падать сам не бросает (диагностика остаётся в шаге).
+  async function syncPush(page, expectEnvelope) {
+    await page.click('#settings-btn');
+    await page.waitForSelector('#settings-view:not([hidden])', { timeout: 5000 });
+    await page.click('#settings-sync-push');
+    await page.waitForTimeout(300);
+    await page.click('#settings-back');
+    await page.waitForSelector('#main:not([hidden])', { timeout: 5000 });
+    if (!expectEnvelope) return;
+    return waitUntil(() =>
+      fb.snapshot && fb.snapshot.qaza &&
+      JSON.stringify(fb.snapshot.qaza.v) === JSON.stringify(expectEnvelope.v) &&
+      fb.snapshot.qaza.ts === expectEnvelope.ts,
+      20000);
+  }
+
+  await step('6. Qaza: A пишет локальную qaza-A (section-writes qaza = T1) и отправляет — на сервере конверт {v: qaza-A, ts: T1}', async () => {
+    const opened = await newPage(browser, 'A-qaza');
+    contextA = opened.context; pageA = opened.page;
+    await setQazaLocal(pageA, qazaA, { qaza: T1 });
+    const pushedA = await syncPush(pageA, { v: qazaA, ts: T1 });
+    assert.ok(pushedA, 'сервер не принял конверт qaza {v: qaza-A, ts: T1}');
+    const state = await readQazaLocal(pageA);
+    assert.deepEqual(state.qaza, qazaA, 'localStorage A не содержит qaza-A');
+    assert.equal(state.writes.qaza, T1, 'section-writes A не содержат T1 для qaza');
+    assert.deepEqual(pageA.errorsCollected, [], `pageerror на A: ${pageA.errorsCollected.join(' | ')}`);
+  });
+
+  await step('7. Qaza: B пишет qaza-B (section-writes qaza = T2, T2 > T1) и отправляет — сервер берёт конверт {v: qaza-B, ts: T2}', async () => {
+    const opened = await newPage(browser, 'B-qaza');
+    contextB = opened.context; pageB = opened.page;
+    await setQazaLocal(pageB, qazaB, { qaza: T2 });
+    const pushedB = await syncPush(pageB, { v: qazaB, ts: T2 });
+    assert.ok(pushedB, 'сервер не принял конверт qaza {v: qaza-B, ts: T2}');
+    const state = await readQazaLocal(pageB);
+    assert.deepEqual(state.qaza, qazaB, 'localStorage B не содержит qaza-B');
+    assert.equal(state.writes.qaza, T2, 'section-writes B не содержат T2 для qaza');
+    assert.deepEqual(pageB.errorsCollected, [], `pageerror на B: ${pageB.errorsCollected.join(' | ')}`);
+  });
+
+  await step('8. Qaza: A ручная сверка — при T2 > T1 серверный конверт побеждает, A принимает qaza-B', async () => {
+    await manualSync(pageA);
+    const state = await readQazaLocal(pageA);
+    assert.deepEqual(state.qaza, qazaB, `A не принял qaza-B: ${JSON.stringify(state.qaza)}`);
+    assert.equal(state.writes.qaza, T2, `section-writes A не переняли серверный T2`);
+    assert.deepEqual(fb.snapshot.qaza, { v: qazaB, ts: T2 },
+      `серверный конверт qaza не {v: qaza-B, ts: T2}`);
+    assert.deepEqual(pageA.errorsCollected, [], `pageerror на A: ${pageA.errorsCollected.join(' | ')}`);
+  });
+
+  await step('9. Qaza: A пишет qaza-A2 (section-writes qaza = T3, T3 > T2) и отправляет — серверный T2 стареет, PUT уходит с qaza-A2', async () => {
+    await setQazaLocal(pageA, qazaA2, { qaza: T3 });
+    const pushedA2 = await syncPush(pageA, { v: qazaA2, ts: T3 });
+    assert.ok(pushedA2, 'PUT A не ушёл с qaza-A2 (серверный T2 не перекрыл локальную правку T3)');
+    const state = await readQazaLocal(pageA);
+    assert.deepEqual(state.qaza, qazaA2, 'localStorage A не содержит qaza-A2 после PUT');
+    assert.equal(state.writes.qaza, T3, 'section-writes A не содержат T3 для qaza');
+    assert.deepEqual(pageA.errorsCollected, [], `pageerror на A: ${pageA.errorsCollected.join(' | ')}`);
+  });
+
+  if (contextA) await contextA.close();
+  if (contextB) await contextB.close();
   await browser.close();
   server.close();
   console.log(`\nИтог: ${passed} PASS, ${failed} FAIL`);
