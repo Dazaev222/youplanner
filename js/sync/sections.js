@@ -45,8 +45,7 @@ import { PRAYER_KEY } from '../data/prayer.js';
 import { QAZA_LOG_KEY, QAZA_LOG_VERSION, QAZA_STORAGE_KEY, validQazaLogEntries } from '../data/qaza.js';
 import { SLEEP_KEY, validSleepHistory } from '../data/sleep.js';
 import { STORAGE_KEYS } from '../data/storage.js';
-import { validCloudArchive, validCloudFast, validCloudHabits, validCloudPrayer, validCloudQaza, validCloudQazaLog, validCloudRecords, validCloudSchedule, validCloudSleep, validCloudTombstones } from './core.js';
-import { mergeTombstonesById } from './merge.js';
+import { mergeTombstonesById, validCloudArchive, validCloudFast, validCloudHabits, validCloudPrayer, validCloudQaza, validCloudQazaLog, validCloudRecords, validCloudSchedule, validCloudSleep, validCloudTombstones } from './core.js';
 
 // Перестройки перед записью. Чистые функции: значение приходит уже
 // провалидированным, хранилище не трогают. Функции-декларации, как в

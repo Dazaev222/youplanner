@@ -27,6 +27,9 @@ import { applyMergedFromCloud } from './merge-engine.js';
 // Публичный API сохраняется: planPlannerApply импортирует data/backup.js,
 // applyCloudData достают тесты и песочницы.
 export { applyCloudData, planPlannerApply };
+// sync.js раньше сам держал флаг syncing (export let); после переноса в core.js
+// он живёт там, но публичный экспорт модуля должен сохранить прежний контракт.
+export { syncing };
 export let syncTimer = null;
 // Сетевой таймаут обменов. Без него зависшее соединение (сеть отдаёт TCP,
 // но не отвечает) держит syncExchange открытым вечно: правки встают в

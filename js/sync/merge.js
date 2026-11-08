@@ -29,7 +29,7 @@
 // состояние стёр бы несработавшую локальную правку или вернул бы отменённую
 // запись журнала (dropLastQazaLog). Модуль чистый: ни bus, ни хранилища —
 // только функции над данными; записи делает applyMergedFromCloud (sync.js).
-import { hasData } from './core.js';
+import { hasData, mergeTombstonesById } from './core.js';
 import { CLOUD_SECTIONS } from './sections.js';
 import { validQazaLogEntries } from '../data/qaza.js';
 import { validSleepHistory } from '../data/sleep.js';
@@ -562,30 +562,10 @@ export function sectionEnvelopeWins(cloudTs, localTs, legacyWins) {
   return cloud > local;
 }
 
-// Надгробия удалённых привычек: слияние по max(ts) на id, аддитивно.
-// Надгробие никогда не «воскрешается»: отсутствие пары на чужой стороне
-// локальную не отменяет — снятие метки локальное решение устройства
-// (pruneResolvedTombstones), а не содержимое снимка. Обе стороны приходят
-// уже очищенными (loadTombstones/validCloudTombstones), битые значения
-// и здесь отбрасываются — защита от вызова с сырыми данными.
-export function mergeTombstonesById(localTombstones, cloudTombstones) {
-  const merged = {};
-  const sides = [localTombstones, cloudTombstones];
-  for (let s = 0; s < sides.length; s++) {
-    const side = sides[s];
-    if (!side || typeof side !== 'object' || Array.isArray(side)) continue;
-    const ids = Object.keys(side);
-    for (let i = 0; i < ids.length; i++) {
-      const id = ids[i];
-      const ts = side[id];
-      // Только числа по типу: мягкое приведение сделало бы из null и ''
-      // нулевую метку — надгробие «с самого начала времён»
-      if (typeof ts !== 'number' || !Number.isFinite(ts) || ts < 0) continue;
-      if (merged[id] === undefined || ts > merged[id]) merged[id] = ts;
-    }
-  }
-  return merged;
-}
+// Надгробия удалённых привычек: функция слияния перенесена в js/sync/core.js
+// (чистая функция, без циклической зависимости); здесь — чистый re-экспорт
+// для существующего публичного API (js/sync/merge.js, js/sync/sections.js).
+export { mergeTombstonesById };
 
 // Чистит устаревший локальный кэш привычек: выбрасывает привычки, у которых
 // есть надгробие, а в серверном списке их нет. Случай «релог после долгого

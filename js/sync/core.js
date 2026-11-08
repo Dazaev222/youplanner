@@ -82,6 +82,31 @@ export function syncTs() {
   return Number(localStorage.getItem(SYNC_TS_KEY)) || 0;
 }
 
+// Надгробия удалённых привычек: слияние по max(ts) на id, аддитивно.
+// Надгробие никогда не «воскрешается»: отсутствие пары на чужой стороне
+// локальную не отменяет — снятие метки локальное решение устройства
+// (pruneResolvedTombstones), а не содержимое снимка. Обе стороны приходят
+// уже очищенными (loadTombstones/validCloudTombstones), битые значения
+// и здесь отбрасываются — защита от вызова с сырыми данными.
+export function mergeTombstonesById(localTombstones, cloudTombstones) {
+  const merged = {};
+  const sides = [localTombstones, cloudTombstones];
+  for (let s = 0; s < sides.length; s++) {
+    const side = sides[s];
+    if (!side || typeof side !== 'object' || Array.isArray(side)) continue;
+    const ids = Object.keys(side);
+    for (let i = 0; i < ids.length; i++) {
+      const id = ids[i];
+      const ts = side[id];
+      // Только числа по типу: мягкое приведение сделало бы из null и ''
+      // нулевую метку — надгробие «с самого начала времён»
+      if (typeof ts !== 'number' || !Number.isFinite(ts) || ts < 0) continue;
+      if (merged[id] === undefined || ts > merged[id]) merged[id] = ts;
+    }
+  }
+  return merged;
+}
+
 // --- Валидаторы облачного снимка (бывший js/sync/validators.js) --------------
 
 // Раздел с данными: непустой список или непустой объект.
