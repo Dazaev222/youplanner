@@ -29,11 +29,8 @@
 // состояние стёр бы несработавшую локальную правку или вернул бы отменённую
 // запись журнала (dropLastQazaLog). Модуль чистый: ни bus, ни хранилища —
 // только функции над данными; записи делает applyMergedFromCloud (sync.js).
-import {
-  hasData, validCloudArchive, validCloudFast, validCloudHabits,
-  validCloudPrayer, validCloudQaza, validCloudQazaLog, validCloudRecords,
-  validCloudSchedule, validCloudSleep, validCloudTombstones,
-} from './core.js';
+import { hasData } from './core.js';
+import { CLOUD_SECTIONS } from './sections.js';
 import { validQazaLogEntries } from '../data/qaza.js';
 import { validSleepHistory } from '../data/sleep.js';
 
@@ -869,6 +866,11 @@ function mergeArchive(localArchive, cloudArchive) {
 // Главная точка входа. Возвращает слитый снимок той же формы, что local, или
 // null, если сливать нечего: сервер не новее последней сверки — всё, что на
 // нём было к прошлому обмену, локально уже есть, и PUT уходит как раньше.
+// Тело — диспетчер-луп по дескрипторам разделов из единственной матрицы
+// CLOUD_SECTIONS (js/sync/sections.js, АДР §2): каждый раздел читает из
+// строки дескриптора валидатор (row.validate), форму хранения
+// (row.envelope — конверт {v, ts}) и pending-запрет (row.skipWhenPending),
+// форма слияния — switch по row.raceMerge.
 export function mergeCloudIntoLocal(local, cloud, opts) {
   const options = opts || {};
   const pending = !!options.pending;
@@ -890,98 +892,129 @@ export function mergeCloudIntoLocal(local, cloud, opts) {
     tombstones: local.tombstones,
   };
 
-  // Надгробия приезжают вместе со снимком и нужны дважды: слиянию привычек
-  // ниже (не вернуть удалённое) и самому разделу (слияние по max(ts)).
-  // Снимки до введения надгробий раздела не несут — тогда слияние идёт
-  // только с локальными.
-  const cloudTombstones = validCloudTombstones(cloud.tombstones);
-  if (cloudTombstones && hasData(cloudTombstones)) {
-    merged.tombstones = mergeTombstonesById(local.tombstones, cloudTombstones);
+  // Цельные разделы сливаются по конвертам: локальные метки записи слияющий
+  // берёт из opts.sectionWrites — модуль чистый, хранилище читает вызывающий
+  // (applyMergedFromCloud). Общее правило гонки (метка раздела/снимка против
+  // последней сверки) одно на луп.
+  const writes = options.sectionWrites && typeof options.sectionWrites === 'object'
+    ? options.sectionWrites : {};
+  const cloudWins = function (section) {
+    return sectionTsOf(cloud, section, cloudTs) > localTs;
+  };
+
+  // Надгробия для слияния коллекций: заполняет первая строка петли
+  // (raceMerge 'tombstones'), до неё коллекции не доходят.
+  let tombstonesForMerge = local.tombstones;
+
+  // Дескрипторы — из единственной матрицы CLOUD_SECTIONS (js/sync/sections.js,
+  // АДР §2): validate, envelope и pending-запрет читаются из строки таблицы.
+  // ПОРЯДОК ОБРАБОТКИ задаёт этот движок, не матрица: надгробия первыми —
+  // они нужны и себе, и коллекциям (habits, records); archive — производные
+  // месячные сводки, применяется всегда и в луп не входит.
+  const rows = [];
+  for (let i = 0; i < CLOUD_SECTIONS.length; i++) {
+    if (CLOUD_SECTIONS[i].raceMerge === 'tombstones') rows.push(CLOUD_SECTIONS[i]);
+  }
+  for (let i = 0; i < CLOUD_SECTIONS.length; i++) {
+    const row = CLOUD_SECTIONS[i];
+    if (row.raceMerge !== 'tombstones' && row.raceMerge !== 'archive') rows.push(row);
   }
 
-  // Коллекции с ключами: аддитивное слияние при любом раскладе. При pending —
-  // только «заполнение дыр» (cloudWins=false): существующие локально элементы
-  // не трогаются, приезжают лишь отсутствующие.
-  // Обеим коллекциям (привычкам и записям) нужны надгробия с двух сторон:
-  // и локальные, и приехавшие с этим снимком — он только что принят к
-  // слиянию, его метки — часть одного решения.
-  const tombstonesForMerge = cloudTombstones
-    ? mergeTombstonesById(local.tombstones, cloudTombstones)
-    : local.tombstones;
-  if (validCloudHabits(cloud.habits) && hasData(cloud.habits)) {
-    merged.habits = mergeHabitsById(local.habits, cloud.habits, !pending, {
-      tombstones: tombstonesForMerge,
-      sectionTs: sectionTsOf(cloud, 'habits', cloudTs),
-    });
-  }
-  if (validCloudRecords(cloud.records) && hasData(cloud.records)) {
-    // Записям надгробия нужны так же, как привычкам: значения удалённой
-    // привычки не привозятся со старого снимка (см. mergeRecordsByDay)
-    merged.records = mergeRecordsByDay(local.records, cloud.records, !pending, {
-      tombstones: tombstonesForMerge,
-    });
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i];
+    switch (row.raceMerge) {
+      case 'tombstones': {
+        // Надгробия приезжают вместе со снимком и нужны дважды: слиянию
+        // привычек и записей ниже (не вернуть удалённое) и самому разделу
+        // (слияние по max(ts)). Снимки до введения надгробий раздела не
+        // несут — тогда слияние идёт только с локальными.
+        const cloudTombstones = row.validate(cloud[row.name]);
+        if (cloudTombstones && hasData(cloudTombstones)) {
+          merged.tombstones = mergeTombstonesById(local.tombstones, cloudTombstones);
+        }
+        tombstonesForMerge = cloudTombstones
+          ? mergeTombstonesById(local.tombstones, cloudTombstones)
+          : local.tombstones;
+        break;
+      }
+      case 'collection:habits': {
+        // Коллекции с ключами: аддитивное слияние при любом раскладе;
+        // при pending — только «заполнение дыр» (cloudWins=false):
+        // существующие локально элементы не трогаются. Обеим коллекциям
+        // нужны надгробия с двух сторон: и локальные, и приехавшие с этим
+        // снимком — он только что принят к слиянию, его метки — часть
+        // одного решения.
+        const value = cloud[row.name];
+        if (row.validate(value) && hasData(value)) {
+          merged[row.name] = mergeHabitsById(local.habits, value, !pending, {
+            tombstones: tombstonesForMerge,
+            sectionTs: sectionTsOf(cloud, row.name, cloudTs),
+          });
+        }
+        break;
+      }
+      case 'collection:records': {
+        // Записям надгробия нужны так же, как привычкам: значения удалённой
+        // привычки не привозятся со старого снимка (см. mergeRecordsByDay)
+        const value = cloud[row.name];
+        if (row.validate(value) && hasData(value)) {
+          merged[row.name] = mergeRecordsByDay(local.records, value, !pending, {
+            tombstones: tombstonesForMerge,
+          });
+        }
+        break;
+      }
+      case 'envelope': {
+        // Цельные разделы приходят в конвертах {v, ts}: ts — метка записи
+        // раздела на отправителе (P1-3). Раздел без конверта — старый
+        // клиент: решает cloudWins (метка раздела/снимка против последней
+        // сверки), он же работает, когда обе стороны без конвертов.
+        // Правка, которой сервер не видел (pending), цельными разделами
+        // не затирается вовсе — конвертные строки пропускаются.
+        if (!row.envelope || pending) break;
+        const incoming = unwrapSection(cloud[row.name]);
+        // emptyWins 'always' (schedule): гейта hasData исторически нет —
+        // пустой календарь тоже состояние, которое должно приехать.
+        if (row.validate(incoming.v) && (row.emptyWins === 'always' || hasData(incoming.v)) &&
+            sectionEnvelopeWins(incoming.ts, writes[row.name], cloudWins(row.name))) {
+          merged[row.name] = incoming.v;
+        }
+        break;
+      }
+      case 'sleep': {
+        // Скаляры сна — по метке раздела против последней сверки. При
+        // pending правка, которой сервер не видел: сну хватает «заполнения
+        // дыр» по истории (cloudWins=false, без отступления истории).
+        const value = cloud[row.name];
+        if (!row.validate(value) || !hasData(value)) break;
+        merged.sleep = pending
+          ? mergeSleepEntry(local.sleep, value, false, false)
+          : mergeSleepEntry(local.sleep, value, cloudWins(row.name), true);
+        break;
+      }
+      case 'qazaLog': {
+        // Журнал каза: аддитивное слияние только без pending
+        // (skipWhenPending) — pending-правка может быть отменой записи
+        // (dropLastQazaLog), и возврат записи с сервера сломал бы отмену.
+        // Журнала локально нет — берём серверный целиком.
+        if (pending && row.skipWhenPending) break;
+        const value = cloud[row.name];
+        if (!row.validate(value) || !hasData(value)) break;
+        merged.qazaLog = local.qazaLog
+          ? {
+            version: local.qazaLog.version,
+            since: local.qazaLog.since,
+            entries: validQazaLogEntries(
+              mergeQazaLogEntries(local.qazaLog.entries, value.entries)
+            ),
+          }
+          : value;
+        break;
+      }
+    }
   }
 
-  if (pending) {
-    // Правка, которой сервер не видел: цельные разделы не применяем вовсе —
-    // они затёрли бы её. Сну хватает «заполнения дыр» по истории.
-    if (validCloudSleep(cloud.sleep) && hasData(cloud.sleep)) {
-      merged.sleep = mergeSleepEntry(local.sleep, cloud.sleep, false, false);
-    }
-  } else {
-    const cloudWins = function (section) {
-      return sectionTsOf(cloud, section, cloudTs) > localTs;
-    };
-    // Цельные разделы приходят в конвертах {v, ts}: ts — метка записи раздела
-    // на отправителе (P1-3). Локальные метки сливающий берёт из
-    // opts.sectionWrites — модуль чистый, хранилище читает вызывающий
-    // (applyMergedFromCloud). Раздел без конверта — старый клиент: решает
-    // прежнее правило (метка раздела/снимка против последней сверки), он же
-    // работает, когда обе стороны без конвертов.
-    const writes = options.sectionWrites && typeof options.sectionWrites === 'object'
-      ? options.sectionWrites : {};
-    const cloudQaza = unwrapSection(cloud.qaza);
-    if (validCloudQaza(cloudQaza.v) && hasData(cloudQaza.v) &&
-        sectionEnvelopeWins(cloudQaza.ts, writes.qaza, cloudWins('qaza'))) {
-      merged.qaza = cloudQaza.v;
-    }
-    const cloudPrayer = unwrapSection(cloud.prayer);
-    if (validCloudPrayer(cloudPrayer.v) && hasData(cloudPrayer.v) &&
-        sectionEnvelopeWins(cloudPrayer.ts, writes.prayer, cloudWins('prayer'))) {
-      merged.prayer = cloudPrayer.v;
-    }
-    const cloudFast = unwrapSection(cloud.fast);
-    if (validCloudFast(cloudFast.v) && hasData(cloudFast.v) &&
-        sectionEnvelopeWins(cloudFast.ts, writes.fast, cloudWins('fast'))) {
-      merged.fast = cloudFast.v;
-    }
-    const cloudSchedule = unwrapSection(cloud.schedule);
-    if (validCloudSchedule(cloudSchedule.v) &&
-        sectionEnvelopeWins(cloudSchedule.ts, writes.schedule, cloudWins('schedule'))) {
-      merged.schedule = cloudSchedule.v;
-    }
-    if (validCloudSleep(cloud.sleep) && hasData(cloud.sleep)) {
-      merged.sleep = mergeSleepEntry(local.sleep, cloud.sleep, cloudWins('sleep'), true);
-    }
-  }
-
-  // Журнал каза: аддитивное слияние только без pending — pending-правка может
-  // быть отменой записи (dropLastQazaLog), и возврат записи с сервера сломал
-  // бы отмену. Журнала локально нет — берём серверный целиком.
-  if (!pending && validCloudQazaLog(cloud.qazaLog) && hasData(cloud.qazaLog)) {
-    if (local.qazaLog) {
-      merged.qazaLog = {
-        version: local.qazaLog.version,
-        since: local.qazaLog.since,
-        entries: validQazaLogEntries(
-          mergeQazaLogEntries(local.qazaLog.entries, cloud.qazaLog.entries)
-        ),
-      };
-    } else {
-      merged.qazaLog = cloud.qazaLog;
-    }
-  }
-
+  // Archive — производные месячные сводки: объединение по месяцам всегда.
   merged.archive = mergeArchive(local.archive, cloud.archive);
   return merged;
 }

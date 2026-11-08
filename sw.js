@@ -95,7 +95,7 @@
 // (v46 — правка текстовая (в комментарии js/data/matrix.js:771 перепутались
 // алфавиты), v45 — четыре файла после v44, v44 — восемь файлов аудита,
 // v43 — транспорт plannerV1, v42 — пересобранная вёрстка Матрицы.)
-const CACHE = 'youplanner-v57';
+const CACHE = 'youplanner-v58';
 // Иконки — все из manifest.json: отсутствующая в кэше иконка ломала бы
 // офлайн-установку PWA (аудит 2026-10-31: icon-512.png не кэшировался)
 const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon-512.png', './icon.svg',
@@ -111,6 +111,11 @@ const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './ic
   './js/vendor/pdf.min.mjs', './js/vendor/pdf.worker.min.mjs',
   './js/data/firebase-auth.js',
   './js/sync/sync.js',
+  // Движки применения облачного снимка (АДР 2026-11-08): дескрипторная
+  // таблица + путь снимка + путь гонки
+  './js/sync/sections.js',
+  './js/sync/apply-engine.js',
+  './js/sync/merge-engine.js',
   './js/ui/state.js',
   './js/ui/assistant-view.js',
   // Подсистемы ассистента, вынесенные из assistant-view.js (этап D.5;

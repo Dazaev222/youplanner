@@ -33,6 +33,14 @@ export const FIREBASE_BACKUPS_URL = 'https://youplanner-5c2f5-default-rtdb.fireb
 // в database.rules.json (запись только владельцу, валидатор схемы).
 export const FIREBASE_PLANNER_URL = 'https://youplanner-5c2f5-default-rtdb.firebaseio.com/youplanner-d8aaea12-60e6-4ac9-973c-46c19b387cd9-planner';
 export const SYNC_TS_KEY = 'youplanner.sync.ts';
+// Идёт обмен с сервером. Свои же сохранения в этот момент не должны ставить
+// встречную отправку: loadQaza() зовёт saveQaza(), а syncToCloud() зовёт
+// loadQaza() — без флага каждая отправка планировала бы следующую. Флаг
+// в core.js с 2026-11-08: его пишут и sync.js (syncToCloudNow), и
+// apply-engine.js (applyCloudData), поэтому присваивание — только через
+// setSyncing (импортированный let присваивать нельзя).
+export let syncing = false;
+export function setSyncing(v) { syncing = v; }
 // Сколько версий держим в узле бэкапов (FIREBASE_BACKUPS_URL)
 export const BACKUP_LIMIT = 10;
 // Минимальная пауза между копиями в узел бэкапов (Г2): копия — самая тяжёлая

@@ -1,30 +1,32 @@
 import { bus } from '../core/bus.js';
-import { ARCHIVE_KEY, loadArchive } from '../data/archive.js';
-import { FAST_KEY, FAST_VERSION, loadFast, validFastHistory } from '../data/fast.js';
+import { loadArchive } from '../data/archive.js';
+import { loadFast } from '../data/fast.js';
 import { DEFAULT_HABITS, defaultHabit, loadHabits, loadTombstones, pruneResolvedTombstones, saveHabits } from '../data/habits.js';
 import { markMigration, migratePressHabit } from '../data/migrations.js';
-import { PRAYER_KEY, loadPrayer } from '../data/prayer.js';
-import { QAZA_LOG_KEY, QAZA_LOG_VERSION, QAZA_STORAGE_KEY, loadQaza, loadQazaLog, validQazaLogEntries } from '../data/qaza.js';
-import { invalidateRecordsCache, loadRecords } from '../data/records.js';
+import { loadPrayer } from '../data/prayer.js';
+import { loadQaza, loadQazaLog } from '../data/qaza.js';
+import { loadRecords } from '../data/records.js';
 import { loadSchedule } from '../data/schedule.js';
-import { SLEEP_KEY, loadSleep, validSleepHistory } from '../data/sleep.js';
+import { loadSleep } from '../data/sleep.js';
 import {
-  SECTION_WRITE_TS_KEY, STORAGE_KEYS, loadPlannerEnvelope, loadSectionWriteTs,
-  savePlannerEnvelope, plannerObserveVersions, sectionWriteTsJson, sectionWrittenTs,
+  STORAGE_KEYS, loadPlannerEnvelope,
+  savePlannerEnvelope, sectionWrittenTs,
 } from '../data/storage.js';
-import {
-  MATRIX_STORAGE_KEY, materializePlannerTasks, plannerLoadOrBuildEnvelope, plannerOwnerUid,
-} from '../data/matrix.js';
-import { rollbackStagedKeys, safeSetItem } from '../core/storage.js';
+import { MATRIX_STORAGE_KEY, plannerOwnerUid } from '../data/matrix.js';
+import { safeSetItem } from '../core/storage.js';
 import { timeoutGuard } from '../core/dom.js';
 // Ядро sync-слоя: константы Firebase, флаги состояния и валидаторы снимка
 // (слито из data/sync.js, sync/state.js и sync/validators.js, этап Y2)
-import { BACKUP_LIMIT, BACKUP_MIN_INTERVAL_MS, FIREBASE_BACKUPS_URL, FIREBASE_PLANNER_URL, FIREBASE_URL, SYNC_DEBOUNCE_MS, SYNC_TS_KEY, clearSyncPending, hasData, markSyncPending, normalizing, saveNormalized, syncPending, syncTs, validCloudArchive, validCloudFast, validCloudHabits, validCloudPrayer, validCloudQaza, validCloudQazaLog, validCloudRecords, validCloudSchedule, validCloudSleep, validCloudTombstones } from './core.js';
-import {
-  mergeCloudIntoLocal, mergeTombstonesById, mergePlannerV1, normalizePlannerV1,
-  plannerCanonicalJson, sectionEnvelopeWins, unwrapSection,
-} from './merge.js';
+import { BACKUP_LIMIT, BACKUP_MIN_INTERVAL_MS, FIREBASE_BACKUPS_URL, FIREBASE_PLANNER_URL, FIREBASE_URL, SYNC_DEBOUNCE_MS, SYNC_TS_KEY, clearSyncPending, hasData, markSyncPending, normalizing, saveNormalized, setSyncing, syncPending, syncTs, syncing } from './core.js';
+import { normalizePlannerV1 } from './merge.js';
 import { refreshAuthToken, getAuthToken, hasSessionRefreshToken } from '../data/firebase-auth.js';
+// Движки применения (АДР 2026-11-08): путь снимка и путь гонки вынесены
+// из этого файла; здесь — транспорт, гейты новизны и состояние обменов.
+import { applyCloudData, planPlannerApply } from './apply-engine.js';
+import { applyMergedFromCloud } from './merge-engine.js';
+// Публичный API сохраняется: planPlannerApply импортирует data/backup.js,
+// applyCloudData достают тесты и песочницы.
+export { applyCloudData, planPlannerApply };
 export let syncTimer = null;
 // Сетевой таймаут обменов. Без него зависшее соединение (сеть отдаёт TCP,
 // но не отвечает) держит syncExchange открытым вечно: правки встают в
@@ -157,10 +159,6 @@ async function fetchWithTimeout(url, options) {
   noteDenied(response);
   return response;
 }
-// Идёт обмен с сервером. Свои же сохранения в этот момент не должны ставить
-// встречную отправку: loadQaza() зовёт saveQaza(), а syncToCloud() зовёт
-// loadQaza() — без флага каждая отправка планировала бы следующую.
-export let syncing = false;
 // Первая сверка с сервером пройдена. До неё отправлять нельзя: локальное
 // состояние ещё не сверено с серверным, и PUT затёр бы на сервере чужие
 // данные. Гонка настоящая: loadQaza() при чтении зовёт saveQaza(), то есть
@@ -171,296 +169,6 @@ export let cloudReady = false;
 // недоступном сервере, а пустая таблица должна отличать «не загрузили»
 // от «человек всё удалил» (§13).
 export let cloudReachable = false;
-// plannerV1: подготовка применения чужого узла (без записей). Снимок
-// merge-ится с envelope (замена целиком — ни одна сторона не теряет
-// независимые поля; delete-wins проверяет mergePlannerV1), результат
-// материализуется в список Матрицы. Отказы:
-//   * узла нет / он пуст — ничего не меняем: отсутствие plannerV1 у
-//     старого клиента ≠ удаление (ТЗ §1.4.1);
-//   * schemaVersion неизвестен или мусор — локальное состояние целое,
-//     уходит только диагностика без содержимого (ТЗ §1.3);
-//   * envelope привязан к другому подтверждённому владельцу — блок в обе
-//     стороны, межустройственное смешивание решает владелец (ТЗ §1.4.4).
-// Возвращает пару значений для stage (envelope + список) или null.
-export function planPlannerApply(cloudRaw) {
-  if (cloudRaw === undefined || cloudRaw === null) return null;
-  const normalized = normalizePlannerV1(cloudRaw);
-  if (!normalized.ok) {
-    bus.emit('planner:rejected', { unsupported: normalized.unsupported === true });
-    return null;
-  }
-  const incoming = normalized.snapshot;
-  if (!hasData(incoming.entries) && !hasData(incoming.settings) && !hasData(incoming.tombstones)) {
-    return null;
-  }
-  const env = plannerLoadOrBuildEnvelope();
-  if (env.ownerUid) {
-    const uid = plannerOwnerUid();
-    if (uid && uid !== env.ownerUid) return null;
-  }
-  const merged = mergePlannerV1(env.snapshot, incoming);
-  if (plannerCanonicalJson(merged) === plannerCanonicalJson(env.snapshot)) return null;
-  env.snapshot = merged;
-  plannerObserveVersions(env, merged);
-  const tasks = materializePlannerTasks(merged);
-  return {
-    envValue: JSON.stringify(env),
-    tasksValue: JSON.stringify(tasks),
-  };
-}
-
-// Применяет данные с сервера. Пишем прямо в localStorage: saveHabits/saveQaza
-// поставили бы отправку и вернули бы на сервер только что полученное.
-// Пустой раздел на сервере не затирает непустой локальный: это след неполного
-// снимка, а не осознанное удаление — иначе чужая пустая копия съест записи.
-//
-// Применение устроено «всё или ничего» (аудит 2026-10-31): раньше каждый
-// прошедший проверку раздел писался сразу, и QuotaExceededError посреди
-// применения оставлял половину разделов — данные пользователя смешивались
-// с серверными, а UI рисовал половину. Теперь три фазы:
-//   1) валидация всех разделов и сбор stage — пар «ключ, готовая строка» —
-//      без единой записи в хранилище;
-//   2) снимок предыдущего состояния каждого ключа stage;
-//   3) запись; первая ошибка — откат уже записанных ключей (rollbackStagedKeys).
-// Предсказать квоту localStorage заранее нельзя: navigator.storage.estimate
-// считает совсем другое (кэш и диски, а не лимит ключей), у строк своя цена
-// в UTF-16 — поэтому гарантией целостности служит откат фаз 2–3, а не
-// предсказание места.
-// Результат: true — снимок применён целиком; false — хранилище отвергло
-// запись и применение откачено (потребитель обязан считать снимок
-// неприменённым); применять было нечего — undefined, как раньше.
-export function applyCloudData(data, ts) {
-  syncing = true;
-  // Снимок считается принятым, если хотя бы один раздел прошёл проверку
-  // и был применён. Только тогда двигаем SYNC_TS_KEY: отметка времени
-  // на отброшенных данных заставила бы считать сервер свежее, чем он есть.
-  // Флаг живёт на уровне функции, а не внутри try: эмит в конце читает его
-  // уже за пределами try-блока.
-  let cloudApplied = false;
-  try {
-    // Снимок локального берём под флагом: loadQaza при первом прогоне пишет
-    // дефолты и иначе поставил бы отправку
-    const local = {
-      habits: loadHabits(),
-      records: loadRecords(),
-      qaza: loadQaza(true),
-      prayer: loadPrayer() || {},
-      fast: loadFast() || null,
-      qazaLog: loadQazaLog() || null,
-      sleep: loadSleep() || null,
-      schedule: loadSchedule(),
-      tombstones: loadTombstones(),
-    };
-    // Локальные метки записи цельных разделов (P1-3): с ними снимок сравнивает
-    // каждый конверт, а не только общую метку снимка
-    const sectionWrites = loadSectionWriteTs();
-    // Метки применённых конвертов — одной записью в конце stage (см. ниже)
-    const writeTsUpdates = {};
-
-    // ── Фаза 1: валидация всех разделов, сбор stage без записей ──
-    // Условия применения каждого раздела — ровно прежние: битый раздел
-    // по-прежнему отвергается целиком (в stage не попадает и не пишется
-    // вовсе), но остальные разделы снимка из-за него не отбрасываются.
-    // Ключей на удаление в stage нет: прежняя семантика никогда не стирает
-    // разделы снимком, и выдумывать удаление здесь нельзя.
-    const stage = [];
-    if (validCloudHabits(data.habits) && (hasData(data.habits) || !hasData(local.habits))) {
-      stage.push({ key: STORAGE_KEYS.habits, value: JSON.stringify(data.habits) });
-    }
-    if (validCloudRecords(data.records) &&
-        (hasData(data.records) || !hasData(local.records))) {
-      stage.push({ key: STORAGE_KEYS.records, value: JSON.stringify(data.records) });
-    }
-    // Раздел каза не применяется, пока есть неотправленная правка:
-    // серверной копии она ещё не видела, и снимок затёр бы её молча.
-    //
-    // P1-3: цельные разделы ходят в конвертах {v, ts} — ts это часы
-    // отправителя на момент записи раздела. Общий гейт новизны
-    // (cloudSnapshotWins) решает по метке ВСЕГО снимка: снимок, опубликованный
-    // позже, переписывал бы раздел, записанный на этом устройстве позже чужой
-    // правки. Поэтому у цельных разделов своё сравнение: конверт применяется,
-    // только если его метка записи строго новее локальной (sectionWrittenTs);
-    // при равенстве побеждает локальная версия — детерминированно, обе стороны
-    // выберут одно и то же. Раздел без конверта (старый клиент) — ts=0:
-    // конверт побеждает его при первом же обмене, а он сам не затирает свежий
-    // конверт. Оба без конвертов — прежнее правило: снимок уже прошёл общий
-    // гейт (третий аргумент sectionEnvelopeWins).
-    const cloudQaza = unwrapSection(data.qaza);
-    if (!syncPending && validCloudQaza(cloudQaza.v) &&
-        (hasData(cloudQaza.v) || !hasData(local.qaza)) &&
-        sectionEnvelopeWins(cloudQaza.ts, sectionWrites.qaza, true)) {
-      stage.push({ key: QAZA_STORAGE_KEY, value: JSON.stringify(cloudQaza.v) });
-      if (cloudQaza.ts > 0) writeTsUpdates.qaza = cloudQaza.ts;
-    }
-    // Координаты — один раздел целиком, в конверте {v, ts} (правило выше).
-    // Пустой объект с сервера не затирает заданные координаты: это след
-    // неполного снимка.
-    const cloudPrayer = unwrapSection(data.prayer);
-    if (validCloudPrayer(cloudPrayer.v) &&
-        (hasData(cloudPrayer.v) || !hasData(local.prayer)) &&
-        sectionEnvelopeWins(cloudPrayer.ts, sectionWrites.prayer, true)) {
-      stage.push({ key: PRAYER_KEY, value: JSON.stringify(cloudPrayer.v) });
-      if (cloudPrayer.ts > 0) writeTsUpdates.prayer = cloudPrayer.ts;
-    }
-    // Счётчик уразы — один раздел целиком, как координаты. Ноль
-    // здесь значимое значение: объект с remaining: 0 непуст по ключам,
-    // поэтому hasData даёт true и счётчик с сервера применяется. Пустым
-    // (null) с сервера приходит только «счётчика нет» — он не затирает
-    // заведённый счётчик на этом устройстве.
-    // История из снимка чистится, но раздел из-за неё не отклоняется:
-    // битая запись — не повод терять счётчик (§5, validFastHistory)
-    // Остаток обязан быть целым неотрицательным числом: снимок вида
-    // { remaining: "15" } или { junk: 1 } ключами непуст и раньше проходил
-    // проверку целиком. Дальше в счётчик писалась строка или undefined,
-    // undefined исчезал при JSON.stringify, следующий loadFast() возвращал
-    // null — и экран уразы показывал форму первого запуска, теряя остаток
-    // и историю. Раздел, не прошедший проверку, не применяется вовсе:
-    // локальный счётчик остаётся нетронутым (уровень защиты 1, §11aa, В2)
-    // Конверт {v, ts} — как у каза и координат (P1-3, см. выше)
-    const cloudFast = unwrapSection(data.fast);
-    if (validCloudFast(cloudFast.v) &&
-        (hasData(cloudFast.v) || !hasData(local.fast)) &&
-        sectionEnvelopeWins(cloudFast.ts, sectionWrites.fast, true)) {
-      stage.push({ key: FAST_KEY, value: JSON.stringify({
-        version: FAST_VERSION,
-        remaining: cloudFast.v.remaining,
-        history: validFastHistory(cloudFast.v.history),
-      }) });
-      if (cloudFast.ts > 0) writeTsUpdates.fast = cloudFast.ts;
-    }
-    // Журнал выполнений каза — отдельный раздел, один целиком, как счётчик
-    // уразы. Пустой журнал (entries: []) ключами непуст, поэтому hasData даёт
-    // true и он применяется, затирая локальный: «журнала нет» выражается
-    // только null. Битый since раздел не пропускает — иначе журнал записался
-    // бы и при следующем чтении пропал бы вовсе (§5, loadQazaLog).
-    // Записи из снимка чистятся, но раздел из-за них не отклоняется:
-    // битая запись — не повод терять историю (§5, validQazaLogEntries)
-    // Журнал каза защищён тем же правилом: неотправленная правка дороже
-    // серверного снимка, который её ещё не содержит.
-    if (!syncPending && validCloudQazaLog(data.qazaLog) &&
-        (hasData(data.qazaLog) || !hasData(local.qazaLog))) {
-      stage.push({ key: QAZA_LOG_KEY, value: JSON.stringify({
-        version: QAZA_LOG_VERSION,
-        since: data.qazaLog.since,
-        entries: validQazaLogEntries(data.qazaLog.entries),
-      }) });
-    }
-    // Запись о сне — отдельный раздел, один целиком, как счётчик уразы.
-    // Пустой объект с сервера не затирает заведённую запись: он приходит
-    // следом неполного снимка, а не осознанным удалением (§5)
-    if (validCloudSleep(data.sleep) &&
-        (hasData(data.sleep) || !hasData(local.sleep))) {
-      stage.push({ key: SLEEP_KEY, value: JSON.stringify(Object.assign({}, data.sleep, {
-        history: validSleepHistory(data.sleep.history),
-      })) });
-    }
-    // Расписание заменяется целиком, как запись о сне. Дефолтов здесь нет:
-    // loadSchedule подставляет их сама, поэтому раздел с сервера, прошедший
-    // проверку, применяется всегда — пустым он быть не может. Конверт {v, ts}
-    // — как у каза (P1-3, см. выше). Перерисовка открытого экрана расписания —
-    // у подписчика sync:applied, вместе с остальными экранами (§11v)
-    const cloudSchedule = unwrapSection(data.schedule);
-    if (validCloudSchedule(cloudSchedule.v) &&
-        sectionEnvelopeWins(cloudSchedule.ts, sectionWrites.schedule, true)) {
-      stage.push({ key: STORAGE_KEYS.schedule, value: JSON.stringify(cloudSchedule.v) });
-      if (cloudSchedule.ts > 0) writeTsUpdates.schedule = cloudSchedule.ts;
-    }
-    // Архив — месячные сводки историй (js/data/archive.js). Раздел заменяет
-    // локальный целиком: сводки производные, месяцы пересчитываются заново
-    // при каждой архивации. Раздела в снимке нет — локальный архив не
-    // трогается: снимок старой версии не должен обнулять то, чего не знает.
-    if (validCloudArchive(data.archive)) {
-      stage.push({ key: ARCHIVE_KEY, value: JSON.stringify(data.archive) });
-    }
-    // Надгробия удалённых привычек (B.3): раздел необязателен — старые
-    // снимки без него применяются как раньше. Заменять локальные надгробия
-    // серверными нельзя: ещё не отправленная метка удаления исчезла бы,
-    // и привычка воскресла бы при следующем слиянии. Поэтому — слияние
-    // по max(ts) (mergeTombstonesById), аддитивное в обе стороны.
-    const cloudTombstones = validCloudTombstones(data.tombstones);
-    if (cloudTombstones && hasData(cloudTombstones)) {
-      stage.push({
-        key: STORAGE_KEYS.tombstones,
-        value: JSON.stringify(mergeTombstonesById(local.tombstones, cloudTombstones)),
-      });
-    }
-    // plannerV1 (ТЗ §1.4.1–2): аддитивный узел планирования. Слияние с
-    // envelope и материализация списка — двумя ключами одного stage:
-    // откат фазы 3 возвращает и envelope, и список побайтно
-    const plannerStage = planPlannerApply(data.plannerV1);
-    if (plannerStage) {
-      stage.push({ key: STORAGE_KEYS.plannerEnvelope, value: plannerStage.envValue });
-      stage.push({ key: MATRIX_STORAGE_KEY, value: plannerStage.tasksValue });
-    }
-
-    // Нечего применять: прежний код с cloudApplied=false не писал метку
-    // и не эмитил — выходим с тем же наблюдаемым результатом (undefined)
-    if (stage.length === 0) return;
-
-    // Метки записи применённых конвертов — в той же атомарной порции: откат
-    // снимка обязан откатить и карту, иначе следующее сравнение считало бы
-    // раздел применённым по метке, которой в хранилище нет (или наоборот).
-    // Перед меткой времени: та остаётся последним элементом stage.
-    const writeTsJson = sectionWriteTsJson(writeTsUpdates);
-    if (writeTsJson) stage.push({ key: SECTION_WRITE_TS_KEY, value: writeTsJson });
-
-    // Метка времени — последний элемент stage: она движется только вместе
-    // с целым снимком (бывшее `if (cloudApplied)`), а сбой её записи откатывает
-    // снимок целиком — метка на наполовину применённых данных заставила бы
-    // считать их серверными и больше не принимать свежий снимок.
-    stage.push({ key: SYNC_TS_KEY, value: String(ts) });
-
-    // ── Фаза 2: снимок предыдущего состояния каждого ключа stage ──
-    // Журнал — он же протокол отката: written отмечает уже записанные
-    // ключи (только они подлежат откату), had — существовал ли ключ до
-    // записи (стирать или восстанавливать).
-    const appliedLog = [];
-    for (let i = 0; i < stage.length; i++) {
-      const previous = localStorage.getItem(stage[i].key);
-      appliedLog.push({
-        key: stage[i].key,
-        value: stage[i].value,
-        previous: previous,
-        had: previous !== null,
-        written: false,
-      });
-    }
-
-    // ── Фаза 3: применение; первая ошибка — откат всего записанного ──
-    for (let i = 0; i < appliedLog.length; i++) {
-      try {
-        localStorage.setItem(appliedLog[i].key, appliedLog[i].value);
-      } catch (e) {
-        // QuotaExceededError или любая другая ошибка записи: применённое
-        // до сбоя откатывается целиком (см. rollbackStagedKeys)
-        rollbackStagedKeys(appliedLog, 'applyCloudData');
-        // Практика сообщения о квоте в проекте одна: safeSetItem эмитит
-        // storage:error, тост показывает подписчик в app.js. Метка не
-        // двигается и sync:applied не эмится: хранилище осталось ровно
-        // в прежнем состоянии
-        bus.emit('storage:error');
-        return false;
-      }
-      appliedLog[i].written = true;
-      // Кэш записей сбрасывается сразу после записи раздела, как раньше:
-      // при последующем откате кэш просто перечитает прежнюю строку
-      if (appliedLog[i].key === STORAGE_KEYS.records) invalidateRecordsCache();
-    }
-
-    cloudApplied = true;
-  } finally {
-    syncing = false;
-  }
-
-  // Обновление appState и перерисовку делает подписчик sync:applied:
-  // слой синхронизации не знает ни состояния интерфейса, ни рендеров.
-  // Эмит только при реально применённых данных: отвергнутый снимок ничего
-  // не менял, и шторм перерисовок (таблица, каза, молитвы, ураза) был бы
-  // чистым расходом — при сверах «ничего нового» частых.
-  if (cloudApplied) bus.emit('sync:applied');
-  // Дошли сюда — все ключи записаны, отката не было
-  return true;
-}
 // Чей снимок применяем. Чистое правило без чтения глобального состояния:
 // серверный снимок должен быть строго новее и не спорить с правкой, которой
 // сервер ещё не видел (pending). Ранние возвраты вместо вложенных условий.
@@ -758,7 +466,7 @@ function publishSectionEnvelope(section, payload) {
 }
 
 function syncBody(ts, previous) {
-  syncing = true;
+  setSyncing(true);
   try {
     let habits = loadHabits();
     if (!cloudReachable && !hasData(habits) && previous && hasData(previous.habits)) {
@@ -814,7 +522,7 @@ function syncBody(ts, previous) {
     };
     return JSON.stringify(body);
   } finally {
-    syncing = false;
+    setSyncing(false);
   }
 }
 
@@ -986,121 +694,6 @@ async function migratePlannerFromRoot(rootSnapshot) {
   // устройство, чей корневой снимок не свежее, всё равно увидело Матрицу
   applyPlannerNodeFromCloud(snapshot);
   return true;
-}
-// Ключ хранилища для раздела слияния. null — раздел без своего ключа
-// (таких в слитом снимке быть не должно).
-function mergeSectionKey(section) {
-  switch (section) {
-    case 'habits': return STORAGE_KEYS.habits;
-    case 'records': return STORAGE_KEYS.records;
-    case 'qaza': return QAZA_STORAGE_KEY;
-    case 'prayer': return PRAYER_KEY;
-    case 'fast': return FAST_KEY;
-    case 'qazaLog': return QAZA_LOG_KEY;
-    case 'sleep': return SLEEP_KEY;
-    case 'schedule': return STORAGE_KEYS.schedule;
-    case 'archive': return ARCHIVE_KEY;
-    case 'tombstones': return STORAGE_KEYS.tombstones;
-  }
-  return null;
-}
-// Слияние облачного снимка с локальным состоянием и запись изменившихся
-// разделов (гонка двух устройств, см. syncToCloudNow). Те же три фазы, что
-// у applyCloudData: сбор stage без записей, снимок прежнего состояния,
-// запись с откатом. Разделы, которые слияние не меняло, не пишутся вовсе:
-// sync:applied и перерисовка — только на реальные изменения. Пишем прямо
-// в хранилище: saveX поставили бы отправку на каждый раздел, а здесь вся
-// порция уезжает текущим PUT.
-function applyMergedFromCloud(previous) {
-  const local = {
-    habits: loadHabits(),
-    records: loadRecords(),
-    qaza: loadQaza(true),
-    prayer: loadPrayer() || {},
-    fast: loadFast() || null,
-    qazaLog: loadQazaLog() || null,
-    sleep: loadSleep() || null,
-    schedule: loadSchedule(),
-    archive: loadArchive(),
-    tombstones: loadTombstones(),
-  };
-  // Метки записи цельных разделов: слияние сравнивает по ним конверты
-  // (P1-3), а победившая метка переносится в карту тем же stage ниже
-  const sectionWrites = loadSectionWriteTs();
-  const merged = mergeCloudIntoLocal(local, previous, {
-    pending: syncPending,
-    localTs: syncTs(),
-    sectionWrites: sectionWrites,
-  });
-  // plannerV1 сливается независимо от «ок новее» соседних разделов:
-  // CRDT-состояние разрешают Lamport-версии, а не метка снимка; старый
-  // узел plannerV1 всё равно не может «воскресить» локальные tombstones
-  const plannerStage = planPlannerApply(previous.plannerV1);
-  if (!merged && !plannerStage) return;
-
-  const stage = [];
-  if (merged) {
-    const sections = Object.keys(merged);
-    for (let i = 0; i < sections.length; i++) {
-      const section = sections[i];
-      const key = mergeSectionKey(section);
-      if (!key) continue;
-      const before = local[section] === undefined ? null : local[section];
-      const after = merged[section] === undefined ? null : merged[section];
-      if (JSON.stringify(before) === JSON.stringify(after)) continue;
-      stage.push({ key: key, value: JSON.stringify(after), section: section });
-    }
-  }
-  if (plannerStage) {
-    stage.push({ key: STORAGE_KEYS.plannerEnvelope, value: plannerStage.envValue });
-    stage.push({ key: MATRIX_STORAGE_KEY, value: plannerStage.tasksValue });
-  }
-  if (stage.length === 0) return;
-
-  // Победивший в слиянии конверт переносит свою метку в локальную карту тем
-  // же stage: раздел поменял содержимое — значит, выиграла облачная сторона
-  // (цельные разделы сливаются целиком), и следующее сравнение должно идти
-  // от её метки записи. Откат фазы записи возвращает и карту. Только четыре
-  // конвертных раздела: у коллекций (habits, records…) меток записи нет.
-  const ENVELOPE_SECTIONS = ['qaza', 'prayer', 'fast', 'schedule'];
-  const writeTsUpdates = {};
-  for (let i = 0; i < stage.length; i++) {
-    const section = stage[i].section;
-    if (ENVELOPE_SECTIONS.indexOf(section) === -1) continue;
-    const incoming = unwrapSection(previous[section]);
-    if (incoming.ts > 0) writeTsUpdates[section] = incoming.ts;
-  }
-  const writeTsJson = sectionWriteTsJson(writeTsUpdates);
-  if (writeTsJson) stage.push({ key: SECTION_WRITE_TS_KEY, value: writeTsJson });
-
-  const appliedLog = [];
-  for (let i = 0; i < stage.length; i++) {
-    const previousValue = localStorage.getItem(stage[i].key);
-    appliedLog.push({
-      key: stage[i].key,
-      previous: previousValue,
-      had: previousValue !== null,
-      written: false,
-    });
-  }
-  for (let i = 0; i < stage.length; i++) {
-    try {
-      localStorage.setItem(stage[i].key, stage[i].value);
-    } catch (e) {
-      rollbackStagedKeys(appliedLog, 'applyMergedFromCloud');
-      bus.emit('storage:error');
-      return;
-    }
-    appliedLog[i].written = true;
-    if (stage[i].section === 'records') invalidateRecordsCache();
-  }
-  // Слитый список мог вернуть удалённые привычки (чужая правка победила
-  // надгробие): их метки снимаются, иначе уехали бы наверх при этом же PUT
-  pruneResolvedTombstones();
-  // Слияние уже в хранилище: подписчик sync:applied перечитает состояние,
-  // запустит архивацию (снимок мог принести старую детализацию) и перерисует
-  // видимый экран
-  bus.emit('sync:applied');
 }
 // Обычное чтение узла данных без копии в бэкапы. Возвращает объект снимка
 // или null, если узел пуст; при ошибке сети бросает — вызывающий решает,

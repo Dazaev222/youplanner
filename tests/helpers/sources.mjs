@@ -56,6 +56,12 @@ export function stripModuleSyntax(text) {
   return text
     .replace(IMPORT_RE, '')
     .replace(SIDE_EFFECT_IMPORT_RE, '')
+    // Ре-экспорт импортированного биндинга (`export { a, b };`): в
+    // конкатенации это пустая операция — модуль-источник склеен раньше
+    // импортёра, имена уже глобальны. Без этого песочница падала бы на
+    // «Unexpected token export» (sync.js ре-экспортирует applyCloudData и
+    // planPlannerApply из apply-engine.js, АДР 2026-11-08).
+    .replace(/^export\s*\{[^}]*\};?\s*$/gm, '')
     .replace(/^export\s+(?=const\b|let\b|function\b|class\b|async\s+function\b)/gm, '');
 }
 

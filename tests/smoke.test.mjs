@@ -64,6 +64,13 @@ test('каждый именованный import находит реальный
       const exported = new Set(
         [...targetText.matchAll(/^export\s+(?:const|let|function|async\s+function|class)\s+([A-Za-z_$][\w$]*)/gm)]
           .map((x) => x[1]));
+      // Ре-экспорт (`export { a, b };`) — настоящий export: имена едут
+      // наружу из модуля-источника через посредника (sync.js ре-экспортирует
+      // applyCloudData/planPlannerApply из apply-engine.js, АДР 2026-11-08)
+      for (const m of targetText.matchAll(/^export\s*\{([^}]*)\};?\s*$/gm)) {
+        m[1].split(',').map((s) => s.trim())
+          .filter(Boolean).forEach((s) => exported.add(s.split(/\s+as\s+/)[0]));
+      }
       for (const name of names) {
         assert.ok(exported.has(name),
           `${file}: импорт ${name} из ${m[2]} не экспортирован`);
