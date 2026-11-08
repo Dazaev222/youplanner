@@ -644,10 +644,13 @@ test('delete: подтверждение — попап из JS, а не confirm
 // тест закрепляет, что живой app.js и index.html подключены тем же манером
 // (иначе тесты зелёные, а в браузере жест ничего не делает)
 
-test('delete: app.js вешает долгое нажатие на ленту и гасит попап слоями', () => {
+test('delete: проводка жеста вешает долгое нажатие на ленту и гасит попап слоями', () => {
+  // Проводка жеста и Escape-слой живут в модуле экранов (вынесены из app.js
+  // в js/events/screens-events.js, пилот Фабрики 2026-11-08); инварианты те же
   const app = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
-  assert.match(app, /bindAssistantChatLongPress/, 'проводка жеста импортирована');
-  assert.match(app,
+  const screens = readFileSync(new URL('../js/events/screens-events.js', import.meta.url), 'utf8');
+  assert.match(screens, /bindAssistantChatLongPress/, 'проводка жеста импортирована');
+  assert.match(screens,
     /getElementById\('assistant-chat'\)[\s\S]{0,120}bindAssistantChatLongPress\(assistantChat\)/,
     'жест делегирован ленте, а не каждому пузырю');
   assert.ok(!app.includes('onAssistantChatClick'), 'обработчик крестика убран из app.js');
@@ -659,7 +662,7 @@ test('delete: app.js вешает долгое нажатие на ленту и
     'закрывателей шторки в app.js больше нет');
   // Escape-слой и уход с экрана: попап не должен переживать ни нажатие,
   // ни переход
-  assert.match(app, /isAssistantDeletePopupOpen\(\)[\s\S]{0,120}closeAssistantDeletePopup\(\)/,
+  assert.match(screens, /isAssistantDeletePopupOpen\(\)[\s\S]{0,120}closeAssistantDeletePopup\(\)/,
     'Escape гасит попап удаления верхним слоем');
   assert.match(app, /closeLevelSheet\(\);[\s\S]{0,240}closeAssistantDeletePopup\(\);/,
     'смена экрана закрывает попап вместе с остальными окнами');

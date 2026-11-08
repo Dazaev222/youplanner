@@ -486,10 +486,13 @@ test('longpress: пузыри защищены от перехвата жест�
   assert.match(rule[0], /-webkit-touch-callout:\s*none/, 'iOS: без системной плашки «копировать»');
 });
 
-test('longpress: app.js вешает жест на ленту, а не на каждый пузырь', () => {
+test('longpress: проводка вешает жест на ленту, а не на каждый пузырь', () => {
+  // Проводка жеста переехала из app.js в js/events/screens-events.js
+  // (пилот Фабрики 2026-11-08); инвариант тот же
   const app = readFileSync(new URL('../js/app.js', import.meta.url), 'utf8');
-  assert.match(app, /bindAssistantChatLongPress/, 'проводка жеста импортирована');
-  assert.match(app,
+  const screens = readFileSync(new URL('../js/events/screens-events.js', import.meta.url), 'utf8');
+  assert.match(screens, /bindAssistantChatLongPress/, 'проводка жеста импортирована');
+  assert.match(screens,
     /getElementById\('assistant-chat'\)[\s\S]{0,120}bindAssistantChatLongPress\(assistantChat\)/,
     'жест делегирован ленте');
   assert.ok(!app.includes('onAssistantChatClick'), 'обработчик крестика убран из app.js');

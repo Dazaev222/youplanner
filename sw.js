@@ -85,7 +85,9 @@
 // table.css, sparkline.css → stats.css, background.css → settings.css),
 // ui/constants.js слит в ui/state.js; правила перенесены дословно, порядок
 // каскада сохранён.)
-// (v47: эмодзи вместо SVG-трендов в пунктах меню статистики (index.html,
+// (v57 — три новых модуля-обработчика bindEvents: js/events/nav-events.js,
+// js/events/sync-data-events.js, js/events/screens-events.js — пилот Фабрики
+// 2026-11-08. v47: эмодзи вместо SVG-трендов в пунктах меню статистики (index.html,
 // js/ui/stats-view.js, styles/mobile.css, стили спарклайнов — теперь в
 // styles/stats.css) и стили календаря/матрицы по замеру TickTick — серые
 // поля вместо синих рамок, iOS-тумблер «Весь день», радиусы/зазоры/паддинги,
@@ -93,7 +95,7 @@
 // (v46 — правка текстовая (в комментарии js/data/matrix.js:771 перепутались
 // алфавиты), v45 — четыре файла после v44, v44 — восемь файлов аудита,
 // v43 — транспорт plannerV1, v42 — пересобранная вёрстка Матрицы.)
-const CACHE = 'youplanner-v56';
+const CACHE = 'youplanner-v57';
 // Иконки — все из manifest.json: отсутствующая в кэше иконка ломала бы
 // офлайн-установку PWA (аудит 2026-10-31: icon-512.png не кэшировался)
 const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon-512.png', './icon.svg',
@@ -128,6 +130,10 @@ const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './ic
   './js/ui/habits-edit.js',
   './js/ui/stats-view.js',
   './js/app.js',
+  // Обработчики bindEvents, вынесенные из app.js (пилот Фабрики 2026-11-08)
+  './js/events/nav-events.js',
+  './js/events/sync-data-events.js',
+  './js/events/screens-events.js',
   './js/core/bus.js', './js/core/dates.js',
   './js/core/storage.js', './js/core/dom.js',
   './js/data/storage.js', './js/data/schedule.js', './js/data/habits.js',
