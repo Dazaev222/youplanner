@@ -310,6 +310,130 @@ export function syncToCloud() {
   syncExchange = run();
   return syncExchange;
 }
+
+// ── Фоновый дожим после неудачного обмена ───────────────────────────────────
+// Два устройства могут спорить за узел долго: сервер всё время отвечает 412,
+// клиент делает ровно PLANNER_CAS_ATTEMPTS попыток за один обмен и сдаётся.
+// Следующая попытка раньше была только по правке человека (scheduleSync) или
+// перезагрузке страницы — конфликт мог висеть часами при живом устройстве B.
+// Сетевой сбой тоже не ретраился: правка оставалась в outbox до следующего
+// действия человека, window 'online' в этом файле никто не слушал.
+//
+// Решение — модульный фоновый retry с экспоненциальным backoff. Константу
+// PLANNER_CAS_ATTEMPTS не увеличиваем: упорный 412 за один обмен всё равно
+// надо перечитывать и сливать, а не долбить сервер лишними PUT. Фоновый
+// дожим повторяет ВЕСЬ обмен через syncToCloud() (очередь syncExchange,
+// single-flight), а не отдельный PUT в обход сериализации.
+//
+// База 1000 мс: достаточно, чтобы не молотить сервер при живом конфликте
+// (у другого устройства есть время закончить свой обмен) и не заставлять
+// человека ждать следующей правки. Потолок 30000 мс: при долгом офлайне
+// повторы редкие, но ещё не минуты тишины — вернувшийся к приложению
+// не должен обнаружить данные, уехавшие только после его следующего тапа.
+const CAS_RETRY_BASE_MS = 1000;
+const CAS_RETRY_MAX_MS = 30000;
+// База может быть переопределена тестом (быстрый прогон без секундного
+// ожидания). Продакшн-код базу не трогает.
+let casRetryBaseMs = CAS_RETRY_BASE_MS;
+// Таймер и текущая пауза — наружу для тестов, в стиле syncTimer/syncExchange:
+// из песочницы читаются через run('casRetryTimer') / run('casRetryDelay').
+export let casRetryTimer = null;
+export let casRetryDelay = casRetryBaseMs;
+// Следующий исход syncToCloudNow — исход фонового дожима, а не человеческого
+// обмена: только такой провал раздвигает паузу сразу, даже если таймер уже
+// погашен самим выстрелом.
+let casRetryFromBackground = false;
+
+// Тестам: ускорить первый ретрай, не через глобальные переменные и не через
+// подмену тестируемого модуля. Возвращает прежнюю базу.
+export function setCASRetryBaseMs(ms) {
+  const previous = casRetryBaseMs;
+  if (typeof ms === 'number' && Number.isFinite(ms) && ms >= 0) {
+    casRetryBaseMs = ms;
+    casRetryDelay = ms;
+  }
+  return previous;
+}
+
+function clearCasRetryTimer() {
+  if (casRetryTimer) {
+    clearTimeout(casRetryTimer);
+    casRetryTimer = null;
+  }
+}
+
+// Успех любого обмена (и возвращение сети) гасит дожим и возвращает паузу
+// на базу: данные уехали, дожимать нечего; прошлый провал мог быть именно
+// из-за сети, с которой теперь покончено.
+function resetCasRetryAfterSuccess() {
+  clearCasRetryTimer();
+  casRetryDelay = casRetryBaseMs;
+  casRetryFromBackground = false;
+}
+
+// Не плодить второй таймер: правка во время ожидания, ручная кнопка и сам
+// фоновый обмен приходят в одну точку scheduleBackgroundRetry. Пока таймер
+// стоит — он один. Перезапуск с удвоенной паузой делает вызывающий
+// noteCasExchangeOutcome (сначала погасить, потом взвести новый).
+function scheduleBackgroundRetry() {
+  if (casRetryTimer) return;
+  casRetryTimer = setTimeout(fireCasRetry, casRetryDelay);
+  // В Node (тесты) unref не держит процесс: старые тесты, спровоцировавшие
+  // неудачный обмен, не должны висеть до конца ретрая. В браузере unref нет —
+  // просто пропускаем.
+  if (casRetryTimer && typeof casRetryTimer.unref === 'function') {
+    casRetryTimer.unref();
+  }
+}
+
+// Истёк таймер: дожимаем через публичный вход. Прямой syncToCloudNow сломал
+// бы инвариант «один обмен одновременно»: здесь может уже идти человеческий
+// обмен, и наш вызов обязан встать в очередь (syncQueued), а не пойти
+// параллельно. Если обмен уже идёт — не влезаем: он либо заберёт наши данные,
+// либо сам взведёт следующий ретрай. Ждём ещё раз с той же паузой.
+function fireCasRetry() {
+  casRetryTimer = null;
+  if (syncExchange) {
+    scheduleBackgroundRetry();
+    return;
+  }
+  casRetryFromBackground = true;
+  syncToCloud();
+}
+
+// Исход обмена → взвести или погасить фоновый дожим.
+// Неудачи: throw (сеть), 412 после исчерпания попыток, 5xx. 401/403 — права,
+// фоновый шторм не поможет (это sync:denied, а не «нет связи»).
+// Прочие 4xx — запрос плохой сам по себе, повтор не лечит.
+function noteCasExchangeOutcome(response, threw) {
+  let failed;
+  if (threw || !response) {
+    failed = true;
+  } else if (response.status === 412) {
+    failed = true;
+  } else if (response.status === 401 || response.status === 403) {
+    failed = false;
+  } else if (!response.ok) {
+    failed = response.status >= 500;
+  } else {
+    failed = false;
+  }
+
+  if (!failed) {
+    resetCasRetryAfterSuccess();
+    return;
+  }
+  // Вторая неудача, пока уже ждём (или провал самого фонового дожима),
+  // раздвигает паузу. Первая — пауза остаётся базовой: рост начинается
+  // после второй, не раньше.
+  if (casRetryFromBackground || casRetryTimer) {
+    casRetryDelay = Math.min(casRetryDelay * 2, CAS_RETRY_MAX_MS);
+  }
+  casRetryFromBackground = false;
+  clearCasRetryTimer();
+  scheduleBackgroundRetry();
+}
+
 // Отправляет локальные данные наверх. Ключ времени пишется ПОСЛЕ успешного
 // PUT: если отправка не дошла, локальная копия и в реальности не новее
 // серверной, и завышенный таймстамп помешал бы принять следующий снимок.
@@ -380,6 +504,8 @@ export async function syncToCloudNow() {
   // PLANNER_CAS_ATTEMPTS попыток за цикл; дальше outbox честно ждёт
   // следующего цикла — глушение 412 безусловным PUT означало бы затирание
   // чужой правки.
+  let casResponse = null;
+  let casThrew = false;
   try {
     let response = null;
     for (let attempt = 0; attempt < PLANNER_CAS_ATTEMPTS; attempt++) {
@@ -407,6 +533,7 @@ export async function syncToCloudNow() {
       // перечитывает envelope и разделы из хранилища); операции
       // неподтверждённой попытки остаются в outbox до удачного CAS
     }
+    casResponse = response;
     if (response && response.ok) {
       // lastCloudEtag обновляется и от успешного PUT: сервер отвечает меткой
       // записанного значения. Без метки в ответе (заглушечный транспорт,
@@ -427,6 +554,12 @@ export async function syncToCloudNow() {
     // считается недоступным, иначе cloudReachable залипает в true
     // и syncBody перестаёт беречь серверные привычки при пустом локальном списке.
     cloudReachable = false;
+    casThrew = true;
+  } finally {
+    // Исход учитывается всегда, включая return из try: успех гасит фоновый
+    // дожим, 412/сеть — взводят. Вызов из syncToCloudNow, но сам дожим потом
+    // идёт только через syncToCloud (fireCasRetry).
+    noteCasExchangeOutcome(casResponse, casThrew);
   }
 }
 // Тело PUT. Привычки берём локальные — кроме одного случая: сверка ни разу
@@ -842,4 +975,18 @@ export function flushPendingSync() {
   clearTimeout(syncTimer);
   syncTimer = null;
   syncToCloud();
+}
+
+// Сеть вернулась: не ждём конца backoff. Немедленный обмен через syncToCloud
+// (очередь syncExchange, если что-то уже идёт). До первой сверки отправлять
+// нельзя: локальное состояние ещё не сверено с серверным, PUT затёр бы чужие
+// данные — поэтому гейт cloudReady, как у scheduleSync.
+// Вешаем аккуратно: window может не быть (чистый Node) или addEventListener
+// отсутствовать (песочница со старым хелпером).
+if (typeof window !== 'undefined' && window && typeof window.addEventListener === 'function') {
+  window.addEventListener('online', function () {
+    resetCasRetryAfterSuccess();
+    if (!cloudReady) return;
+    syncToCloud();
+  });
 }
