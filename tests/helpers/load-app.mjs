@@ -12,6 +12,12 @@ import { getAppJs } from './sources.mjs';
 export function loadApp({ fetchImpl } = {}) {
   const storage = new Map();
 
+  // Слушатели window, собранные из приложения (sync.js 'online', app.js
+  // 'storage'/'load'/'resize'). Нужны тестам фонового ретрая: dispatch
+  // имитирует возвращение сети. Обычные пользователи loadApp этот объект
+  // не читают — контракт прежних полей не меняется.
+  const windowListeners = {};
+
   // Узел #toast: showToast/showErrorToast пишут в него через getElementById.
   // Тесты читают textContent, чтобы проверить текст тоста (например, тост
   // «Сессия истекла, войдите заново» при sync:auth-expired). addEventListener
@@ -52,8 +58,15 @@ export function loadApp({ fetchImpl } = {}) {
       documentElement: { style: { setProperty() {} } },
     },
     window: {
-      addEventListener() {},
-      removeEventListener() {},
+      addEventListener(type, fn) {
+        (windowListeners[type] = windowListeners[type] || []).push(fn);
+      },
+      removeEventListener(type, fn) {
+        const list = windowListeners[type];
+        if (!list) return;
+        const i = list.indexOf(fn);
+        if (i !== -1) list.splice(i, 1);
+      },
       matchMedia() { return { matches: false }; },
       scrollTo() {},
       innerWidth: 1200,
@@ -94,6 +107,14 @@ export function loadApp({ fetchImpl } = {}) {
     sandbox,
     context,
     toastNode,
+    windowListeners,
+    // Вызвать слушатели window типа type. Событие — { type } или своё.
+    // Копия списка: обработчик может отписаться внутри вызова.
+    dispatchWindowEvent(type, event) {
+      const list = windowListeners[type] || [];
+      const evt = event || { type };
+      for (const fn of list.slice()) fn(evt);
+    },
     // выполнить код в том же контексте (доступ к глобальным лексическим
     // const — например bus или syncPending — возможен только изнутри)
     run(code) {
