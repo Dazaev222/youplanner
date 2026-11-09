@@ -381,6 +381,15 @@ async function exchangeRefreshToken() {
       } catch (e) {
         // тело отказа не обязано быть JSON'ом
       }
+      // Опоздавший 4xx от обмена прошлой сессии НОВУЮ сессию не разлогинивает.
+      // Успешный ответ уже сверяется с sessionAtStart (ниже); деструктивная
+      // ветка обязана сверяться так же. Иначе мёртвый анонимный refresh,
+      // получивший 400 уже после успешного входа, стирал бы только что
+      // купленную владельческую сессию (forcedSignOut + sync:auth-expired).
+      // Именно этот случай и есть мотив «Войти»: синк уже ловит 401, старый
+      // обмен висит с мёртвым токеном, человек входит — и не должен быть
+      // выкинут опоздавшим отказом этого обмена.
+      if (authSession !== sessionAtStart) return null;
       forcedSignOut(reason);
     }
     return null;
@@ -488,6 +497,22 @@ async function requestFreshToken() {
       if (response.status < 400 || response.status >= 500) {
         throw new Error('auth-сервер ответил ' + response.status);
       }
+      // Опоздавший 4xx от обмена прошлой сессии (или ключ уже заменён):
+      // текущий refresh не стирать и анонимный signUp не заводить. Иначе
+      // старый мёртвый анонимный refresh, отказавший уже после входа,
+      // стирал бы владельческий токен, а при owner ещё и бросал
+      // «Сессия владельца потеряна» на живую сессию. Стирать вправе только
+      // отказ обмена, который шёл по тому же ключу, что сейчас в хранилище,
+      // и в той же сессии.
+      let currentRefresh = null;
+      try {
+        currentRefresh = localStorage.getItem(AUTH_REFRESH_KEY);
+      } catch (e) {
+        currentRefresh = null;
+      }
+      if (authSession !== sessionAtStart || currentRefresh !== refreshToken) {
+        throw new Error('Обмен отменён: сессия или refresh-токен сменились');
+      }
       try {
         localStorage.removeItem(AUTH_REFRESH_KEY);
       } catch (e) {
@@ -552,7 +577,12 @@ export async function getAuthToken() {
     // Причина — в консоль (в стиле [assistant]/[сеть]): наверх уходит только
     // null, синк сам продолжает без токена
     console.error('[firebase-auth] токен не получен:', e);
-    authPausedUntil = Date.now() + AUTH_PAUSE_MS;
+    // Пауза — только для той сессии, в которой обмен ходил: неудача старого
+    // обмена (в том числе 4xx после успешного входа) не должна глушить сеть
+    // на 5 минут уже новой владельческой сессии.
+    if (authSession === sessionAtStart) {
+      authPausedUntil = Date.now() + AUTH_PAUSE_MS;
+    }
     return null;
   }
 }

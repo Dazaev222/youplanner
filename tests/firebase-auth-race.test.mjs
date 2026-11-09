@@ -166,3 +166,85 @@ test('выход во время входа: ownerSignIn отвергает, с�
     'опоздавший успешный вход вернул запись владельца');
   assert.equal(context.getOwnerAccount(), null, 'состояние входа восстановилось');
 });
+
+test('опоздавший 400 от старого обмена не разлогинивает новую владельческую сессию', async () => {
+  // Деструктивная ветка exchangeRefreshToken: 4xx → forcedSignOut. Без сверки
+  // authSession она стирала бы сессию, которую уже успел открыть ownerSignIn.
+  // Мотив из ТЗ: «Войти» жмут, пока старый refresh уже мёртв и висит в сети.
+  const fetchImpl = (url) => {
+    const u = String(url);
+    if (u.indexOf('securetoken.googleapis.com') !== -1) {
+      return new Promise((resolve) => {
+        setTimeout(() => resolve({
+          ok: false,
+          status: 400,
+          json: () => Promise.resolve({ error: { message: 'INVALID_REFRESH_TOKEN' } }),
+        }), 50);
+      });
+    }
+    if (u.indexOf('signInWithPassword') !== -1) {
+      return Promise.resolve(ownerResponse());
+    }
+    return Promise.resolve(okJson({}));
+  };
+
+  const { context, sandbox } = loadApp({ fetchImpl });
+  context.setFirebaseApiKey(KEY);
+  sandbox.localStorage.setItem(AUTH_REFRESH_KEY, ANON_R);
+
+  const stale = context.forceRefreshAuthToken();
+  await context.ownerSignIn('owner@example.com', 'pw');
+  await stale;
+
+  assert.equal(sandbox.localStorage.getItem(AUTH_REFRESH_KEY), 'owner-r',
+    'опоздавший 400 старого обмена стёр владельческий refresh-токен');
+  const stored = JSON.parse(sandbox.localStorage.getItem(AUTH_OWNER_KEY) || 'null');
+  assert.ok(stored && stored.uid === OWNER_UID,
+    'опоздавший 400 старого обмена разлогинил владельца');
+  assert.equal(context.getOwnerAccount() && context.getOwnerAccount().uid, OWNER_UID,
+    'ownerAccount в памяти модуля потерян после опоздавшего 400');
+  assert.equal(await context.getAuthToken(), 'owner-tok',
+    'кэш id-токена владельца затёрт опоздавшим 400');
+});
+
+test('опоздавший 400 requestFreshToken не стирает владельческий refresh и не заводит signUp', async () => {
+  // Вторая дыра: requestFreshToken на 4xx снимал AUTH_REFRESH_KEY без сверки
+  // поколения. После успешного входа это стирало бы owner-r (а при owner ещё
+  // и бросало «Сессия владельца потеряна» на живую сессию). Плюс: неудача
+  // старого обмена не должна ставить 5-минутную паузу новой сессии.
+  const fetchImpl = (url) => {
+    const u = String(url);
+    if (u.indexOf('securetoken.googleapis.com') !== -1) {
+      return new Promise((resolve) => {
+        setTimeout(() => resolve({
+          ok: false,
+          status: 400,
+          json: () => Promise.resolve({ error: { message: 'INVALID_REFRESH_TOKEN' } }),
+        }), 50);
+      });
+    }
+    if (u.indexOf('signInWithPassword') !== -1) {
+      return Promise.resolve(ownerResponse());
+    }
+    // signUp не должен вызываться: Owner уже есть, анонимный аккаунт заводить нельзя
+    if (u.indexOf('accounts:signUp') !== -1) {
+      return Promise.resolve(okJson({ idToken: 'anon-new', refreshToken: 'anon-new-r', expiresIn: '3600' }));
+    }
+    return Promise.resolve(okJson({}));
+  };
+
+  const { context, sandbox } = loadApp({ fetchImpl });
+  context.setFirebaseApiKey(KEY);
+  sandbox.localStorage.setItem(AUTH_REFRESH_KEY, ANON_R);
+
+  const pending = context.getAuthToken();
+  await context.ownerSignIn('owner@example.com', 'pw');
+  await pending;
+
+  assert.equal(sandbox.localStorage.getItem(AUTH_REFRESH_KEY), 'owner-r',
+    'опоздавший 400 requestFreshToken стёр владельческий refresh');
+  const stored = JSON.parse(sandbox.localStorage.getItem(AUTH_OWNER_KEY) || 'null');
+  assert.ok(stored && stored.uid === OWNER_UID, 'запись владельца потеряна');
+  assert.equal(await context.getAuthToken(), 'owner-tok',
+    'после опоздавшего 400 владельческий токен не выдаётся');
+});
