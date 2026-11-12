@@ -382,7 +382,7 @@ test('облачные бэкапы не лежат внутри синхрон�
     'осталось обращение к вложенному /backups внутри узла данных',
   );
   const start = js.indexOf('function backupCloudSnapshot()');
-  const end = js.indexOf('function scheduleSync()', start);
+  const end = js.indexOf('function scheduleSync(', start);
   assert.ok(start !== -1 && end > start, 'не найдена backupCloudSnapshot()');
   assert.ok(
     js.slice(start, end).includes('FIREBASE_BACKUPS_URL'),

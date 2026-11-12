@@ -152,8 +152,13 @@ test('без sectionTs меткой раздела считается updatedAt 
   assert.equal(sectionTsOf({}, 'qaza', CLOUD_TS), CLOUD_TS);
 });
 
-test('цельные разделы при pending не трогаются вовсе', () => {
-  const merged = merge(baseLocal(), baseCloud(), { pending: true });
+test('цельные разделы при pending: локально правленный раздел не трогается', () => {
+  // pending защищает раздел, у которого есть неотправленная локальная правка.
+  // Признак правки — её метка записи (section-writes): её ставит saveX вне
+  // нормализующего чтения. Раздел без метки — дефолт первого запуска, и
+  // серверный конверт обязан приехать (см. qaza-clean-device.test.mjs).
+  const sectionWrites = { qaza: LOCAL_TS + 1, prayer: LOCAL_TS + 1, fast: LOCAL_TS + 1 };
+  const merged = merge(baseLocal(), baseCloud(), { pending: true, sectionWrites });
   assert.equal(merged.qaza.cursor, 3);
   assert.equal(merged.prayer.madhhab, 'hanafi');
   assert.equal(merged.fast.remaining, 2);

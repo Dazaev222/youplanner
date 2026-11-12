@@ -949,10 +949,17 @@ export function mergeCloudIntoLocal(local, cloud, opts) {
         // раздела на отправителе (P1-3). Раздел без конверта — старый
         // клиент: решает cloudWins (метка раздела/снимка против последней
         // сверки), он же работает, когда обе стороны без конвертов.
-        // Правка, которой сервер не видел (pending), цельными разделами
-        // не затирается вовсе — конвертные строки пропускаются.
-        if (!row.envelope || pending) break;
+        // Правка, которой сервер не видел (pending), не затирается — но
+        // только если раздел ДЕЙСТВИТЕЛЬНО правили локально. Метка записи
+        // (section-writes) ставится saveX вне нормализующего чтения; у дефолта
+        // первого запуска её нет, и это не правка. Глобальный pending при этом
+        // мог прийти из другого раздела (или из события 'online') — пропускать
+        // из-за него весь конверт значит оставить дефолт и затереть сервер
+        // (баг владельца 2026-11-12: на новом устройстве qaza оставался
+        // 305/306/306/305/305 вместо серверных чисел).
+        if (!row.envelope) break;
         const incoming = unwrapSection(cloud[row.name]);
+        if (pending && (Number(writes[row.name]) || 0) > 0) break;
         // emptyWins 'always' (schedule): гейта hasData исторически нет —
         // пустой календарь тоже состояние, которое должно приехать.
         if (row.validate(incoming.v) && (row.emptyWins === 'always' || hasData(incoming.v)) &&
@@ -976,8 +983,11 @@ export function mergeCloudIntoLocal(local, cloud, opts) {
         // Журнал каза: аддитивное слияние только без pending
         // (skipWhenPending) — pending-правка может быть отменой записи
         // (dropLastQazaLog), и возврат записи с сервера сломал бы отмену.
-        // Журнала локально нет — берём серверный целиком.
-        if (pending && row.skipWhenPending) break;
+        // Но pending защищает только СВОЙ журнал: если локального нет
+        // (чистое устройство), серверный обязан приехать — иначе отмена
+        // записи на новом устройстве недоступна, а PUT затрёт серверный
+        // журнал пустотой.
+        if (pending && row.skipWhenPending && hasData(local[row.name])) break;
         const value = cloud[row.name];
         if (!row.validate(value) || !hasData(value)) break;
         merged.qazaLog = local.qazaLog
