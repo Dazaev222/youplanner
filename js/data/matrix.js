@@ -35,6 +35,7 @@ import {
 } from './storage.js';
 import { safeSetItem } from '../core/storage.js';
 import { DAY_MS, addDays, isDateLike, parseISODate, toISODate } from '../core/dates.js';
+import { isPlainObject, isoDateOrNull } from '../core/struct.js';
 import {
   SCHEDULE_VERSION,
   cloneSchedule,
@@ -70,15 +71,12 @@ export const QUADRANTS = [
   { id: 'q4', numeral: 'IV', title: 'Не срочно и не важно', hint: 'ни то, ни другое' },
 ];
 
-// Дата-строка или null. Проверка кругом: parseISODate на мусоре возвращает
-// Invalid Date (объект, а не false), а '2026-13-45' Date разворачивает в
-// другую дату. Без этого битая строка из хранилиса оседала бы в модели и
-// рисовалась в карточке.
-function isoOrNull(value) {
-  if (typeof value !== 'string') return null;
-  const parsed = parseISODate(value);
-  return isDateLike(parsed) && toISODate(parsed) === value ? value : null;
-}
+// Дата-строка или null — общий примитив isoDateOrNull (js/core/struct.js,
+// YP-08); прежнее имя — алиас, чтобы не трогать места вызова. Отличие от
+// прежней локальной копии: общий примитив дополнительно требует строгий
+// формат YYYY-MM-DD, годы не из четырёх цифр (Date их и так не даёт вернуть
+// круглым обходом) теперь отбрасываются.
+const isoOrNull = isoDateOrNull;
 
 // «Сегодня» приходит аргументом, чтобы квадрант можно было проверить без
 // часов машины. isDateLike — из js/core/dates.js: в песочнице node:vm Date из
@@ -188,9 +186,9 @@ export function loadTasksReport() {
   return { tasks, issues, broken: false };
 }
 
-function plainObject(value) {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}
+// Общий предикат «plain object» (js/core/struct.js, YP-08): прежнее имя —
+// алиас, чтобы не трогать места вызова.
+const plainObject = isPlainObject;
 
 export function newTaskId() {
   // Тот же стиль id, что у привычек: префикс + время основания + случай,

@@ -20,7 +20,7 @@ import {
   qazaStreak,
 } from '../data/stats.js';
 import { FAST_KEY } from '../data/fast.js';
-import { QAZA_HABIT_ID, QAZA_STORAGE_KEY } from '../data/qaza.js';
+import { QAZA_HABIT_ID, QAZA_STORAGE_KEY, copyQaza, qazaTotalRemaining } from '../data/qaza.js';
 import { SLEEP_KEY } from '../data/sleep.js';
 import { STORAGE_KEYS } from '../data/storage.js';
 
@@ -100,11 +100,17 @@ export function buildHabitsAnalysisSnapshot(today) {
     for (let i = 0; i < dates.length; i++) {
       done += qazaDoneOn(records, dates[i]);
     }
+    // Очередь хранится объектом {version, cursor, remaining, history}
+    // (saveQaza, js/data/qaza.js), поэтому остаток — сумма remaining.
+    // copyQaza валидирует значения: мусор в ключе даёт нули, а не NaN
     const queue = readStoredSection(QAZA_STORAGE_KEY);
+    const queueLeft = queue && typeof queue.remaining === 'object' && queue.remaining
+      ? qazaTotalRemaining(copyQaza(queue))
+      : 0;
     lines.push('Каза-намазы: серия ' + qazaStreak(records, today) + ' дн., '
       + 'выполнено ' + done + ' за ' + ANALYSIS_DAYS + ' дней'
-      + (typeof queue === 'number' && queue > 0
-        ? ', в очереди ' + queue
+      + (queueLeft > 0
+        ? ', в очереди ' + queueLeft
         : ''));
   }
 

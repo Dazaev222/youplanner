@@ -1,3 +1,45 @@
+// v59 (v58 -> v59): аудит 2026-11-13 — Low-фиксы и дедупликация (YP-08).
+// Дедупликация: четыре предиката «plain object» и две проверки ISO-даты
+// сведены в новый общий модуль js/core/struct.js (добавлен в ASSETS).
+// Низкие находки правили код: js/app.js, js/data/matrix-schedule.js,
+// js/data/matrix.js, js/data/records.js, js/data/sleep.js,
+// js/data/storage.js, js/sync/apply-engine.js, js/sync/merge.js,
+// js/sync/sections.js, js/sync/sync.js, js/ui/assistant-analysis.js,
+// js/ui/assistant-view.js, js/ui/matrix-view.js, sw.js и тесты
+// tests/assistant-analysis.test.mjs, tests/assistant.test.mjs,
+// tests/e2e/user-crash.e2e.mjs, tests/matrix-calendar.test.mjs,
+// tests/planner-sync.test.mjs, tests/qaza-clean-device.test.mjs,
+// tests/sync-retry.test.mjs, tests/sync.test.mjs.
+// v58 (v57 -> v58): дескрипторная sync-архитектура (АДР 2026-11-08) —
+// applyCloudData/applyMergedFromCloud/mergeCloudIntoLocal разложены на
+// таблицу CLOUD_SECTIONS (js/sync/sections.js) и два движка:
+// js/sync/apply-engine.js (writeStaged — единственная атомарная запись
+// «все или ничего» + generic-луп снимка) и js/sync/merge-engine.js
+// (ключи и метки из дескрипторов); js/sync/merge.js — луп по таблице
+// (mergeSectionKey удалён), js/sync/sync.js ужат до транспорта и гейтов
+// новизны, js/sync/core.js — флаг syncing + setSyncing; три модуля
+// добавлены в ASSETS. Новый постоянный гейт гонки двух устройств на
+// честном моке Firebase (ETag/If-Match/412): tests/e2e/sync-race.e2e.mjs
+// (tests/helpers/sources.mjs, tests/smoke.test.mjs).
+// v57 (v56 -> v57): bindEvents (832 строки, 124 слушателя) вынесен из
+// js/app.js в три модуля-обработчика — таблица/список, навигация, хаб
+// статистики, периоды, правка привычек, таб-бар (js/events/nav-events.js);
+// синк, владелец, экспорт/импорт, фон, форма привычки
+// (js/events/sync-data-events.js); ассистент, каза, ураза, расписание,
+// клавиатура/шторки (js/events/screens-events.js) — три файла добавлены
+// в ASSETS, тесты-стражи лонг-пресса перепривязаны на новый модуль
+// (tests/assistant-delete.test.mjs, tests/assistant-longpress.test.mjs).
+// Под v57 кэша ушли и аудит-фиксы между бампами: адопция серверных
+// привычек не отменяет непогашенное удаление всех привычек (js/sync/sync.js),
+// импорт копии — records через validCloudRecords, лимит file.size 5 МБ
+// (js/app.js, js/data/backup.js).
+// v56 (v55 -> v56): краш-тесты ПК — аккордеон «Редактирования привычек»
+// раскрывается на ПК (styles/habits-edit.css), Матрица Эйзенхауэра
+// доступна на ПК (index.html, js/app.js, js/ui/matrix-view.js,
+// styles/mobile.css, tests/e2e/user-crash.e2e.mjs); low-замечания ревью —
+// четвёртая копия pluralDays, boolean-контракт saveStatsPeriod/saveQazaLog,
+// устаревший комментарий (js/data/matrix-schedule.js, js/data/qaza.js,
+// js/data/stats.js, js/sync/sync.js, tests/planner-sync.test.mjs).
 // v55 (v54 -> v55): набор гипотез Г1–Г5 (аудит сети и дубликатов).
 // Г1: контрольный GET перед корневым PUT убран — гонку B.2 закрывает
 // условная запись (If-Match → 412 → перечитывание → слияние → повтор),
@@ -85,9 +127,7 @@
 // table.css, sparkline.css → stats.css, background.css → settings.css),
 // ui/constants.js слит в ui/state.js; правила перенесены дословно, порядок
 // каскада сохранён.)
-// (v57 — три новых модуля-обработчика bindEvents: js/events/nav-events.js,
-// js/events/sync-data-events.js, js/events/screens-events.js — пилот Фабрики
-// 2026-11-08. v47: эмодзи вместо SVG-трендов в пунктах меню статистики (index.html,
+// (v47: эмодзи вместо SVG-трендов в пунктах меню статистики (index.html,
 // js/ui/stats-view.js, styles/mobile.css, стили спарклайнов — теперь в
 // styles/stats.css) и стили календаря/матрицы по замеру TickTick — серые
 // поля вместо синих рамок, iOS-тумблер «Весь день», радиусы/зазоры/паддинги,
@@ -95,7 +135,7 @@
 // (v46 — правка текстовая (в комментарии js/data/matrix.js:771 перепутались
 // алфавиты), v45 — четыре файла после v44, v44 — восемь файлов аудита,
 // v43 — транспорт plannerV1, v42 — пересобранная вёрстка Матрицы.)
-const CACHE = 'youplanner-v58';
+const CACHE = 'youplanner-v59';
 // Иконки — все из manifest.json: отсутствующая в кэше иконка ломала бы
 // офлайн-установку PWA (аудит 2026-10-31: icon-512.png не кэшировался)
 const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon-512.png', './icon.svg',
@@ -110,6 +150,8 @@ const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './ic
   // офлайн-PWA разбирает файлы без сети
   './js/vendor/pdf.min.mjs', './js/vendor/pdf.worker.min.mjs',
   './js/data/firebase-auth.js',
+  // Общие примитивы структуры значений (аудит 2026-11-13, YP-08)
+  './js/core/struct.js',
   './js/sync/sync.js',
   // Движки применения облачного снимка (АДР 2026-11-08): дескрипторная
   // таблица + путь снимка + путь гонки

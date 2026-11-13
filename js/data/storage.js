@@ -5,6 +5,7 @@
 // не должен покидать устройство, а поведение ассистента — настройка конкретного
 // устройства (обоснование — в шапке js/ui/assistant-view.js).
 import { safeSetItem } from '../core/storage.js';
+import { isPlainObject } from '../core/struct.js';
 
 export const STORAGE_KEYS = {
   habits: 'youplanner.habits',
@@ -38,9 +39,9 @@ export const STORAGE_KEYS = {
 // одна строка целиком через safeSetItem: либо всё, либо ничего; false
 // означает «хранилище отвергло, прежние байты не тронуты».
 
-function plannerPlainObj(value) {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}
+// Общий предикат «plain object» (js/core/struct.js, YP-08): прежнее имя —
+// алиас, чтобы не трогать места вызова.
+const plannerPlainObj = isPlainObject;
 
 // Случайный стабильный идентификатор установки — НЕ пользовательские данные.
 // crypto.randomUUID есть не везде (Safari < 16.4, песочница node:vm),

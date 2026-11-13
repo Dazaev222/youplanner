@@ -882,6 +882,49 @@ test('Б7 «Настроить»: свои даты становятся пра�
   assert.deepEqual(Array.from(draft(app).schedule.repeat.dates), [iso(9)], 'дата снята');
 });
 
+// Аудит 2026-11-13 (YP-04): недобранное правило жило в calRepeatEdit и
+// сбрасывалось только в onEscape, по пресету и по «Применить». Клик по
+// подложке листа (calSheetLayer: removeOverlay напрямую) и срыв листа даты
+// всей семьёй обходили сброс — следующее открытие подставляло чужое
+// полусобранное правило.
+test('YP-04 срыв слоя «Повтор» без onEscape выбрасывает недобранное правило', (t) => {
+  const app = loadApp();
+  const dom = installMatrixDom(app);
+  openComposer(app, dom, 'q2');
+  openCalendar(app, dom);
+  clickDay(dom, iso(0));
+
+  // Частично собираем правило (интервал 3), «Применить» не нажимаем
+  oneByClass(dom.host, 'matrix-repeat-row').fire('click');
+  const interval = oneByClass(dom.host, 'matrix-repeat-interval');
+  interval.value = '3';
+  interval.fire('change');
+  assert.equal(oneByClass(dom.host, 'matrix-repeat-interval').value, '3',
+    'редерендер обязан помнить недобранный выбор');
+
+  // Клик по подложке листа повтора: removeOverlay('repeat') без onEscape
+  const backdrop = findByClass(dom.host, 'matrix-sheet-backdrop')
+    .filter(node => node.classList.contains('is-repeat'))[0];
+  assert.ok(backdrop, 'подложка листа повтора открыта');
+  backdrop.fire('click');
+
+  // Открываем снова: правило начинается с нуля, а не с чужой тройки
+  oneByClass(dom.host, 'matrix-repeat-row').fire('click');
+  assert.equal(oneByClass(dom.host, 'matrix-repeat-interval').value, '1',
+    'полусобранное правило не должно переживать срыв слоя');
+
+  // Второй путь демонтажа: срыв листа даты уносит «Повтор» семьёй
+  // (overlayFamily('date') захватывает дочерний 'repeat'); состояние правила
+  // живёт в top-level let модуля — читается из той же лексической области
+  oneByClass(dom.host, 'matrix-repeat-interval').value = '4';
+  oneByClass(dom.host, 'matrix-repeat-interval').fire('change');
+  assert.equal(app.run('calRepeatEdit && calRepeatEdit.interval'), 4,
+    'недобранное правило должно жить в состоянии модуля');
+  app.context.removeOverlay('date');
+  assert.equal(app.run('calRepeatEdit'), null,
+    'срыв листа даты семьёй тоже должен выбрасывать недобранное правило');
+});
+
 test('Б7.6 выполнение повторяющейся задачи даёт completed + next одним действием', (t) => {
   const app = loadApp();
   const dom = installMatrixDom(app);

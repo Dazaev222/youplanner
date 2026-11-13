@@ -72,7 +72,7 @@ export function loadRecords() {
     }
     // День может приехать битым (null вместо объекта) с чужого устройства
     // или из старой версии. Отсеваем по критерию дня validCloudRecords
-    // (js/sync/core.js:100-101): иначе перебор дней в hasRecords/removeHabit
+    // (js/sync/core.js): иначе перебор дней в hasRecords/removeHabit
     // падает на hasOwnProperty.call(null, ...). Собираем новый объект —
     // кэш-инвариант «тот же объект уходит в saveRecords» сохранён.
     const days = {};

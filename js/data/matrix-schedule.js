@@ -18,6 +18,7 @@
    Перевод часов не сдвигает ни срок, ни длительность all-day. */
 
 import { DAY_MS, isDateLike, parseISODate, pluralDays, toISODate } from '../core/dates.js';
+import { isPlainObject, isoDateOrNull } from '../core/struct.js';
 
 export const SCHEDULE_VERSION = 1;
 
@@ -50,25 +51,17 @@ const MAX_MONTH_SEARCH = 1200;
 
 /* --- Примитивы проверки --------------------------------------------------- */
 
-function isoDateOrNull(value) {
-  if (typeof value !== 'string') return null;
-  const parts = value.split('-');
-  if (parts.length !== 3) return null;
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return null;
-  const parsed = parseISODate(value);
-  // Круглая проверка: '2026-11-31' Date разворачивает в 1 декабря, и молча
-  // принять такую дату означало бы хранить не то, что человек выбрал.
-  return isDateLike(parsed) && toISODate(parsed) === value ? value : null;
-}
+// isoDateOrNull — общий примитив js/core/struct.js (аудит 2026-11-13, YP-08):
+// одна копия проверки ISO-даты для хранилища и Матрицы.
 
 function timeOrNull(value) {
   if (typeof value !== 'string') return null;
   return /^([01]\d|2[0-3]):([0-5]\d)$/.test(value) ? value : null;
 }
 
-function isRecord(value) {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}
+// Общий предикат «plain object» (js/core/struct.js, YP-08): прежнее имя —
+// алиас, чтобы не трогать десятки мест вызова.
+const isRecord = isPlainObject;
 
 // Строгий целый: числа из JSON не приводятся из строк (Б3.5), NaN и Infinity
 // не проходят, дробные отбрасываются.

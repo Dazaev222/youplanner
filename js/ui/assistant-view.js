@@ -661,10 +661,13 @@ function buildContext(contextDays) {
 
   const qaza = readSection(QAZA_STORAGE_KEY);
   if (qaza) parts.push('Очередь каза-намазов: ' + compact(qaza, 500));
-  const qazaLog = readSection(QAZA_LOG_KEY);
-  if (Array.isArray(qazaLog)) {
-    parts.push('Журнал выполнений каза: всего ' + qazaLog.length
-      + ', последние: ' + compact(qazaLog.slice(-5), 400));
+  // Журнал хранится объектом {version, since, entries} (saveQazaLog,
+  // js/data/qaza.js), записи лежат в поле entries
+  const log = readSection(QAZA_LOG_KEY);
+  const entries = log && Array.isArray(log.entries) ? log.entries : [];
+  if (entries.length) {
+    parts.push('Журнал выполнений каза: всего ' + entries.length
+      + ', последние: ' + compact(entries.slice(-5), 400));
   }
   const fast = readSection(FAST_KEY);
   if (fast !== null) parts.push('Счётчик уразы: ' + compact(fast, 300));

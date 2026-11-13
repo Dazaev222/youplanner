@@ -231,6 +231,9 @@ export function sleepHistoryEntry(history, entry) {
 // хаба, — и жить оно должно в одном месте: разложенное по экранам, оно
 // разъезжается при первой же правке. excluded — явное «не считать этот день»:
 // человек сам его назвал, и день не попадает ни в средние, ни в график.
+// Проверка дня — Set, а не проход по dates на каждую запись: dates
+// сворачивается в него один раз, и скан остаётся линейным по истории,
+// как бы ни разросся период. Для дат-строк поведение то же, что у ===
 // Порядок истории сохраняется: записи идут по дням, и график складывается сам.
 // Возвращается новый массив — история читается и в других местах, и фильтрация
 // не должна её трогать
@@ -238,18 +241,12 @@ export function sleepEntriesInPeriod(history, dates) {
   if (!Array.isArray(history)) return [];
   if (!Array.isArray(dates) || dates.length === 0) return [];
 
+  const period = new Set(dates);
   const result = [];
   for (let i = 0; i < history.length; i++) {
     const entry = history[i];
     if (entry.excluded === true) continue;
-    let inPeriod = false;
-    for (let j = 0; j < dates.length; j++) {
-      if (entry.date === dates[j]) {
-        inPeriod = true;
-        break;
-      }
-    }
-    if (inPeriod) result.push(entry);
+    if (period.has(entry.date)) result.push(entry);
   }
   return result;
 }

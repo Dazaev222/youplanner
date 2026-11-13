@@ -212,7 +212,12 @@ function adoptServerHabitsIfLocalEmpty(data) {
     return !(typeof ts === 'number' && Number.isFinite(ts));
   });
   if (!hasData(habits)) return;
-  localStorage.setItem(STORAGE_KEYS.habits, JSON.stringify(habits));
+  // safeSetItem, как во всём sync-слое: сырой setItem при исчерпанной квоте
+  // бросал в catch syncFromCloud — сервер помечался недоступным (он ведь
+  // ответил), и settleHabitsAfterSync сеял офлайн-дефолты поверх непринятого
+  // серверного списка. false — запись не прошла: выходим, не трогая
+  // reachable и не отрывая надгробия; storage:error safeSetItem эмитит сам
+  if (!safeSetItem(STORAGE_KEYS.habits, JSON.stringify(habits))) return;
   // Привычки вернулись в список — их надгробия (если чудом остались)
   // больше не нужны: висящая метка блокировала бы привоз этой привычки
   // на других устройствах. Надгробия непривезённых — след ещё не виденных

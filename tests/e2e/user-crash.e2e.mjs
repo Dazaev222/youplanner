@@ -718,7 +718,7 @@ async function main() {
     assert.ok(clickLatency < 3000, `интерфейс отвечает ${clickLatency} мс — завис?`);
     assert.deepEqual(page.errorsCollected, [], `pageerror офлайна: ${page.errorsCollected.join(' | ')}`);
 
-    // Сеть вернулась: 'online' → scheduleSync → PUT доезжает и принят моком
+    // Сеть вернулась: 'online' → немедленный syncToCloud (sync.js) → PUT доезжает и принят моком
     await context.setOffline(false);
     const seenAt = Date.now();
     const put = await page.net.waitFor(

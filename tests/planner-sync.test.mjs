@@ -104,6 +104,31 @@ test('normalizePlannerV1: мусор отвергается целиком, би
   assert.ok(dirty.issues.length >= 2, 'отбрасывание без причины — молчаливая потеря');
 });
 
+// YP-09 (аудит 2026-11-13): запись без объекта fields (или с полями-мусором)
+// отбрасывается ещё на входе в цикл полей (broken-entry + continue) —
+// нормализация не падает и не теряет причину. Регрессионная страховка
+// инварианта, по которому в цикле полей не нужна повторная проверка
+// plannerPlainObject(source.fields).
+test('normalizePlannerV1: запись без объекта fields отбрасывается, нормализация не роняется', () => {
+  const result = normalizePlannerV1({
+    schemaVersion: PLANNER_SCHEMA_VERSION,
+    entries: {
+      good: entry('good', { title: fld('Есть', 1, 'a1') }),
+      noFields: { id: 'noFields' },
+      fieldsNull: { id: 'fieldsNull', fields: null },
+      fieldsGarbage: { id: 'fieldsGarbage', fields: 'мусор' },
+      fieldsArray: { id: 'fieldsArray', fields: [] },
+    },
+  });
+  assert.equal(result.ok, true, 'битая запись не роняет раздел целиком');
+  assert.deepEqual(Object.keys(result.snapshot.entries), ['good']);
+  assert.ok(result.issues.length >= 4, 'отбрасывание без причины — молчаливая потеря');
+  for (const issue of result.issues) {
+    assert.equal(issue.code, 'broken-entry',
+      'причина отбрасывания теряться не должна: ' + JSON.stringify(issue));
+  }
+});
+
 // ── cmpPlannerVersion ───────────────────────────────────────────────────────
 
 test('cmpPlannerVersion: лексикографически (counter, actorId), часы не при чём', () => {

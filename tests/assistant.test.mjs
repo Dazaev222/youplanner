@@ -772,6 +772,35 @@ test('buildContext: contextDays задаёт окно записей в сним
     'склонение «21 дней» — уродливо: ' + system.slice(0, 300));
 });
 
+test('buildContext: журнал каза из живой формы хранилища {version, since, entries} попадает в снимок', () => {
+  const { sandbox, context } = loadApp();
+  // Форма saveQazaLog (js/data/qaza.js): объект с полем entries, а не массив.
+  // 7 записей: в «последние» должны попасть ровно пять последних дат
+  const entries = [];
+  for (let d = 1; d <= 7; d++) {
+    entries.push({
+      date: '2026-10-0' + d,
+      namaz: 'zuhr',
+      source: 'done',
+    });
+  }
+  sandbox.localStorage.setItem('youplanner.qaza.log', JSON.stringify({
+    version: 1,
+    since: '2026-10-01',
+    entries: entries,
+  }));
+
+  const system = context.buildMessages()[0].content;
+  assert.ok(system.indexOf('Журнал выполнений каза: всего 7, последние: ') !== -1,
+    'журнал каза должен попасть в снимок в форме хранилища: '
+      + system.slice(-600));
+  assert.ok(system.indexOf('2026-10-07') !== -1, 'последняя запись потерялась');
+  assert.ok(system.indexOf('2026-10-03') !== -1, 'запись из последних пяти потерялась');
+  assert.ok(system.indexOf('2026-10-01') === -1
+    && system.indexOf('2026-10-02') === -1,
+    'в «последние» попали записи за пределами slice(-5)');
+});
+
 test('payload: temperature и max_tokens из персонализации уходят в тело запроса', async () => {
   const bodies = [];
   const fetchImpl = (_url, opts) => {

@@ -412,6 +412,42 @@ test('syncFromCloud при отвергнутом снимке: сервер п�
     'sync:applied эмитился на отвергнутом снимке');
 });
 
+// Аудит 2026-11-13 (YP-03): адопция привычек при пустом списке писала ключ
+// сырым localStorage.setItem — единственным в sync-слое. Квота на этой записи
+// бросала в catch syncFromCloud: сервер помечался недоступным (reachable:false),
+// хотя он ответил, и settleHabitsAfterSync сеял офлайн-дефолты поверх
+// непринятого серверного списка. safeSetItem эмитит storage:error и возвращает
+// false — reachable при этом не трогается.
+test('квота на адопции привычек: сервер остаётся доступным, storage:error эмитится', async () => {
+  // Без updatedAt: снимок не «новее» локального — сработает ветка адопции
+  const snapshot = { habits: [habit()] };
+  const fetchImpl = (url) => {
+    if (String(url).includes('-planner')) {
+      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(null) });
+    }
+    return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(snapshot) });
+  };
+  const app = loadApp({ fetchImpl });
+  // Планировщик пуст (ключа youplanner.habits нет) — адопция берёт серверный список
+  const patch = failOnNthSetItem(app.sandbox.localStorage, 1);
+  app.run(`
+    globalThis.__storageError = 0;
+    bus.on('storage:error', () => { globalThis.__storageError++; });
+  `);
+
+  const result = await app.context.syncFromCloud();
+
+  assert.equal(patch.calls, 1, 'инъекция не попала в запись адопции');
+  assert.equal(result.reachable, true,
+    'сервер ответил — квота локальной записи не должна выглядеть как сетевой сбой');
+  assert.equal(app.run('cloudReachable'), true,
+    'флаг доступности не должен роняться: settleHabitsAfterSync иначе сеет офлайн-дефолты');
+  assert.equal(app.run('globalThis.__storageError'), 1,
+    'о квоте должно быть сообщено через storage:error');
+  assert.equal(app.sandbox.localStorage.getItem('youplanner.habits'), null,
+    'запись не прошла — серверный список не должен числиться принятым');
+});
+
 // database.rules.json привязан к auth.uid владельца. Пока устройство не вошло
 // в постоянный аккаунт (или сессия потеряна), сервер отвечает 401/403
 // PERMISSION_DENIED — а для интерфейса это неотличимо от «нет сети»: человек

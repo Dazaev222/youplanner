@@ -28,7 +28,13 @@ function seed(sandbox, context) {
   records['2026-11-01'] = { h1: true, h6: 1, h8: 3 };
   sandbox.localStorage.setItem('youplanner.records', JSON.stringify(records));
   sandbox.localStorage.setItem('youplanner.habits', JSON.stringify(HABITS));
-  sandbox.localStorage.setItem('youplanner.qaza', JSON.stringify(5));
+  // Форма saveQaza (js/data/qaza.js): объект {version, cursor, remaining,
+  // history}, а не число — сумма остатков 5
+  sandbox.localStorage.setItem('youplanner.qaza', JSON.stringify({
+    version: 3, cursor: 0,
+    remaining: { fajr: 1, zuhr: 1, asr: 1, maghrib: 1, isha: 1 },
+    history: [],
+  }));
   sandbox.localStorage.setItem('youplanner.qaza.fast', JSON.stringify({ count: 12 }));
   sandbox.localStorage.setItem('youplanner.sleep', JSON.stringify({ bed: '23:00' }));
   // Записи могли уже попасть в кэш records.js при старте песочницы

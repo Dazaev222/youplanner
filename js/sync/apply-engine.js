@@ -160,7 +160,7 @@ export function applyCloudData(data, ts) {
       if (row.skipWhenPending && syncPending) continue;
       // Нормализация ДО гейтов пустоты: у tombstones валидатор возвращает
       // уже очищенный объект, и прежний гейт шёл по очищенному значению
-      // (sync.js:380-381). Для fast/qazaLog/sleep порядок не меняет ничего:
+      // (гейт в applyCloudData). Для fast/qazaLog/sleep порядок не меняет ничего:
       // их нормализованные объекты непусты тогда же, когда и сырые.
       let stored = row.normalize ? row.normalize(value) : value;
       if (row.emptyWins === 'ifLocalEmpty' && !(hasData(stored) || !hasData(local[row.name]))) continue;

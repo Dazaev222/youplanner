@@ -33,6 +33,7 @@ import { hasData, mergeTombstonesById } from './core.js';
 import { CLOUD_SECTIONS } from './sections.js';
 import { validQazaLogEntries } from '../data/qaza.js';
 import { validSleepHistory } from '../data/sleep.js';
+import { isPlainObject } from '../core/struct.js';
 
 // ── plannerV1: ядро слияния области планирования (ТЗ §1.3) ─────────────────
 // Узел plannerV1 = {schemaVersion, entries, settings, tombstones}: Матрица и
@@ -58,9 +59,10 @@ export const PLANNER_SCHEMA_VERSION = 1;
 const PLANNER_ID_MAX = 256;
 const PLANNER_ACTOR_MAX = 128;
 
-function plannerPlainObject(value) {
-  return !!value && typeof value === 'object' && !Array.isArray(value);
-}
+// Общий предикат «plain object» (js/core/struct.js, YP-08): прежнее имя —
+// алиас, песочница склеивает модули в одну область видимости, и повторное
+// объявление сломало бы конкатенацию.
+const plannerPlainObject = isPlainObject;
 
 function plannerValidId(value) {
   return typeof value === 'string' && value !== '' && value.length <= PLANNER_ID_MAX;
@@ -180,7 +182,10 @@ export function normalizePlannerV1(raw) {
           if (!cleaned) { broke = true; continue; }
           fields[name] = cleaned;
         }
-        if (!plannerPlainObject(source.fields)) broke = true;
+        // Повторная проверка plannerPlainObject(source.fields) здесь не нужна:
+        // запись без объекта fields отброшена continue'ом на входе в цикл
+        // полей (broken-entry), source.fields в цикле не переприсваивается
+        // (YP-09, аудит 2026-11-13).
         if (broke && Object.keys(fields).length === 0) continue;
         snapshot.entries[id] = { id: id, fields: plannerSortedMap(fields) };
       }

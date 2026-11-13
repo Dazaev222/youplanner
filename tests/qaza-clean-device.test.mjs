@@ -166,7 +166,7 @@ test('чистое устройство: pending-правка в другом р
 });
 
 test('online не взводит pending: событие сети — не правка данных', () => {
-  // Слушатель 'online' навешивается на загрузке модуля (app.js), init не нужен.
+  // Слушатель 'online' навешивается на загрузке модуля (sync.js), init не нужен.
   const app = loadApp();
   assert.equal(app.run('syncPending'), false);
   app.dispatchWindowEvent('online');

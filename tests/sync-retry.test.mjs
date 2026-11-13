@@ -254,9 +254,9 @@ test('C. online после сетевого сбоя: начинается но�
   fetchImpl.setUp(true);
   app.dispatchWindowEvent('online');
 
-  // Окно меньше SYNC_DEBOUNCE_MS (1500): на текущем коде app.js уже слушает
-  // online через scheduleSync — тот сработал бы только через 1.5 с. Фикс
-  // обязан начать обмен НЕМЕДЛЕННО, иначе тест красный.
+  // Окно меньше SYNC_DEBOUNCE_MS (1500): обмен обязан начаться НЕМЕДЛЕННО
+  // (обработчик 'online' в sync.js зовёт syncToCloud напрямую) — иначе тест
+  // красный.
   const ok = await waitFor(function () {
     return mainPuts(fetchImpl).length >= 1 &&
       app.sandbox.localStorage.getItem('youplanner.sync.ts') !== '1';
@@ -265,7 +265,41 @@ test('C. online после сетевого сбоя: начинается но�
   assert.notEqual(app.sandbox.localStorage.getItem('youplanner.sync.ts'), '1',
     'метка сверки не записана после успешного online-обмена');
 
-  // Гасим дебаунс app.js (scheduleSync на том же 'online'): он сделал бы
-  // второй обмен через 1.5 с и удерживал бы процесс лишние полторы секунды
+  // Дубль слушателя app.js на 'online' убран (YP-06), второго дебаунса нет.
+  // Строчка остаётся страховкой: погасить syncTimer, если кто-то его взвёл,
+  // чтобы тест не держал процесс лишние полторы секунды.
   app.run('if (syncTimer) { clearTimeout(syncTimer); syncTimer = null; }');
+});
+
+// YP-06: 'online' должен обрабатывать ТОЛЬКО sync.js (немедленный
+// syncToCloud). Второй слушатель в app.js (scheduleSync({pending:false}))
+// ставил ещё один обмен через 1.5 с — на каждое возвращение сети уходили
+// два корневых PUT. Здесь ловим сам симптом: после первого (немедленного)
+// обмена окно наблюдения больше SYNC_DEBOUNCE_MS (1500), и корневых PUT
+// должно остаться ровно один.
+test('D. online порождает ровно один обмен: дубль слушателя в app.js удалён', async () => {
+  const fetchImpl = makeFlakyFetch();
+  const app = loadApp({ fetchImpl });
+  app.context.markCloudReady();
+  app.sandbox.localStorage.setItem('youplanner.sync.ts', '1');
+
+  // Сеть вниз: прогревочный обмен без отправок (он взводит фоновый ретрай —
+  // dispatch('online') ниже гасит его через resetCasRetryAfterSuccess)
+  await app.context.syncToCloud();
+  assert.equal(mainPuts(fetchImpl).length, 0);
+
+  fetchImpl.setUp(true);
+  app.dispatchWindowEvent('online');
+
+  const ok = await waitFor(function () {
+    return mainPuts(fetchImpl).length >= 1;
+  }, 900);
+  assert.ok(ok, 'после online первый обмен не начался');
+
+  // Окно наблюдения: 1700 > SYNC_DEBOUNCE_MS (1500). На коде с дублем
+  // слушателя второй корневый PUT приезжает в этом окне — тест красный.
+  await new Promise((resolve) => setTimeout(resolve, 1700));
+  assert.equal(mainPuts(fetchImpl).length, 1,
+    'online породил второй корневой PUT: остался дубль слушателя ' +
+    '(mainPuts=' + mainPuts(fetchImpl).length + ')');
 });

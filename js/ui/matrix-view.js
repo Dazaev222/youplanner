@@ -278,6 +278,16 @@ function overlayFamily(id) {
 function removeOverlay(id) {
   if (!overlays.some(layer => layer.id === id)) return false;
   const doomed = overlayFamily(id);
+  // Слой «Повтор» срывается не только через onEscape (клик по подложке
+  // calSheetLayer, срыв листа даты всей семьёй): недобранное правило
+  // в calRepeatEdit пережило бы демонтаж и подставилось бы при следующем
+  // открытии. Единая точка демонтажа — здесь; редерендер открытого листа
+  // спасает своё состояние в calOpenRepeat.
+  if (doomed.has('repeat')) {
+    calRepeatEdit = null;
+    calRepeatFocus = null;
+    calRepeatNotice = '';
+  }
   overlays = overlays.filter(layer => {
     if (!doomed.has(layer.id)) return true;
     if (layer.node && layer.node.remove) layer.node.remove();
@@ -2206,11 +2216,18 @@ function calOpenRepeat() {
     calBlockWithoutDate('повтор');
     return;
   }
+  // Редерендер открытого листа — не демонтаж: недобранный выбор, фокус и
+  // подсказку спасаем до снятия слоя (removeOverlay теперь сбрасывает
+  // состояние повтора) и возвращаем после
+  const keep = calRepeatEdit;
+  const keepFocus = calRepeatFocus;
+  const keepNotice = calRepeatNotice;
   removeOverlay('repeat');
-  if (!calRepeatEdit) calRepeatEdit = calCloneRepeat(calendarDraft.repeat);
+  if (!calRepeatEdit) calRepeatEdit = keep || calCloneRepeat(calendarDraft.repeat);
   const edit = calRepeatEdit;
   const controls = {};
-  const notice = calRepeatNotice;
+  calRepeatFocus = keepFocus;
+  const notice = keepNotice;
   calRepeatNotice = '';
 
   const rerender = (key) => {
