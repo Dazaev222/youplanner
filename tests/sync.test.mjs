@@ -15,16 +15,24 @@ function makeFetch() {
   const calls = [];
   let active = 0;
   let maxActive = 0;
+  // YP-05: ключи, «уже лежащие» в узле бэкапов (shallow GET вернёт их).
+  fetchImpl.backupsKeys = [];
 
   function responseBody(url, method) {
-    if (method === 'GET' && String(url).includes('backups')) return [];
-    if (method === 'GET') return {};
+    const u = String(url);
+    if (method === 'GET' && u.includes('backups')) {
+      if (u.includes('shallow=true')) {
+        return Object.fromEntries(fetchImpl.backupsKeys.map((k) => [k, null]));
+      }
+      return [];
+    }
+    if (method === 'GET') return { updatedAt: 42 };
     return {};
   }
 
   function fetchImpl(url, opts = {}) {
     const method = (opts && opts.method) || 'GET';
-    calls.push({ url: String(url), method });
+    calls.push({ url: String(url), method, body: (opts && opts.body) || null });
     active += 1;
     if (active > maxActive) maxActive = active;
     return Promise.resolve().then(() => {
@@ -51,6 +59,47 @@ function makeFetch() {
   };
   return fetchImpl;
 }
+
+test('YP-05: копия кладётся отдельным ребёнком /backups/{key}.json — одним снимком', async () => {
+  const fetchImpl = makeFetch();
+  const { context } = loadApp({ fetchImpl });
+  await context.syncToCloud();
+  const backupPuts = fetchImpl.stats.calls.filter((c) =>
+    c.method === 'PUT' && c.url.includes('-backups'));
+  assert.equal(backupPuts.length, 1,
+    `PUT-ов в узел бэкапов: ${backupPuts.length}`);
+  const url = backupPuts[0].url;
+  assert.match(url, /-backups\/[0-9]+\.json$/,
+    `PUT должен идти в /backups/{millis}.json: ${url}`);
+  const body = JSON.parse(backupPuts[0].body);
+  assert.ok(body && typeof body === 'object' && !Array.isArray(body),
+    'тело копии — один снимок, а не список');
+  assert.equal(body.updatedAt, 42, 'в копии — снимок данных узла');
+});
+
+test('YP-05: ротация — переполнение удаляет самую старую копию (DELETE минимального ключа)', async () => {
+  const fetchImpl = makeFetch();
+  fetchImpl.backupsKeys = ['1630000000000', '1630000000001', '1630000000002',
+    '1630000000003', '1630000000004', '1630000000005', '1630000000006',
+    '1630000000007', '1630000000008', '1630000000009'];
+  const { context } = loadApp({ fetchImpl });
+  await context.syncToCloud();
+  const deletes = fetchImpl.stats.calls.filter((c) => c.method === 'DELETE'
+    && c.url.includes('-backups'));
+  assert.equal(deletes.length, 1, `DELETE-ов: ${deletes.length}`);
+  assert.match(deletes[0].url, /-backups\/1630000000000\.json$/,
+    `удаляется минимальный (самый старый) ключ: ${deletes[0].url}`);
+});
+
+test('YP-05: без переполнения DELETE не делается', async () => {
+  const fetchImpl = makeFetch();
+  fetchImpl.backupsKeys = ['1630000000001', '1630000000002'];
+  const { context } = loadApp({ fetchImpl });
+  await context.syncToCloud();
+  const deletes = fetchImpl.stats.calls.filter((c) => c.method === 'DELETE'
+    && c.url.includes('-backups'));
+  assert.equal(deletes.length, 0, `лишних DELETE-ов: ${deletes.length}`);
+});
 
 test('одиночная отправка делает один PUT и пишет метку времени', async () => {
   const fetchImpl = makeFetch();

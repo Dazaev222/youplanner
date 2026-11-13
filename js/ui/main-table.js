@@ -59,7 +59,7 @@ export function weekPercent(habit) {
 export function monthPercent(habit) {
   return calcProgress(habit, cachedMonthDates());
 }
-// Класс границы поля отметки по уровню записи (§1.5). Уровня нет — класс
+// Класс границы поля отметки по уровню записи Уровня нет — класс
 // не ставится, и поле остаётся с обычной рамкой --border.
 export function levelClass(level) {
   if (level === LEVEL_ON_TIME) return ' is-on-time';
@@ -67,7 +67,7 @@ export function levelClass(level) {
   if (level === LEVEL_TWO_MIN) return ' is-two-min';
   return '';
 }
-// Маленькая кнопка вызова попапа уровня — только у Корана (§1.2)
+// Маленькая кнопка вызова попапа уровня — только у Корана 
 export function levelButtonMarkup(habit, date) {
   const entry = getEntry(date, habit.id);
   const isSet = entry && entry.level ? ' is-set' : '';
@@ -391,7 +391,7 @@ export function onTableChange(event) {
 
   const entry = getEntry(date, habitId);
   const current = entry ? entry.value : undefined;
-  // Уровень «2 минуты» выбран человеком и правку значения переживает (§2.4) —
+ // Уровень «2 минуты» выбран человеком и правку значения переживает —
   // но только у Корана: там значение и уровень независимы. У Спорта уровень
   // выводится из самого ответа, и «отдых» после «2 минут» не должен остаться
   // голубым, поэтому там он всегда пересчитывается.
@@ -465,7 +465,7 @@ export function onTableClick(event) {
   const target = event.target;
   if (!target || typeof target.closest !== 'function') return;
 
-  // Кнопка уровня открывает попап на привычке и дне своей ячейки (§1.2)
+ // Кнопка уровня открывает попап на привычке и дне своей ячейки 
   const levelButton = target.closest('.cell-level-btn');
   if (levelButton) {
     const levelCell = cellContainer(levelButton);
@@ -504,7 +504,7 @@ export function syncBooleanCell(cell, value) {
   if (cross) cross.classList.toggle('is-active', value === false);
 }
 // Записывает значение и обновляет ТОЛЬКО круг своей строки — без renderTable().
-// День отметки может уехать во вчерашний (§4): тогда без перерисовки не
+// День отметки может уехать во вчерашний : тогда без перерисовки не
 // обойтись — отметка встанет в чужую колонку и останется незамеченной.
 export function onCellChange(habit, date, value, level) {
   if (!habit) return false;
@@ -558,7 +558,7 @@ export function goToday() {
 }
 
 // Опции выпадающего списка значений ячейки choice. У Спорта и Пресса свой
-// список кодов и свои подписи (§3.1), у прочих привычек типа choice — общий.
+// список кодов и свои подписи у прочих привычек типа choice — общий.
 export function choiceOptionsMarkup(current, habitId) {
   const isCoded = isChoiceLevelHabit(habitId);
   const codes = isCoded ? SPORT_VALUES : CHOICE_OPTIONS;

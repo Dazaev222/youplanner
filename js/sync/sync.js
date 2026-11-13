@@ -866,16 +866,19 @@ async function fetchCloudNode() {
   return previous;
 }
 // Кладёт в отдельный узел бэкапов копию того, что сейчас лежит на сервере:
-// запись затирает чужой снимок, и без копии его не вернуть. Свежая версия
-// сверху, всего не больше BACKUP_LIMIT — самая старая уходит. Пустой узел
-// копировать нечего. Узел бэкапов — соседний корень (FIREBASE_BACKUPS_URL),
-// а не ребёнок данных: иначе PUT основного узла стирал бы копии (см. выше).
+// запись затирает чужой снимок, и без копии его не вернуть. Копии лежат
+// отдельными детьми /backups/{millis}.json (YP-05): PUT целого списка
+// перезаписывал бы все BACKUP_LIMIT полных снимков при добавлении одного —
+// мегабайты на каждую копию. Пустой узел копировать нечего. Узел бэкапов —
+// соседний корень (FIREBASE_BACKUPS_URL), а не ребёнок данных: иначе PUT
+// основного узла стирал бы копии (см. выше).
 // Возвращает предыдущий узел: не вышло записать копию — отправку это
 // не отменяет, и узел всё равно нужен вызывающему. Троттлинг (Г2): чаще
 // раза за BACKUP_MIN_INTERVAL_MS возвращается null сразу, без запросов.
-// Чтения последовательны: сначала снимок данных, затем список бэкапов и
-// запись копии (GET+GET → PUT), каждый запрос ждёт предыдущего. Снимок
-// нужен и копии, и вызывающему, поэтому он идёт первым.
+// Чтения последовательны: сначала снимок данных, затем shallow-чтение ключей
+// узла бэкапов и запись копии (GET+GET → PUT → DELETE при переполнении),
+// каждый запрос ждёт предыдущего. Снимок нужен и копии, и вызывающему,
+// поэтому он идёт первым.
 export async function backupCloudSnapshot() {
   // Гейт стоит внутри, а не у вызова в syncToCloudNow: через эту функцию
   // идут все обмены — стартовая синхронизация, ручная кнопка, flushPendingSync
@@ -896,19 +899,43 @@ export async function backupCloudSnapshot() {
     // Копия — best-effort: её сбой отправку не отменяет, но previous
     // всё равно нужен вызывающему.
     try {
-      const backupsResponse = await fetchWithTimeout(FIREBASE_BACKUPS_URL + '.json');
-      if (!backupsResponse.ok) throw new Error('нет ответа');
-      const list = await backupsResponse.json();
-      const items = Array.isArray(list) ? list : [];
-      items.unshift(snapshot);
-      const copyResponse = await fetchWithTimeout(FIREBASE_BACKUPS_URL + '.json', {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(items.slice(0, BACKUP_LIMIT)),
-      });
-      // Метка троттлинга — только после успешного PUT списка: сорвавшаяся
+      // Shallow-чтение: только ключи узла бэкапов, без тел снимков —
+      // они занимали бы мегабайты ради одного счётчика.
+      const keysResponse = await fetchWithTimeout(FIREBASE_BACKUPS_URL + '.json?shallow=true');
+      if (!keysResponse.ok) throw new Error('нет ответа');
+      const keysIndex = await keysResponse.json();
+      const keys = keysIndex && typeof keysIndex === 'object' && !Array.isArray(keysIndex)
+        ? Object.keys(keysIndex)
+        : [];
+
+      // Новый снимок — отдельным ребёнком /backups/{millis}.json, телом
+      // ровно один снимок данных (без поля backups, см. выше).
+      const copyResponse = await fetchWithTimeout(
+        FIREBASE_BACKUPS_URL + '/' + String(Date.now()) + '.json',
+        {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(snapshot),
+        },
+      );
+
+      // Метка троттлинга — только после успешного PUT копии: сорвавшаяся
       // копия не глушит следующие попытки, следующая отправка повторит.
       if (copyResponse && copyResponse.ok) lastBackupAt = Date.now();
+
+      // Ротация (YP-05): копий с новой стало больше BACKUP_LIMIT — самая
+      // старая уходит. Минимальный ключ = самая старая копия:
+      // millisecond-ключи сортируются лексикографически = хронологически.
+      // Ротация после успешного PUT: срыв копии не должен уменьшать историю.
+      if (copyResponse && copyResponse.ok && keys.length + 1 > BACKUP_LIMIT) {
+        const oldest = keys.slice().sort()[0];
+        if (oldest) {
+          await fetchWithTimeout(
+            FIREBASE_BACKUPS_URL + '/' + encodeURIComponent(oldest) + '.json',
+            { method: 'DELETE' },
+          );
+        }
+      }
     } catch (e) {
       // не вышло записать копию — данные всё равно отправит syncToCloudNow
     }

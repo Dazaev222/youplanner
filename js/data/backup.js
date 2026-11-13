@@ -15,7 +15,7 @@ import { hasData, validCloudArchive, validCloudRecords, validCloudSchedule } fro
 import { rollbackStagedKeys } from '../core/storage.js';
 // Версия формата резервной копии. Растёт, если меняется состав полей файла:
 // версия 2 добавила раздел tasks, версия 3 — раздел prayer, версия 4 —
-// время у привычки и уровень у записи (§8), версия 5 — раздел fast (§11x),
+// время у привычки и уровень у записи версия 5 — раздел fast (§11x),
 // версия 6 — раздел qazaLog (§5), 7 — раздел sleep, 8 — история сна (§11ab),
 // 10 — раздел tasks снят, 11 — раздел schedule (§11ac),
 // 12 — аддитивный узел plannerV1 (Матрица: entries/settings/tombstones с

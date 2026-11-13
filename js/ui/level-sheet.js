@@ -3,10 +3,10 @@ import { isMainDayView } from './state.js';
 import { findHabit, refreshMainSnapshot, renderDayCards, syncLevelCell, updateRowCircle } from './main-table.js';
 import { cssEscape, syncSheetToKeyboard } from '../core/dom.js';
 // Привычка и день, для которых открыт попап. День здесь уже выправленный
-// правилом полуночи (§4): попап пишет туда же, куда писала бы клетка.
+// правилом полуночи : попап пишет туда же, куда писала бы клетка.
 export let levelSheetTarget = null;
 // Текущее значение отметки — из него считается «Полная версия».
-// Пустое поле значит, что выполнять нечего, и пункт гаснет (§2.3).
+// Пустое поле значит, что выполнять нечего, и пункт гаснет
 export function openLevelSheet(habitId, date) {
   const habit = findHabit(habitId);
   if (!habit || !date || !hasLevelPopup(habitId)) return;
@@ -73,7 +73,7 @@ export function onLevelPick(event) {
     level = defaultLevel(habit, value, date);
   }
 
-  // Числа ещё нет — «2 минуты» пишутся нулём страниц (§2.4).
+ // Числа ещё нет — «2 минуты» пишутся нулём страниц
   // «Полная версия» без числа недоступна, поэтому дальше пути нет.
   let written = value;
   if (written === undefined && level === LEVEL_TWO_MIN) written = 0;
