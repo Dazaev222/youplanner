@@ -141,7 +141,9 @@
 // SW кэширует ОБОЛОЧКУ: ответы approvals_v2, решения и токены под кэш не
 // попадают — живые запросы js/harness/firebase.js (fetch/EventSource мимо
 // Cache Storage); никаких background sync решений (U5.6.8).
-const CACHE = 'youplanner-v60';
+// v61 (v60 -> v61): F6 — геометрия iOS и «Настройки модели»: js/harness/
+// viewport.js, js/harness/settings.js, js/harness/settings-view.js в precache.
+const CACHE = 'youplanner-v61';
 // Иконки — все из manifest.json: отсутствующая в кэше иконка ломала бы
 // офлайн-установку PWA (аудит 2026-10-31: icon-512.png не кэшировался)
 const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon-512.png', './icon.svg',
@@ -163,6 +165,10 @@ const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './ic
   './js/harness/firebase.js',
   './js/harness/chat.js',
   './js/harness/approvals.js',
+  // F6.1/F6.2: владелец геометрии iOS и экран настроек модели
+  './js/harness/viewport.js',
+  './js/harness/settings.js',
+  './js/harness/settings-view.js',
   './js/harness/index.js',
   // Общие примитивы структуры значений (аудит 2026-11-13, YP-08)
   './js/core/struct.js',

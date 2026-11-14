@@ -878,39 +878,99 @@
        Подтверждения живут в отдельном dialog РЯДОМ с корневой оболочкой
        (#app), не внутри скрываемой вкладки. -->
   <section id="harness-view" class="harness-view" aria-labelledby="harness-title" hidden>
-    <header class="harness-head">
-      <button type="button" class="harness-icon-btn" aria-label="Назад">
-        <!-- Стрелка назад (chevron.left) -->
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
-      </button>
-      <div class="harness-head-info">
-        <h1 id="harness-title">ПК-агент</h1>
-        <p id="harness-presence" role="status">Проверяем связь с ПК…</p>
-      </div>
-      <button type="button" class="harness-icon-btn" aria-label="Меню ПК" aria-expanded="false">
-        <!-- Монитор (display) -->
-        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8"/><path d="M12 16v4"/></svg>
-      </button>
-    </header>
-    <section id="harness-messages" class="harness-messages" aria-label="Сообщения и задачи" tabindex="0">
-      <ol class="harness-message-list"></ol>
-    </section>
-    <p id="harness-announcer" class="harness-sr-only" role="status" aria-live="polite"></p>
-    <footer class="harness-dock">
-      <button type="button" id="harness-new-messages" class="harness-secondary" hidden>Новые сообщения</button>
-      <button type="button" id="harness-pending" class="harness-secondary" hidden>Ожидают подтверждения: 1</button>
-      <p id="harness-feedback" role="status" hidden></p>
-      <form id="harness-form">
-        <label for="harness-input" class="harness-sr-only">Задача для ПК</label>
-        <div class="harness-input-row">
-          <textarea id="harness-input" rows="1" placeholder="Напишите задачу…" aria-describedby="harness-feedback"></textarea>
-          <button id="harness-send" type="submit" aria-label="Отправить задачу">
-            <!-- Стрелка вверх (arrow.up), как в композере ассистента -->
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
-          </button>
+    <!-- F6.2: панель чата и панель настроек — две переключаемые панели одного
+         маршрута. Переход в настройки скрывает chat-panel без unmount сессии;
+         dialog подтверждения остаётся снаружи скрываемых панелей. -->
+    <div id="harness-chat-panel" class="harness-chat-panel">
+      <header class="harness-head">
+        <button type="button" class="harness-icon-btn" aria-label="Назад">
+          <!-- Стрелка назад (chevron.left) -->
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+        </button>
+        <div class="harness-head-info">
+          <h1 id="harness-title">ПК-агент</h1>
+          <p id="harness-presence" role="status">Проверяем связь с ПК…</p>
         </div>
+        <button type="button" id="harness-open-settings" class="harness-icon-btn" aria-label="Настройки модели">
+          <!-- Ползунки (slider.horizontal.3) -->
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 8h10"/><path d="M18 8h2"/><circle cx="16" cy="8" r="2"/><path d="M4 16h2"/><path d="M10 16h10"/><circle cx="8" cy="16" r="2"/></svg>
+        </button>
+        <button type="button" class="harness-icon-btn" aria-label="Меню ПК" aria-expanded="false">
+          <!-- Монитор (display) -->
+          <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8"/><path d="M12 16v4"/></svg>
+        </button>
+      </header>
+      <section id="harness-messages" class="harness-messages" aria-label="Сообщения и задачи" tabindex="0">
+        <ol class="harness-message-list"></ol>
+      </section>
+      <p id="harness-announcer" class="harness-sr-only" role="status" aria-live="polite"></p>
+      <footer class="harness-dock">
+        <button type="button" id="harness-new-messages" class="harness-secondary" hidden>Новые сообщения</button>
+        <button type="button" id="harness-pending" class="harness-secondary" hidden>Ожидают подтверждения: 1</button>
+        <p id="harness-feedback" role="status" hidden></p>
+        <form id="harness-form">
+          <label for="harness-input" class="harness-sr-only">Задача для ПК</label>
+          <div class="harness-input-row">
+            <textarea id="harness-input" rows="1" placeholder="Напишите задачу…" aria-describedby="harness-feedback"></textarea>
+            <button id="harness-send" type="submit" aria-label="Отправить задачу">
+              <!-- Стрелка вверх (arrow.up), как в композере ассистента -->
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+            </button>
+          </div>
+        </form>
+      </footer>
+    </div>
+    <section id="harness-settings-view" class="harness-settings-view" aria-labelledby="harness-settings-title" hidden>
+      <header class="harness-settings-head">
+        <button id="harness-settings-back" class="harness-icon-btn" type="button" aria-label="Назад в чат">Назад</button>
+        <h2 id="harness-settings-title" tabindex="-1">Настройки модели</h2>
+      </header>
+      <form id="harness-settings-form" class="harness-settings-content">
+        <fieldset class="harness-settings-group">
+          <legend>Модель</legend>
+          <label class="harness-settings-field" for="harness-provider">Семейство</label>
+          <select id="harness-provider" name="provider"></select>
+          <label class="harness-settings-field" for="harness-model">Модель</label>
+          <select id="harness-model" name="modelId"></select>
+          <p id="harness-capabilities" role="status"></p>
+        </fieldset>
+        <fieldset class="harness-settings-group">
+          <legend>Размышления</legend>
+          <label class="harness-settings-field" for="harness-reasoning">Уровень размышлений</label>
+          <select id="harness-reasoning" name="reasoning"></select>
+          <p id="harness-reasoning-help"></p>
+        </fieldset>
+        <fieldset class="harness-settings-group">
+          <legend>Параметры генерации</legend>
+          <label class="harness-settings-field" for="harness-temperature">Температура</label>
+          <input id="harness-temperature" type="range" name="temperature" aria-describedby="harness-temperature-help">
+          <output id="harness-temperature-value" class="harness-settings-value" for="harness-temperature"></output>
+          <p id="harness-temperature-help"></p>
+          <label class="harness-settings-field" for="harness-context">Контекст, токены</label>
+          <input id="harness-context" type="range" name="contextTokens" aria-describedby="harness-context-help">
+          <output id="harness-context-value" class="harness-settings-value" for="harness-context"></output>
+          <p id="harness-context-help"></p>
+          <label class="harness-settings-field" for="harness-output-limit">Лимит ответа, токены</label>
+          <input id="harness-output-limit" type="range" name="maxOutputTokens">
+          <output id="harness-output-limit-value" class="harness-settings-value" for="harness-output-limit"></output>
+        </fieldset>
+        <fieldset class="harness-settings-group">
+          <legend>Персонализация</legend>
+          <label class="harness-settings-field" for="harness-persona-name">Как ко мне обращаться</label>
+          <input id="harness-persona-name" name="preferredName" type="text" maxlength="80" autocomplete="off">
+          <label class="harness-settings-field" for="harness-persona-context">Что учитывать</label>
+          <textarea id="harness-persona-context" name="about" rows="4" maxlength="2000"></textarea>
+          <label class="harness-settings-field" for="harness-persona-style">Как отвечать</label>
+          <textarea id="harness-persona-style" name="responseStyle" rows="4" maxlength="2000"></textarea>
+        </fieldset>
+        <footer class="harness-settings-actions">
+          <p id="harness-settings-status" role="status" aria-live="polite"></p>
+          <p id="harness-settings-error" class="harness-settings-error" role="alert" hidden></p>
+          <button id="harness-settings-save" type="submit">Сохранить настройки</button>
+          <button id="harness-settings-discard" type="button">Отменить изменения</button>
+        </footer>
       </form>
-    </footer>
+    </section>
   </section>
 
   <!-- Панель навигации статистики (заход 4). У самой панели атрибута hidden

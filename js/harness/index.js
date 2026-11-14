@@ -19,6 +19,12 @@ import {
   HARNESS_DEVICE_HEARTBEAT_MS,
   HARNESS_DEVICE_STALE_MS,
 } from './firebase.js';
+import {
+  MODEL_CATALOG,
+  createSettingsStore,
+  defaultSettings,
+} from './settings.js';
+import { createSettingsView } from './settings-view.js';
 import { mountHarnessViewport } from './viewport.js';
 
 // Публичный веб-конфиг RTDB Bridge (см. шапку файла).
@@ -88,6 +94,12 @@ export function mountHarness({ onBack } = {}) {
     dialog: document.getElementById('harness-approval'),
     dialogTitle: document.getElementById('harness-approval-title'),
     dialogSummary: document.getElementById('harness-approval-summary'),
+    // Подэкран «Настройки модели» (F6.2): панель чата и панель настроек
+    chatPanel: document.getElementById('harness-chat-panel'),
+    settingsView: document.getElementById('harness-settings-view'),
+    settingsTitle: document.getElementById('harness-settings-title'),
+    openSettings: document.getElementById('harness-open-settings'),
+    settingsBack: document.getElementById('harness-settings-back'),
   };
   if (el.dialog) {
     el.counter = el.dialog.querySelector('.harness-approval-counter');
@@ -114,6 +126,7 @@ export function mountHarness({ onBack } = {}) {
   let settingsOpen = false;     // подэкран «Настройки модели» (F6.2.8)
   let chat = null;
   let approvals = null;
+  let settings = null;          // контроллер DOM-формы настроек (F6.2)
   let viewport = null;
   const unsubscribes = [];
   // Модель ленты: команды по commandId, статусы по execution/result.
@@ -239,6 +252,91 @@ export function mountHarness({ onBack } = {}) {
       },
       announce,
     },
+  });
+
+  /* --- Настройки модели (F6.2) ------------------------------------------------------------ */
+
+  // Хранилище настроек создаётся на сессию (ключ содержит ownerUid/deviceId,
+  // смешивание владельцев исключено). View создаётся один раз на маршрут.
+  let settingsStore = null;
+  let settingsLoadNotice = '';
+  settings = createSettingsView({
+    elements: {
+      view: el.settingsView,
+      form: document.getElementById('harness-settings-form'),
+      title: el.settingsTitle,
+      provider: document.getElementById('harness-provider'),
+      model: document.getElementById('harness-model'),
+      capabilities: document.getElementById('harness-capabilities'),
+      reasoning: document.getElementById('harness-reasoning'),
+      reasoningHelp: document.getElementById('harness-reasoning-help'),
+      temperature: document.getElementById('harness-temperature'),
+      temperatureValue: document.getElementById('harness-temperature-value'),
+      temperatureHelp: document.getElementById('harness-temperature-help'),
+      context: document.getElementById('harness-context'),
+      contextValue: document.getElementById('harness-context-value'),
+      contextHelp: document.getElementById('harness-context-help'),
+      outputLimit: document.getElementById('harness-output-limit'),
+      outputLimitValue: document.getElementById('harness-output-limit-value'),
+      personaName: document.getElementById('harness-persona-name'),
+      personaContext: document.getElementById('harness-persona-context'),
+      personaStyle: document.getElementById('harness-persona-style'),
+      status: document.getElementById('harness-settings-status'),
+      error: document.getElementById('harness-settings-error'),
+      saveBtn: document.getElementById('harness-settings-save'),
+      discardBtn: document.getElementById('harness-settings-discard'),
+    },
+    deps: {
+      catalog: MODEL_CATALOG,
+      doc: document,
+      getActive: () => (settingsStore ? settingsStore.getActive() : null),
+      getDefault: () => defaultSettings(MODEL_CATALOG),
+      save: (next) => (settingsStore
+        ? settingsStore.save(next)
+        : { ok: false, reason: 'storage' }),
+      isOffline: () =>
+        (typeof navigator !== 'undefined' && navigator.onLine === false),
+      announce,
+      onDirty: () => { /* dirty отслеживается внутри view (requestBack) */ },
+      onBack: () => closeSettings(),
+      clearActive: () => {
+        if (settingsStore) settingsStore.clearMemory();
+        settingsStore = null;
+        settingsLoadNotice = '';
+      },
+      getLoadNotice: () => settingsLoadNotice,
+    },
+  });
+
+  function openSettings() {
+    if (destroyed || !el.settingsView || !el.chatPanel) return;
+    settingsOpen = true;
+    el.chatPanel.hidden = true;
+    el.settingsView.hidden = false;
+    settings.open();
+  }
+
+  function closeSettings() {
+    if (destroyed || !el.settingsView || !el.chatPanel) return;
+    settingsOpen = false;
+    el.settingsView.hidden = true;
+    el.chatPanel.hidden = false;
+  }
+
+  bind(el.openSettings, 'click', function () {
+    openSettings();
+  });
+  bind(el.settingsBack, 'click', function () {
+    // dirty → view показывает inline-блок и не возвращает; иначе — возврат.
+    settings.requestBack();
+  });
+
+  // storage-событие другой вкладки: конфликт без затирания ввода (F6.2.7).
+  bind(window, 'storage', function (event) {
+    if (destroyed || !settingsStore || !event) return;
+    if (event.key !== settingsStore.key()) return;
+    const applied = settingsStore.applyExternal(event.newValue);
+    settings.onExternalChange(applied);
   });
 
   /* --- Сессия --------------------------------------------------------------------------- */
@@ -739,8 +837,23 @@ export function mountHarness({ onBack } = {}) {
       renderPresence(null);
       renderAuthPanel('');
       if (el.pendingChip) el.pendingChip.hidden = true;
+      // Logout: форма и активная память настроек очищаются, до нового входа
+      // чужие значения не показываются (F6.2.7).
+      closeSettings();
+      settings.reset();
       return;
     }
+    // Настройки — по owner/device текущей сессии: смена ПК или владельца
+    // начинает новое хранилище, старые записи не подмешиваются (F6.2.5).
+    settingsStore = createSettingsStore({
+      storage,
+      ownerUid: ownerUid(),
+      deviceId: currentDeviceId(),
+      catalog: MODEL_CATALOG,
+    });
+    const loaded = settingsStore.load();
+    settingsLoadNotice = loaded.ok ? '' :
+      'В хранилище повреждённая запись настроек. Проверьте значения и сохраните явно.';
     approvals.setConnection('online');
     subscribeAll();
     renderPresence(lastPresence);
@@ -786,6 +899,11 @@ export function mountHarness({ onBack } = {}) {
         viewport = null;
       }
       approvals.destroy();
+      if (settings) {
+        settings.destroy();
+        settings = null;
+      }
+      settingsStore = null;
       statusNodes.clear();
       feed.commands.clear();
       feed.executions.clear();
