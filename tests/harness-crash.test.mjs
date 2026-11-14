@@ -428,7 +428,6 @@ test('F6.5.1-2 (unit-эквивалент): база пересчитывает�
   root.dispatch('focusin', { target: textarea });
   vv.height = 240; vv.dispatch('resize');
   rafQueue.splice(0).forEach((f) => f && f());
-  assert.ok(body.classList.contains && false === false);
   root.dispatch('focusout', { target: textarea, relatedTarget: null });
   vv.height = 371; vv.dispatch('resize');   // восстановление в допуске 24px
   rafQueue.splice(0).forEach((f) => f && f());
