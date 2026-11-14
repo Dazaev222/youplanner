@@ -165,7 +165,8 @@ const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './ic
   './js/harness/firebase.js',
   './js/harness/chat.js',
   './js/harness/approvals.js',
-  // F6.1/F6.2: владелец геометрии iOS и экран настроек модели
+  // F6.1/F6.2/F6.3: владелец геометрии iOS, настройки модели, контракт команд
+  './js/harness/commands.js',
   './js/harness/viewport.js',
   './js/harness/settings.js',
   './js/harness/settings-view.js',

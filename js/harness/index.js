@@ -15,6 +15,16 @@
 import { createApprovalController } from './approvals.js';
 import { createChat, statusFor, FEEDBACK_LOADING_NOTE } from './chat.js';
 import {
+  UNKNOWN_OUTCOME_TEXT,
+  VERIFICATION_LABEL,
+  buildModelTaskParams,
+  buildVerificationParams,
+  createPendingCommandStore,
+  createTaskSender,
+  freezeSettingsSnapshot,
+  textFromCommandParams,
+} from './commands.js';
+import {
   createHarnessFirebase,
   HARNESS_DEVICE_HEARTBEAT_MS,
   HARNESS_DEVICE_STALE_MS,
@@ -100,6 +110,8 @@ export function mountHarness({ onBack } = {}) {
     settingsTitle: document.getElementById('harness-settings-title'),
     openSettings: document.getElementById('harness-open-settings'),
     settingsBack: document.getElementById('harness-settings-back'),
+    // Явный повтор отправки с неизвестным исходом (F6.3.11)
+    retrySend: document.getElementById('harness-retry-send'),
   };
   if (el.dialog) {
     el.counter = el.dialog.querySelector('.harness-approval-counter');
@@ -132,6 +144,47 @@ export function mountHarness({ onBack } = {}) {
   // Модель ленты: команды по commandId, статусы по execution/result.
   const feed = { commands: new Map(), executions: new Map(), results: new Map() };
   const statusNodes = new Map();   // commandId → узел статуса в карточке
+
+  /* --- Отправка: sender + pending-made (F6.3) -------------------------------------------
+     sender строится на адаптере; pending-хранилище пересоздаётся на сессию
+     (ключ по owner/device). Кнопка повтора видна только при живом pending. */
+
+  let pendingStore = null;
+  let sender = null;
+
+  function pendingExists() {
+    return Boolean(pendingStore && pendingStore.load());
+  }
+
+  function renderPendingButton() {
+    if (el.retrySend) el.retrySend.hidden = !pendingExists();
+  }
+
+  sender = createTaskSender({
+    makeCommand: (args) => adapter.makeCommand(args),
+    sendCommand: (made) => adapter.sendCommand(made),
+    readCommand: (path) => adapter.readCommand(path),
+    pending: {
+      save: (made) => {
+        const saved = pendingStore ? pendingStore.save(made) : false;
+        renderPendingButton();
+        return saved;
+      },
+      load: () => (pendingStore ? pendingStore.load() : null),
+      clear: () => { if (pendingStore) pendingStore.clear(); renderPendingButton(); },
+    },
+    now: () => (adapter ? adapter.serverNow() : Date.now()),
+  });
+
+  // Снимок активных настроек: активная запись store или defaults. Вызывается
+  // синхронно в sendTask ДО первого await (F6.3.7).
+  function activeSettingsSnapshot() {
+    if (settingsStore) {
+      const active = settingsStore.getActive();
+      if (active) return freezeSettingsSnapshot(active);
+    }
+    return freezeSettingsSnapshot(defaultSettings(MODEL_CATALOG));
+  }
 
   function announce(text) {
     if (!destroyed && el.announcer) el.announcer.textContent = String(text || '');
@@ -423,7 +476,20 @@ export function mountHarness({ onBack } = {}) {
     };
 
     bind({ kind: 'commands', ownerUid: uid, deviceId }, (data) => {
+      const previous = feed.commands;
       feed.commands = new Map(Object.entries(data));
+      // Карточка с неизвестным исходом сохраняется, пока исход не подтверждён
+      // сервером (F6.3.11): единственный ID не исчезает из ленты.
+      for (const [id, card] of previous) {
+        if (card.outcomeUnknown && !feed.commands.has(id)) {
+          feed.commands.set(id, card);
+        }
+      }
+      // Подтверждённая запись снимает pending-повтор.
+      if (pendingStore) {
+        const rec = pendingStore.load();
+        if (rec && feed.commands.has(rec.commandId)) pendingStore.clear();
+      }
       renderFeed();
     });
     bind({ kind: 'executions', ownerUid: uid, deviceId }, (data) => {
@@ -456,8 +522,13 @@ export function mountHarness({ onBack } = {}) {
     return commands.map((cmd) => {
       const execution = feed.executions.get(cmd.commandId) || null;
       const result = feed.results.get(cmd.commandId) || null;
-      const status = statusFor({ command: true, execution, result });
-      const text = cmd.params && cmd.params.task ? String(cmd.params.task) : cmd.type;
+      // Неизвестный исход отправки — честный статус, не «Записано в облако».
+      const status = cmd.outcomeUnknown
+        ? { text: UNKNOWN_OUTCOME_TEXT }
+        : statusFor({ command: true, execution, result });
+      // model_task → actions[].params.text; проверочный — метка режима;
+      // legacy params.task — только отображение старых записей (F6.3.10).
+      const text = textFromCommandParams(cmd.params, cmd.type);
       return {
         id: cmd.commandId,
         role: 'owner',
@@ -481,9 +552,12 @@ export function mountHarness({ onBack } = {}) {
     }
   }
 
-  /* --- Отправка задачи (P2.3) --------------------------------------------------------------- */
+  /* --- Отправка задачи (P2.3, F6.3) --------------------------------------------------------------- */
 
-  async function sendTask(text) {
+  // Общий путь отправки для обычной задачи и проверочного режима. Карточка
+  // появляется по commandId до сети; исход отправки разрешается через
+  // sender (pending ДО PUT, чтение того же path/digest при потере ответа).
+  async function dispatchTask({ text, params }) {
     if (destroyed) throw new Error('экран закрыт');
     if (!adapter.getAccount()) {
       const err = new Error('нужен вход владельца');
@@ -493,51 +567,102 @@ export function mountHarness({ onBack } = {}) {
     const gen = generation;
     await adapter.getAccessToken();
     if (destroyed || gen !== generation) throw new Error('сессия сменилась');
-    // commandId создаётся ДО отправки и сохраняется: потеря ответа
-    // разрешается чтением этого ID, не созданием нового (P2.3).
-    const made = await adapter.makeCommand({
+    const result = await sender.send({
       ownerUid: ownerUid(),
       deviceId: currentDeviceId(),
       type: 'run_task',
-      params: { task: String(text) },
+      params,
       serverTime: adapter.serverNow(),
+      onMade: (made) => {
+        feed.commands.set(made.commandId, made.payload);
+        chat.appendMessage({
+          id: made.commandId,
+          role: 'owner',
+          text,
+          at: made.payload.createdAt,
+          status: 'Отправляется',
+        });
+      },
     });
-    feed.commands.set(made.commandId, made.payload);
-    chat.appendMessage({
-      id: made.commandId,
-      role: 'owner',
-      text: String(text),
-      at: made.payload.createdAt,
-      status: 'Отправляется',
-    });
-    try {
-      await adapter.sendCommand(made);
-      if (destroyed || gen !== generation) return { ok: true, commandId: made.commandId };
+    if (result.ok) {
+      if (destroyed || gen !== generation) {
+        return { ok: true, commandId: result.commandId };
+      }
       // «Записано в облако»: статус показываем сразу, уточнит подписка.
-      const card = feed.commands.get(made.commandId);
+      const card = feed.commands.get(result.commandId);
       if (card) card.writtenToCloud = true;
       renderFeed();
-      return { ok: true, commandId: made.commandId };
-    } catch (err) {
-      if (destroyed || gen !== generation) throw err;
-      // Потерянный ответ: сверка чтением ТОГО ЖЕ commandId со сравнением
-      // digest; новый ID не создаём (P2.3). ID с другим payload — конфликт.
-      let reconciled = null;
-      try {
-        const check = await adapter.readCommand(made.path);
-        if (check && check.ok && check.data &&
-            check.data.digest === made.payload.digest) {
-          reconciled = check.data;
-        }
-      } catch (e2) { /* сверка не удалась — исход остаётся неизвестным */ }
-      if (reconciled && !destroyed && gen === generation) {
-        feed.commands.set(made.commandId, reconciled);
-        renderFeed();
-        return { ok: true, commandId: made.commandId, reconciled: true };
-      }
-      // Адресная ошибка: текст задачи остаётся черновиком (chat.trySend).
-      feed.commands.delete(made.commandId);
+      return { ok: true, commandId: result.commandId };
+    }
+    if (destroyed || gen !== generation) {
+      throw result.error || new Error('сессия сменилась');
+    }
+    if (result.outcomeUnknown) {
+      // Неизвестный исход: карточка остаётся, единственный ID не удаляется
+      // (F6.3.11); черновик сохраняется наверху (chat.trySend).
+      const card = feed.commands.get(result.commandId);
+      if (card) card.outcomeUnknown = true;
+      renderFeed();
+      renderPendingButton();
+      const err = new Error(UNKNOWN_OUTCOME_TEXT);
+      err.code = 'unknown-outcome';
       throw err;
+    }
+    // Достоверный отказ (записи нет на сервере): адресная причина, текст
+    // задачи остаётся черновиком; pending сохранён для явного повтора.
+    feed.commands.delete(result.commandId);
+    renderFeed();
+    throw result.error || new Error('не удалось отправить задачу');
+  }
+
+  async function sendTask(text) {
+    // Снимок активных настроек и params строятся синхронно, до первого
+    // асинхронного шага создания команды (F6.3.7): изменение настроек сразу
+    // после «Отправить» не меняет payload/digest уже созданной задачи;
+    // следующая задача возьмёт новый снимок.
+    const snapshot = activeSettingsSnapshot();
+    const params = buildModelTaskParams({
+      text: String(text),
+      settings: snapshot,
+    });
+    return dispatchTask({ text: String(text), params });
+  }
+
+  // Проверочный режим (метка «Проверка контура — запись строки» в меню
+  // устройств): ровно fixture контракта, не ответ модели и не обычный чат.
+  async function sendVerification() {
+    return dispatchTask({
+      text: VERIFICATION_LABEL,
+      params: buildVerificationParams(),
+    });
+  }
+
+  // Явный повтор по кнопке: readCommand того же path/digest, затем — только
+  // если записи достоверно нет — повтор ТОГО ЖЕ made (F6.3.11).
+  async function retryPendingSend() {
+    if (destroyed || !sender) return;
+    if (el.retrySend) el.retrySend.disabled = true;
+    try {
+      const result = await sender.retry();
+      if (result.ok) {
+        const card = feed.commands.get(result.commandId);
+        if (card) card.writtenToCloud = true;
+        renderFeed();
+        announce('Отправка подтверждена: ' + result.commandId);
+        return;
+      }
+      if (result.reason === 'expired') {
+        if (pendingStore) pendingStore.clear();
+        announce('Срок команды истёк — повтор этого ID невозможен');
+        return;
+      }
+      if (result.outcomeUnknown) {
+        announce(UNKNOWN_OUTCOME_TEXT);
+        return;
+      }
+    } finally {
+      if (el.retrySend) el.retrySend.disabled = false;
+      renderPendingButton();
     }
   }
 
@@ -649,6 +774,18 @@ export function mountHarness({ onBack } = {}) {
       menu.appendChild(item);
     }
 
+    // Проверочный режим контракта (F6.3): явная метка, отдельный от
+    // обычного чата путь — записывает строку-заглушку через агента.
+    const verification = document.createElement('button');
+    verification.type = 'button';
+    verification.className = 'harness-device-item';
+    verification.textContent = VERIFICATION_LABEL;
+    verification.addEventListener('click', function () {
+      closeDeviceMenu();
+      sendVerification();
+    });
+    menu.appendChild(verification);
+
     view.appendChild(menu);
     deviceMenu = menu;
     menuButton.setAttribute('aria-expanded', 'true');
@@ -725,6 +862,9 @@ export function mountHarness({ onBack } = {}) {
   bind(el.pendingChip, 'click', function () {
     approvals.open();
     scheduleDialogLayout();
+  });
+  bind(el.retrySend, 'click', function () {
+    retryPendingSend();
   });
   bind(backButton, 'click', function () {
     if (typeof onBack === 'function') onBack();
@@ -838,9 +978,12 @@ export function mountHarness({ onBack } = {}) {
       renderAuthPanel('');
       if (el.pendingChip) el.pendingChip.hidden = true;
       // Logout: форма и активная память настроек очищаются, до нового входа
-      // чужие значения не показываются (F6.2.7).
+      // чужие значения не показываются (F6.2.7). Pending прошлой сессии
+      // не смешивается с новой (F6.3.11).
       closeSettings();
       settings.reset();
+      pendingStore = null;
+      renderPendingButton();
       return;
     }
     // Настройки — по owner/device текущей сессии: смена ПК или владельца
@@ -854,6 +997,15 @@ export function mountHarness({ onBack } = {}) {
     const loaded = settingsStore.load();
     settingsLoadNotice = loaded.ok ? '' :
       'В хранилище повреждённая запись настроек. Проверьте значения и сохраните явно.';
+    // Pending-made тоже по owner/device: восстановление после перезагрузки
+    // страницы возвращает кнопку повтора, не создавая новый commandId.
+    pendingStore = createPendingCommandStore({
+      storage,
+      ownerUid: ownerUid(),
+      deviceId: currentDeviceId(),
+    });
+    pendingStore.load();
+    renderPendingButton();
     approvals.setConnection('online');
     subscribeAll();
     renderPresence(lastPresence);
@@ -904,6 +1056,7 @@ export function mountHarness({ onBack } = {}) {
         settings = null;
       }
       settingsStore = null;
+      pendingStore = null;
       statusNodes.clear();
       feed.commands.clear();
       feed.executions.clear();

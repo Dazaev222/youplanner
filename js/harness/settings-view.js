@@ -16,6 +16,8 @@
    * storage-событие другой вкладки при dirty — конфликт без затирания ввода;
    * destroy снимает все слушатели, включая динамический inline-блок. */
 
+import { familyForModel } from './settings.js';
+
 function stableStringify(value) {
   if (value === null || value === undefined) return 'null';
   if (Array.isArray(value)) return '[' + value.map(stableStringify).join(',') + ']';
