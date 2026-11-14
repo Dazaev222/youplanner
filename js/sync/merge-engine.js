@@ -35,7 +35,21 @@ import { planPlannerApply, writeStaged } from './apply-engine.js';
 // разделов. Разделы, которые слияние не меняло, не пишутся вовсе (см.
 // шапку); stage собирается без записей, сравнением «до/после» по каждой
 // строке матрицы CLOUD_SECTIONS.
-export function applyMergedFromCloud(previous) {
+//
+// Возвращает явный результат (ТЗ V2 B4, контракт 0.5 §6.5):
+//   true  — слияние применено или применять нечего: локальное состояние
+//           включает прочитанный снимок, PUT по его ETag допустим;
+//   false — хранилище отвергло запись (writeStaged откатил применение,
+//           storage:error эмитит он сам): состояние НЕ включает снимок.
+//           Молчаливый return здесь означал бы, что CAS-цикл sync.js
+//           отправит PUT старого тела с новой If-Match и затрёт сервер.
+//
+// opts.assumeNewer — ветка 412 (ТЗ V2 B4.4): перечитанный после конфликта
+// снимок доказанно другая версия, и гейт новизны по updatedAt решать не
+// может — локальные часы устройства могут стоять далеко впереди/позади
+// чужих. Доменные правила разделов (надгробия, конверты, версии plannerV1)
+// разрешают конфликт как обычно, безусловного overwrite и здесь нет.
+export function applyMergedFromCloud(previous, opts) {
   const local = {
     habits: loadHabits(),
     records: loadRecords(),
@@ -55,12 +69,13 @@ export function applyMergedFromCloud(previous) {
     pending: syncPending,
     localTs: syncTs(),
     sectionWrites: sectionWrites,
+    assumeNewer: opts !== null && opts !== undefined && opts.assumeNewer === true,
   });
   // plannerV1 сливается независимо от «ок новее» соседних разделов:
   // CRDT-состояние разрешают Lamport-версии, а не метка снимка; старый
   // узел plannerV1 всё равно не может «воскресить» локальные tombstones
   const plannerStage = planPlannerApply(previous.plannerV1);
-  if (!merged && !plannerStage) return;
+  if (!merged && !plannerStage) return true;
 
   const stage = [];
   if (merged) {
@@ -77,7 +92,7 @@ export function applyMergedFromCloud(previous) {
     stage.push({ key: STORAGE_KEYS.plannerEnvelope, value: plannerStage.envValue });
     stage.push({ key: MATRIX_STORAGE_KEY, value: plannerStage.tasksValue });
   }
-  if (stage.length === 0) return;
+  if (stage.length === 0) return true;
 
   // Победивший в слиянии конверт переносит свою метку в локальную карту тем
   // же stage: раздел поменял содержимое — значит, выиграла облачная сторона
@@ -103,8 +118,9 @@ export function applyMergedFromCloud(previous) {
   if (writeTsJson) stage.push({ key: SECTION_WRITE_TS_KEY, value: writeTsJson });
 
   // Запись с откатом (фаза 3) целиком в writeStaged: на отказе записи он
-  // сам эмитит storage:error — здесь просто выходим без sync:applied.
-  if (!writeStaged(stage)) return;
+  // сам эмитит storage:error — сюда возвращается false, и CAS-цикл sync.js
+  // не отправит PUT старого тела с новой If-Match (ТЗ V2 B4).
+  if (!writeStaged(stage)) return false;
 
   // Слитый список мог вернуть удалённые привычки (чужая правка победила
   // надгробие): их метки снимаются, иначе уехали бы наверх при этом же PUT
@@ -113,4 +129,5 @@ export function applyMergedFromCloud(previous) {
   // запустит архивацию (снимок мог принести старую детализацию) и перерисует
   // видимый экран
   bus.emit('sync:applied');
+  return true;
 }

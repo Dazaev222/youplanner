@@ -272,8 +272,11 @@ export async function syncFromCloud() {
     // серверных привычек в syncBody остаётся честной). reachable в ответе
     // остаётся true: сервер реально отвечал, а reachable:false заставил бы
     // settleHabitsAfterSync сеять офлайн-дефолты поверх рабочих данных.
+    // Метка этого GET (она уже в lastCloudEtag) — метка НЕ применённого
+    // снимка: PUT по ней разрешён только после успешного слияния (ТЗ V2 B4).
     if (applyCloudData(data, serverTs) === false) {
       cloudReachable = false;
+      unmergedCloudVersion = true;
     } else {
       // Снимок применён: привычки, вернувшиеся в списке, надгробий не
       // заслужили — иначе метки уезжали бы наверх при каждой отправке
@@ -348,6 +351,17 @@ export let casRetryDelay = casRetryBaseMs;
 // обмена: только такой провал раздвигает паузу сразу, даже если таймер уже
 // погашен самим выстрелом.
 let casRetryFromBackground = false;
+
+// «Последний прочитанный серверный снимок ещё НЕ сохранён в хранилище»
+// (ТЗ V2 B4, контракт 0.5 §6.5). Ставится, когда хранилище отвергло запись
+// слияния (syncFromCloud, пре-PUT слияние, ветка 412): fetchCloudNode к этому
+// моменту уже обновил lastCloudEtag, и PUT по текущему хранилищу уехал бы
+// СТАРЫМ телом с НОВОЙ If-Match — затёр бы сервер устаревшим снимком и
+// отрапортовал бы об успехе. Снимается гейтом в syncToCloudNow: успешным
+// слиянием свежепрочитанного снимка (или обнаружением пустого узла — затирать
+// нечего); пока снимок не сохранён, PUT не начинается. Транспортная метка
+// остаётся наблюдаемой, но базой применённого снимка не объявляется.
+let unmergedCloudVersion = false;
 
 // Тестам: ускорить первый ретрай, не через глобальные переменные и не через
 // подмену тестируемого модуля. Возвращает прежнюю базу.
@@ -464,7 +478,18 @@ export async function syncToCloudNow() {
   // метки — снимок уже виден локально, слияние не нужно.
   const cloudTs = previous ? Number(previous.updatedAt) || 0 : 0;
   if (previous && cloudTs > syncTs()) {
-    applyMergedFromCloud(previous);
+    // Явный результат слияния (ТЗ V2 B4, контракт 0.5 §6.5): true — свеже-
+    // прочитанный снимок сохранён, PUT по его метке допустим; false —
+    // хранилище отвергло запись (откат сделан, storage:error эмитит
+    // writeStaged): состояние НЕ включает снимок, и PUT по его метке уехал
+    // бы СТАРЫМ телом. Флаг ниже обязывает перед любым PUT заново прочитать,
+    // слить и сохранить; не вышло — обмен провален честно, без ложного
+    // «синхронизировано».
+    if (applyMergedFromCloud(previous) === true) {
+      unmergedCloudVersion = false;
+    } else {
+      unmergedCloudVersion = true;
+    }
   }
 
   // Вторая гонка того же обмена (B.2): между первым GET (внутри
@@ -495,7 +520,14 @@ export async function syncToCloudNow() {
     try {
       const plannerNode = await fetchPlannerNode();
       plannerKnown = true;
-      if (plannerNode) applyPlannerNodeFromCloud(plannerNode);
+      // 'rejected' (ТЗ V2 B4): хранилище отвергло сохранение слияния —
+      // конверт НЕ включает чужой узел, а lastPlannerEtag уже его метка;
+      // публикация уехала бы СТАРЫМ конвертом с НОВОЙ If-Match. Публикация
+      // переносится: операции остаются в outbox до следующего обмена, как
+      // при несостоявшемся чтении узла.
+      if (plannerNode && applyPlannerNodeFromCloud(plannerNode) === 'rejected') {
+        plannerKnown = false;
+      }
     } catch (e) {
       plannerKnown = false;
     }
@@ -512,6 +544,22 @@ export async function syncToCloudNow() {
   let casResponse = null;
   let casThrew = false;
   try {
+    // Гейт ТЗ V2 B4: метка lastCloudEtag может указывать на снимок, который
+    // хранилище НЕ сохранило (отказ записи слияния — флаг unmergedCloudVersion).
+    // PUT по ней уехал бы СТАРЫМ телом и затёр бы чужую правку, которую мы
+    // не приняли, а обмен отрапортовал бы об успехе. Повтор разрешён только
+    // после успешного нового чтения, слияния и сохранения; не вышло — бросок
+    // уводит обмен в честный провал (catch ниже: без записи SYNC_TS, без
+    // снятия pending, фоновый дожим повторяет весь обмен).
+    if (unmergedCloudVersion) {
+      const refetched = await fetchCloudNode();
+      if (refetched &&
+          applyMergedFromCloud(refetched, { assumeNewer: true }) === false) {
+        throw new Error('снимок сервера не сохранён в хранилище');
+      }
+      unmergedCloudVersion = false;
+      if (refetched) previous = refetched;
+    }
     let response = null;
     for (let attempt = 0; attempt < PLANNER_CAS_ATTEMPTS; attempt++) {
       // X-Firebase-ETag у PUT: RTDB возвращает ETag в ответе только на
@@ -532,7 +580,19 @@ export async function syncToCloudNow() {
         refetch = null;
       }
       if (!refetch) break;
-      applyMergedFromCloud(refetch);
+      // assumeNewer (ТЗ V2 B4.4): перечитанный после 412 снимок доказанно
+      // другая версия — условная запись только что отказала, и гейт новизны
+      // по updatedAt решать не может: локальные часы устройства могут стоять
+      // далеко впереди/позади чужих. Доменные правила разделов разрешают
+      // конфликт как обычно, безусловного overwrite нет. false — хранилище
+      // отвергло сохранение слияния: следующий PUT уехал бы СТАРЫМ телом с
+      // НОВОЙ If-Match (fetchCloudNode уже обновил lastCloudEtag) — прерываем
+      // цикл без повторного PUT; флаг unmergedCloudVersion закрывает и
+      // фоновые повторы до успешного нового чтения/слияния/сохранения.
+      if (applyMergedFromCloud(refetch, { assumeNewer: true }) === false) {
+        unmergedCloudVersion = true;
+        break;
+      }
       previous = refetch;
       // тело следующего PUT строится уже по слитому состоянию (syncBody
       // перечитывает envelope и разделы из хранилища); операции
@@ -723,16 +783,25 @@ async function fetchPlannerNode() {
 // общего stage трёх фаз, поэтому запись немедленная и с откатом в духе
 // saveTasks (js/data/matrix.js): сначала envelope, потом список; список не
 // лег — envelope возвращается к прежним байтам.
+// Возвращает явный результат (ТЗ V2 B4, контракт 0.5 §6.5):
+//   'applied'   — слито и записано;
+//   'unchanged' — применять нечего (узел пуст, не спорит с локальным по
+//                 версиям, чужой владелец, отклонён валидатором): хранилище
+//                 уже включает всё, что несёт узел, PUT по его ETag допустим;
+//   'rejected'  — хранилище отвергло запись (откат сделан, storage:error
+//                 эмитит safeSetItem): состояние НЕ включает узел, и PUT по
+//                 его ETag уехал бы старым конвертом — CAS-цикл публикации
+//                 обязан прерваться без повторного PUT.
 function applyPlannerNodeFromCloud(cloudRaw) {
   const planned = planPlannerApply(cloudRaw);
-  if (!planned) return false;
+  if (!planned) return 'unchanged';
   let rawBefore = null;
   try {
     rawBefore = localStorage.getItem(STORAGE_KEYS.plannerEnvelope);
   } catch (e) {
     rawBefore = null;
   }
-  if (!safeSetItem(STORAGE_KEYS.plannerEnvelope, planned.envValue)) return false;
+  if (!safeSetItem(STORAGE_KEYS.plannerEnvelope, planned.envValue)) return 'rejected';
   if (!safeSetItem(MATRIX_STORAGE_KEY, planned.tasksValue)) {
     if (rawBefore === null) {
       try { localStorage.removeItem(STORAGE_KEYS.plannerEnvelope); } catch (e) { /* уже пусто */ }
@@ -740,11 +809,11 @@ function applyPlannerNodeFromCloud(cloudRaw) {
       safeSetItem(STORAGE_KEYS.plannerEnvelope, rawBefore);
     }
     bus.emit('storage:error');
-    return false;
+    return 'rejected';
   }
   // Список Матрицы изменился: перерисовку делает подписчик sync:applied (§11v)
   bus.emit('sync:applied');
-  return true;
+  return 'applied';
 }
 
 // Публикация снимка в выделенный узел своим CAS-контуром: If-Match по ETag
@@ -787,7 +856,11 @@ async function publishPlannerSnapshot() {
         refetchOk = false;
       }
       if (!refetchOk) break;
-      if (refetch) applyPlannerNodeFromCloud(refetch);
+      // 'rejected' (ТЗ V2 B4): хранилище отвергло сохранение слияния —
+      // PUT старого конверта с новой If-Match запрещён, цикл прерывается
+      // без повторного PUT; outbox ждёт следующего обмена (фоновый дожим
+      // повторяет весь обмен, включая новое чтение и слияние).
+      if (refetch && applyPlannerNodeFromCloud(refetch) === 'rejected') break;
       // снимок следующей попытки перечитывается из envelope в начале цикла
     }
     if (response && response.ok) ackPlannerPublish(info);

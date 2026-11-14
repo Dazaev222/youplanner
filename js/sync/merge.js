@@ -862,7 +862,13 @@ export function mergeCloudIntoLocal(local, cloud, opts) {
   const localTs = Number(options.localTs) || 0;
   if (!cloud || typeof cloud !== 'object' || Array.isArray(cloud)) return null;
   const cloudTs = Number(cloud.updatedAt) || 0;
-  if (cloudTs <= localTs) return null;
+  // assumeNewer (ТЗ V2 B4.4): ветка 412 перечитывает снимок, который
+  // доказанно другая версия — условная запись только что отказала. Гейт
+  // новизны по updatedAt здесь решать не может: локальные часы устройства
+  // могут стоять далеко впереди/позади чужих, и сверка меток отбросила бы
+  // авторитетный снимок только из-за updatedAt. Доменные правила разделов
+  // ниже разрешают конфликт как обычно — безусловного overwrite нет.
+  if (!(options.assumeNewer === true) && cloudTs <= localTs) return null;
 
   const merged = {
     habits: local.habits,
