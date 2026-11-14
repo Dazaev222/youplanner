@@ -174,23 +174,24 @@ test('нормализация ошибок сети/сервера/прав/к�
   assert.equal(http(500).code, 'server');
 });
 
-/* --- Условная запись решения (PATCH + If-Match, CONTRACT-0.5 §6) ---------------- */
+/* --- Запись решения (PATCH без If-Match: RTDB REST не поддерживает
+     If-Match для PATCH — проверено 2026-11-14; одноразовость и срок
+     гарантируют Правила атомарно) ---------------- */
 
-test('решение — PATCH {decision, decidedAt} с If-Match на approvals_v2/owner', async () => {
+test('решение — PATCH {decision, decidedAt} на approvals_v2/owner без If-Match', async () => {
   const fetchImpl = recordingFetch(() => stubResponse({ data: {}, etag: 'etag-new' }));
   const fb = makeFirebase({ fetchImpl });
   await fb.decideApproval({
     ownerUid: 'uid-owner',
     approvalId: 'apr-1',
     decision: 'approved',
-    etag: 'etag-v1',
     serverTime: 1_234_567,
   });
   const call = fb.fetch.calls[0];
   assert.match(call.url, /bridge\/approvals_v2\/uid-owner\/apr-1\.json/);
   assert.equal(call.options.method, 'PATCH');
-  assert.equal(call.options.headers['If-Match'], 'etag-v1',
-    'безусловный PATCH запрещён контрактом §6');
+  assert.equal(call.options.headers['If-Match'], undefined,
+    'If-Match на PATCH RTDB отвергает (400) — одноразовость дают Правила');
   const body = JSON.parse(call.options.body);
   assert.deepEqual(Object.keys(body).sort(), ['decidedAt', 'decision'],
     'решение — ровно пара decision/decidedAt одним PATCH');
@@ -198,14 +199,14 @@ test('решение — PATCH {decision, decidedAt} с If-Match на approvals_
   assert.equal(body.decidedAt, 1_234_567, 'decidedAt — серверное время, одним запросом');
 });
 
-test('412 на решении — нормализованный conflict, не безусловный повтор', async () => {
-  const fetchImpl = recordingFetch(() => stubResponse({ status: 412, data: {} }));
+test('отказ правил на решении — нормализованная denied, наверху перечитывают победителя', async () => {
+  const fetchImpl = recordingFetch(() => stubResponse({ status: 403, data: { error: 'Permission denied' } }));
   const fb = makeFirebase({ fetchImpl });
   await assert.rejects(
-    () => fb.decideApproval({ ownerUid: 'o', approvalId: 'a', decision: 'approved', etag: 'e', serverTime: 1 }),
-    (err) => { assert.equal(err.code, 'conflict'); return true; },
+    () => fb.decideApproval({ ownerUid: 'o', approvalId: 'a', decision: 'approved', serverTime: 1 }),
+    (err) => { assert.equal(err.code, 'denied'); return true; },
   );
-  assert.equal(fb.fetch.calls.length, 1, 'адаптер не молча повторяет безусловный PATCH');
+  assert.equal(fb.fetch.calls.length, 1, 'адаптер не молча повторяет — перечитывает наверху');
 });
 
 /* --- Чтение approval с ETag -------------------------------------------------- */

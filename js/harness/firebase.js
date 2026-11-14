@@ -270,9 +270,13 @@ export function createHarnessFirebase({ config, fetchImpl, storage, now }) {
     };
   };
 
-  // Решение — одним PATCH-парой с If-Match (уникальный способ менять
-  // decision по контракту §6; Rules проверяют pending и expiresAt).
-  api.decideApproval = async function decideApproval({ ownerUid, approvalId, decision, etag, serverTime }) {
+  // Решение — одним PATCH-парой {decision, decidedAt} БЕЗ If-Match:
+  // RTDB REST не поддерживает If-Match для PATCH (проверено 2026-11-14,
+  // «The 'if-match' header is not supported with GET, PATCH or POST»).
+  // Одноразовость и срок гарантируют Правила (decision один раз при
+  // expiresAt>now — атомарно); при отказе правил наверху перечитывают
+  // approval и показывают победившее решение другой вкладки.
+  api.decideApproval = async function decideApproval({ ownerUid, approvalId, decision, serverTime }) {
     if (decision !== 'approved' && decision !== 'rejected') {
       throw normalizeError(new Error('недопустимое решение: ' + decision));
     }
@@ -281,7 +285,6 @@ export function createHarnessFirebase({ config, fetchImpl, storage, now }) {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
-        'If-Match': String(etag || '*'),
       },
       body: JSON.stringify({ decision, decidedAt }),
     });
