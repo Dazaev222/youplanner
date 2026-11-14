@@ -13,6 +13,35 @@
   color-scheme: light;
 }
 
+/* --- Обязательный блок F6.1 (единый владелец геометрии iOS) -------------------
+   Переменные --harness-vh/--harness-vtop/--harness-bottom-space пишет
+   js/harness/viewport.js ТОЛЬКО на #app; здесь — их CSS fallback и каркас
+   панелей чата/настроек. Изменять блок можно только вместе с ТЗ F6.1. */
+body.view-harness { color-scheme: light; }
+#harness-settings-view[hidden], #harness-chat-panel[hidden] { display: none !important; }
+.harness-chat-panel, .harness-settings-view {
+  display: flex; flex-direction: column; flex: 1 1 auto;
+  min-height: 0; min-width: 0; overflow: hidden;
+}
+.harness-messages { flex: 1 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+@media (max-width: 700px) {
+  body.view-harness { overflow: hidden; }
+  body.view-harness #app {
+    position: fixed; top: var(--harness-vtop, 0px); left: 0; right: 0;
+    height: 100vh; height: 100dvh; height: var(--harness-vh, 100dvh);
+    min-height: 0; margin: 0; padding: 0; overflow: hidden;
+    display: flex; flex-direction: column;
+  }
+  body.view-harness #header { display: none; }
+  body.view-harness .harness-view { padding: 0; margin: 0; }
+  body.view-harness .harness-dock {
+    padding: 12px 16px var(--harness-bottom-space, calc(8px + env(safe-area-inset-bottom, 0px)));
+  }
+  body.view-harness.harness-editing #tab-bar { display: none !important; }
+  body.view-harness.harness-editing .harness-dock { padding-bottom: 8px; }
+  body.view-harness.harness-editing .harness-settings-actions { padding-bottom: 8px; }
+}
+
 /* Парное правило обязательно: display:flex/grid у контейнеров иначе
    перебивает атрибут hidden, и неактивный экран просвечивает (U5.4.1) */
 .harness-view[hidden],
@@ -602,30 +631,11 @@ body.view-harness #app {
   }
 }
 
-/* --- Телефон (порог 700px совпадает с isMobileView и mobile.css) --------------------------
-   Экран-колонка на весь телефон, как у ассистента: глобальная шапка
-   (логотип, недели) прячется — у экрана своя шапка с «Назад». Док получает
-   нижний запас под плавающий таб-бар (84px = 64 капсула + 20 отступ, как в
-   mobile.css ассистента), поле ввода никогда не уезжает под бар.
-   Правила сидят ЗДЕСЬ, а не в mobile.css: mobile.css не редактируется. */
-@media (max-width: 700px) {
-  body.view-harness #app {
-    padding: 0;
-  }
-
-  body.view-harness #header {
-    display: none;
-  }
-
-  .harness-view {
-    margin-top: 0;
-    padding: 0 12px;
-  }
-
-  .harness-dock {
-    padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px));
-  }
-}
+/* --- Телефон ----------------------------------------------------------------------------------
+   Мобильная геометрия Harness целиком в обязательном блоке F6.1 (начало
+   файла): #app fixed по --harness-vh/--harness-vtop, резерв dock —
+   --harness-bottom-space с CSS fallback. Отдельных мобильных правил для
+   dock здесь больше нет: прежний константный резерв заменён механизмом F6.1. */
 
 /* --- Уменьшенное движение: без анимаций и плавной прокрутки (U5.3) ----------------------- */
 

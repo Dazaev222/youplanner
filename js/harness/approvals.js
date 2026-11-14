@@ -254,6 +254,9 @@ export function createApprovalController({ elements, deps }) {
       // недоступны — диалог не открываем, объясняем словами.
       return;
     }
+    // Перед открытием — blur активного ввода без потери черновика (F6.1.9);
+    // фокус в textarea автоматически не возвращается.
+    if (typeof io.beforeOpen === 'function') io.beforeOpen();
     if (!el.dialog.open) el.dialog.showModal();
     // Фокус на заголовок, не на «Разрешить» (U5.5.5).
     if (el.title && typeof el.title.focus === 'function') el.title.focus();

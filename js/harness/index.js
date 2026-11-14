@@ -19,7 +19,7 @@ import {
   HARNESS_DEVICE_HEARTBEAT_MS,
   HARNESS_DEVICE_STALE_MS,
 } from './firebase.js';
-import { syncSheetToKeyboard } from '../core/dom.js';
+import { mountHarnessViewport } from './viewport.js';
 
 // Публичный веб-конфиг RTDB Bridge (см. шапку файла).
 const BRIDGE_WEB_CONFIG = {
@@ -111,8 +111,10 @@ export function mountHarness({ onBack } = {}) {
   let deviceMenu = null;        // открытый пункт меню устройств
   let presenceTimer = 0;
   let layoutFrame = 0;
+  let settingsOpen = false;     // подэкран «Настройки модели» (F6.2.8)
   let chat = null;
   let approvals = null;
+  let viewport = null;
   const unsubscribes = [];
   // Модель ленты: команды по commandId, статусы по execution/result.
   const feed = { commands: new Map(), executions: new Map(), results: new Map() };
@@ -219,7 +221,17 @@ export function mountHarness({ onBack } = {}) {
       },
       serverNow: () => (adapter ? adapter.serverNow() : Date.now()),
       timers: { setTimeout, clearTimeout },
-      isVisible: () => !destroyed && !view.hidden && document.visibilityState !== 'hidden',
+      // Открытие dialog: сначала blur ввода (черновик остаётся в поле),
+      // фокус в textarea автоматически не возвращается (F6.1.9).
+      beforeOpen: () => {
+        const active = document.activeElement;
+        if (active && typeof active.blur === 'function' &&
+            active !== document.body && !destroyed) {
+          active.blur();
+        }
+      },
+      isVisible: () => !destroyed && !view.hidden &&
+        document.visibilityState !== 'hidden' && !settingsOpen,
       onQueueChanged: (count) => {
         if (!el.pendingChip) return;
         el.pendingChip.hidden = count === 0;
@@ -544,7 +556,7 @@ export function mountHarness({ onBack } = {}) {
     menuButton.setAttribute('aria-expanded', 'true');
   }
 
-  /* --- Геометрия dialog (U5.5.3) ---------------------------------------------------------------- */
+  /* --- Геометрия dialog (U5.5.3, F6.1.9) ---------------------------------------------------------- */
 
   function layoutDialog() {
     layoutFrame = 0;
@@ -556,12 +568,16 @@ export function mountHarness({ onBack } = {}) {
     const doc = document.documentElement;
     const clientWidth = doc.clientWidth;
     const clientHeight = doc.clientHeight;
-    const bottomEdge = rowRect.top - 8;   // нижний край карточки
-    // Доступная высота: от видимого верха viewport + 8px до нижнего края.
-    const visibleTop = (window.visualViewport && Number.isFinite(window.visualViewport.offsetTop))
-      ? window.visualViewport.offsetTop
-      : 0;
-    const availableHeight = Math.max(120, bottomEdge - (visibleTop + 8));
+    const bottomEdge = rowRect.top - 8;   // нижний край карточки: верх поля − 8px
+    // Одна система layout-координат: видимый верх — vv.offsetTop, DOMRect поля
+    // в тех же client-координатах; offsetTop второй раз не прибавляется.
+    const vv = window.visualViewport;
+    const visibleTop = (vv && Number.isFinite(Number(vv.offsetTop)))
+      ? Number(vv.offsetTop) : 0;
+    // Без константного минимума высоты (старый Math.max с 120 убран):
+    // max-height ограничена реальным доступным местом; нехватка места не
+    // выталкивает кнопки — карточка сжимается и прокручивается.
+    const availableHeight = Math.max(0, bottomEdge - (visibleTop + 8));
     // Ширина = min(ширина колонки чата − 32px, 560px), центр колонки.
     const columnWidth = Math.min(clientWidth, 760);
     const width = Math.min(columnWidth - 32, 560);
@@ -649,20 +665,11 @@ export function mountHarness({ onBack } = {}) {
     }
   });
 
-  // Viewport: клавиатура/поворот — пересчёт позиции диалога одним rAF
-  // (U5.5.3) + общий адаптер клавиатуры YouPlanner.
-  bind(window, 'resize', function () {
-    syncSheetToKeyboard();
-    scheduleDialogLayout();
-  });
+  // Viewport: клавиатура/поворот — единый владелец геометрии (F6.1) пишет
+  // переменные на #app и зовёт onLayout; позиция диалога пересчитывается
+  // после обновлённой геометрии, вторым viewport-компенсатором не заводится.
+  bind(window, 'resize', scheduleDialogLayout);
   bind(window, 'orientationchange', scheduleDialogLayout);
-  if (window.visualViewport) {
-    bind(window.visualViewport, 'resize', function () {
-      syncSheetToKeyboard();
-      scheduleDialogLayout();
-    });
-    bind(window.visualViewport, 'scroll', scheduleDialogLayout);
-  }
 
   // Возврат из фона и reconnect: свежее чтение approvals и повторная
   // проверка дедлайна до разблокировки (U5.6.7).
@@ -744,7 +751,13 @@ export function mountHarness({ onBack } = {}) {
 
   adapter = createHarnessFirebase({ config: BRIDGE_WEB_CONFIG, storage });
   startSession();
-  syncSheetToKeyboard();
+  // Единый владелец геометрии iOS (F6.1): монтируется один раз на маршрут,
+  // destroy на unmount; Dialog получает onLayout после обновления геометрии.
+  viewport = mountHarnessViewport({
+    app: document.getElementById('app'),
+    root: view,
+    onLayout: scheduleDialogLayout,
+  });
 
   return {
     unmount() {
@@ -768,6 +781,10 @@ export function mountHarness({ onBack } = {}) {
       listeners.length = 0;
       closeDeviceMenu();
       removeAuthPanel();
+      if (viewport) {
+        viewport.destroy();
+        viewport = null;
+      }
       approvals.destroy();
       statusNodes.clear();
       feed.commands.clear();
