@@ -48,6 +48,9 @@ import { closeStatsMenu, isStatsMenuOpen, isStatsView, openStatsMenu, renderStat
 import { bindNavEvents } from './events/nav-events.js';
 import { bindSyncDataEvents } from './events/sync-data-events.js';
 import { bindScreensEvents } from './events/screens-events.js';
+// PWA-пульт Harness (ТЗ U5): mountHarness ставит подписки/жизненный цикл
+// при входе на маршрут; unmount возвращает экран в чистое состояние.
+import { mountHarness } from './harness/index.js';
 
 /* --- Статус ручной синхронизации в Настройках ------------------------------ */
 
@@ -328,7 +331,18 @@ const ROUTE_RENDER = {
   'fast': function () { resetFastForm(); renderFastView(); },
   // Ассистенту на входе нужно только обновить подпись про ключ
   'assistant': renderAssistantView,
+  // Harness: вход на маршрут поднимает сессию (Auth/device/подписки),
+  // выход из маршрута её полностью гасит — см. switchAppView ниже
+  'harness': function () {
+    harnessSession = mountHarness({
+      onBack: function () { switchAppView('main'); },
+    });
+  },
 };
+
+// Активная сессия Harness (mountHarness → { unmount }). Одна на маршрут:
+// при уходе с экрана unmount чистит таймеры/подписки/dialog (U5.9.1).
+let harnessSession = null;
 
 // Предупреждение о битом имени экрана уже выведено (switchAppView)
 let warnedUnknownView = false;
@@ -367,6 +381,12 @@ export function switchAppView(name) {
   // без этого оставил бы его висеть поверх нового раздела
   closeAssistantDeletePopup();
   closeModal();
+  // Уход с экрана Harness гасит его сессию ДО переключения видимости:
+  // подписки/таймеры/dialog не переживают маршрут (U5.8/U5.9.1).
+  if (currentView === 'harness' && harnessSession && name !== 'harness') {
+    harnessSession.unmount();
+    harnessSession = null;
+  }
 
   // Вход в раздел запоминает, откуда вошли, — туда «Назад» из хаба и вернёт
   if (isStatsView(name) && !isStatsView(currentView)) statsReturnView = currentView;

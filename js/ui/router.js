@@ -41,6 +41,10 @@ export const SCREENS = {
   // без подсветки таб-бар на этом экране не показывал бы активного раздела
   'schedule-edit': { el: 'schedule-edit-view', tab: 'schedule' },
   'assistant': { el: 'assistant-view', tab: 'assistant', bodyClass: 'view-assistant' },
+  // PWA-пульт Harness (ТЗ U5): чат с ПК-агентом и подтверждения опасных
+  // действий. Вход — кнопка шапки на ПК и пункт «Меню» на телефоне,
+  // поэтому вкладка — главная
+  'harness': { el: 'harness-view', tab: 'main', bodyClass: 'view-harness' },
 };
 
 // Вкладка для экрана. `from` — экран, с которого пришли (currentView до
@@ -73,6 +77,8 @@ export function applyScreen(name, from) {
   setHidden('schedule-btn', !isMain);
   setHidden('settings-btn', !isMain);
   setHidden('assistant-btn', !isMain);
+  // «ПК-агент» — вход с главной, как и остальные кнопки шапки
+  setHidden('harness-btn', !isMain);
   // Кнопка статистики открывает панель с экранами раздела: на других
   // экранах ей нечего делать
   setHidden('stats-menu-btn', !isMain);
@@ -93,7 +99,7 @@ export function applyScreen(name, from) {
   // читается по экрану. Список ниже — единственный источник правды: экран с
   // bodyClass вне этого списка получал бы пустой <body> и шапку поверх себя.
   const classes = ['view-qaza', 'view-prayer', 'view-fast', 'view-settings',
-    'view-stats', 'view-matrix', 'view-assistant'];
+    'view-stats', 'view-matrix', 'view-assistant', 'view-harness'];
   const active = Object.prototype.hasOwnProperty.call(SCREENS, name)
     ? SCREENS[name].bodyClass
     : null;

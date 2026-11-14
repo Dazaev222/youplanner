@@ -22,15 +22,21 @@
          (js/ui/assistant-view.js:979, js/ui/assistant-pdf.js:419);
        * font-src https://fonts.gstatic.com — woff2-файлы Inter; офлайн
          деградирует на system-ui (см. комментарий к preconnect ниже);
-       * connect-src — точный список хостов, к которым код ходит по fetch
-         (WebSocket/EventSource/XHR в проекте нет):
+         * connect-src — точный список хостов, к которым код ходит по fetch
+           (WebSocket/EventSource/XHR в проекте нет):
            firebaseio.com — REST-синхронизация (js/sync/core.js:22,27);
            identitytoolkit + securetoken .googleapis.com — Firebase Auth
-           REST (js/data/firebase-auth.js:190,255,275);
+           REST (js/data/firebase-auth.js:190,255,275;
+           js/harness/firebase.js — Auth проекта Bridge);
+           telegram-claude-tunnel-default-rtdb.europe-west1.
+           firebasedatabase.app — RTDB Bridge для PWA-пульта Harness
+           (js/harness/firebase.js, публичный веб-конфиг
+           BR/служебное/get_web_config.py; доступ закрывают Rules);
            api.neuraldeep.ru — ассистент (js/ui/assistant-media.js:34);
          wss-портов нет: Realtime Database ходит через REST, а https:-
          источник в connect-src покрывает и wss на этот хост, если когда-
-         нибудь понадобится стриминг;
+         нибудь понадобится стриминг; Harness-подписки — EventSource к
+         тому же хосту RTDB Bridge;
        * worker-src 'self' — модульный воркер pdf.js same-origin
          (js/ui/assistant-pdf.js:446; blob-обёртка в pdf.min.mjs включается
          только для cross-origin workerSrc, поэтому blob: не нужен);
@@ -46,7 +52,7 @@
          путь (hosting.headers /** в firebase.json); заголовок начнёт
          работать после следующего деплоя хостинга. -->
   <meta http-equiv="Content-Security-Policy"
-        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' blob: data:; font-src 'self' https://fonts.gstatic.com; connect-src https://youplanner-5c2f5-default-rtdb.firebaseio.com https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://api.neuraldeep.ru; worker-src 'self'; manifest-src 'self'; base-uri 'self'; object-src 'none'; form-action 'none'; frame-ancestors 'none'">
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' blob: data:; font-src 'self' https://fonts.gstatic.com; connect-src https://youplanner-5c2f5-default-rtdb.firebaseio.com https://telegram-claude-tunnel-default-rtdb.europe-west1.firebasedatabase.app https://identitytoolkit.googleapis.com https://securetoken.googleapis.com https://api.neuraldeep.ru; worker-src 'self'; manifest-src 'self'; base-uri 'self'; object-src 'none'; form-action 'none'; frame-ancestors 'none'">
   <!-- Установка на телефон как отдельного приложения: иконка, имя, цвет строки статуса -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
@@ -76,6 +82,7 @@
   <link rel="stylesheet" href="styles/matrix.css">
   <link rel="stylesheet" href="styles/habits-edit.css">
   <link rel="stylesheet" href="styles/assistant.css">
+  <link rel="stylesheet" href="styles/harness.css">
   <link rel="stylesheet" href="styles/mobile.css">
 </head>
 <body>
@@ -104,6 +111,7 @@
     </nav>
     <div id="header-actions">
       <button id="assistant-btn" class="btn btn-secondary">Ассистент</button>
+      <button id="harness-btn" class="btn btn-secondary">ПК-агент</button>
       <button id="qaza-btn" class="btn btn-secondary">Каза-намазы</button>
       <button id="schedule-btn" class="btn btn-secondary">Расписание</button>
       <button id="settings-btn" class="btn btn-secondary">Настройки</button>
@@ -862,6 +870,49 @@
     </div>
   </section>
 
+  <!-- PWA-пульт Mobile Harness (ТЗ U5.2): чат с ПК-агентом и подтверждения
+       опасных действий. Внешний main у документа есть (#main), поэтому
+       контейнер — section с точными id/классами из каркаса U5.2. История
+       команд Harness отдельна от обычного ИИ-чата: свой узел Firebase
+       (bridge/* проекта telegram-claude-tunnel) и свои модули js/harness.
+       Подтверждения живут в отдельном dialog РЯДОМ с корневой оболочкой
+       (#app), не внутри скрываемой вкладки. -->
+  <section id="harness-view" class="harness-view" aria-labelledby="harness-title" hidden>
+    <header class="harness-head">
+      <button type="button" class="harness-icon-btn" aria-label="Назад">
+        <!-- Стрелка назад (chevron.left) -->
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m15 18-6-6 6-6"/></svg>
+      </button>
+      <div class="harness-head-info">
+        <h1 id="harness-title">ПК-агент</h1>
+        <p id="harness-presence" role="status">Проверяем связь с ПК…</p>
+      </div>
+      <button type="button" class="harness-icon-btn" aria-label="Меню ПК" aria-expanded="false">
+        <!-- Монитор (display) -->
+        <svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8"/><path d="M12 16v4"/></svg>
+      </button>
+    </header>
+    <section id="harness-messages" class="harness-messages" aria-label="Сообщения и задачи" tabindex="0">
+      <ol class="harness-message-list"></ol>
+    </section>
+    <p id="harness-announcer" class="harness-sr-only" role="status" aria-live="polite"></p>
+    <footer class="harness-dock">
+      <button type="button" id="harness-new-messages" class="harness-secondary" hidden>Новые сообщения</button>
+      <button type="button" id="harness-pending" class="harness-secondary" hidden>Ожидают подтверждения: 1</button>
+      <p id="harness-feedback" role="status" hidden></p>
+      <form id="harness-form">
+        <label for="harness-input" class="harness-sr-only">Задача для ПК</label>
+        <div class="harness-input-row">
+          <textarea id="harness-input" rows="1" placeholder="Напишите задачу…" aria-describedby="harness-feedback"></textarea>
+          <button id="harness-send" type="submit" aria-label="Отправить задачу">
+            <!-- Стрелка вверх (arrow.up), как в композере ассистента -->
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>
+          </button>
+        </div>
+      </form>
+    </footer>
+  </section>
+
   <!-- Панель навигации статистики (заход 4). У самой панели атрибута hidden
        нет: его переключение не дало бы выезду сыграть — открытое состояние
        помечено классом is-open, а гасит панель базовое display:none на ПК.
@@ -909,6 +960,9 @@
          «Цикла сна»: экран не лежит в data-stats-view и общий обработчик
          статистики его не открыл бы -->
     <button type="button" class="stats-menu-item" data-matrix-view><span class="stats-menu-emoji" aria-hidden="true">🗂️</span>Матрица Эйзенхауэра</button>
+    <!-- ПК-агент (Harness): на телефоне это второй вход после шапки ПК —
+         экран чата с ПК и подтверждений опасных действий -->
+    <button type="button" class="stats-menu-item" data-harness-view><span class="stats-menu-emoji" aria-hidden="true">🖥️</span>ПК-агент</button>
   </aside>
 
   <!-- Нижний таб-бар: переключает разделы. Виден только на телефоне,
@@ -933,6 +987,34 @@
       <span>Настройки</span></button>
   </nav>
 </div>
+
+<!-- Модальное подтверждение Harness (ТЗ U5.2/U5.5): одно окно на всю очередь
+     запросов. Живёт РЯДОМ с корневой оболочкой (#app), не внутри скрываемой
+     вкладки, чтобы showModal не зависел от видимости вкладки. Открывается
+     ТОЛЬКО через showModal (js/harness/approvals.js); Escape/backdrop/
+     «Свернуть без решения» закрывают представление, НЕ записывая решение. -->
+<dialog id="harness-approval" class="harness-approval" aria-labelledby="harness-approval-title" aria-describedby="harness-approval-summary">
+  <header class="harness-approval-head">
+    <h2 id="harness-approval-title" tabindex="-1">Требуется подтверждение</h2>
+    <p class="harness-approval-counter"></p>
+  </header>
+  <div class="harness-approval-body">
+    <p id="harness-approval-summary"></p>
+    <dl class="harness-approval-facts"></dl>
+    <details class="harness-approval-details">
+      <summary>Точная команда и параметры</summary>
+      <pre class="harness-approval-arguments"></pre>
+    </details>
+  </div>
+  <footer class="harness-approval-footer">
+    <p class="harness-approval-state" role="status" aria-live="polite"></p>
+    <div class="harness-approval-actions">
+      <button type="button" class="harness-reject">Отклонить</button>
+      <button type="button" class="harness-approve">Разрешить один раз</button>
+    </div>
+    <button type="button" class="harness-collapse">Свернуть без решения</button>
+  </footer>
+</dialog>
 
 <!-- Модальное окно редактирования списка привычек -->
 <div id="habit-modal" class="modal" hidden>

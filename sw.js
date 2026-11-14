@@ -135,7 +135,13 @@
 // (v46 — правка текстовая (в комментарии js/data/matrix.js:771 перепутались
 // алфавиты), v45 — четыре файла после v44, v44 — восемь файлов аудита,
 // v43 — транспорт plannerV1, v42 — пересобранная вёрстка Матрицы.)
-const CACHE = 'youplanner-v59';
+// v60 (v59 -> v60): PWA-пульт Harness (ТЗ U5) — styles/harness.css и модули
+// js/harness/{firebase,chat,approvals,index}.js в precache; экран ПК-агента
+// в index.html (+ CSP connect-src хоста RTDB Bridge в мете и заголовке).
+// SW кэширует ОБОЛОЧКУ: ответы approvals_v2, решения и токены под кэш не
+// попадают — живые запросы js/harness/firebase.js (fetch/EventSource мимо
+// Cache Storage); никаких background sync решений (U5.6.8).
+const CACHE = 'youplanner-v60';
 // Иконки — все из manifest.json: отсутствующая в кэше иконка ломала бы
 // офлайн-установку PWA (аудит 2026-10-31: icon-512.png не кэшировался)
 const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon-512.png', './icon.svg',
@@ -145,11 +151,19 @@ const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './ic
   './styles/schedule.css', './styles/sheets.css', './styles/prayer.css',
   './styles/toast.css', './styles/settings.css', './styles/stats.css',
   './styles/habits-edit.css', './styles/assistant.css',
+  // PWA-пульт Harness (ТЗ U5): только селекторы экрана ПК-агента
+  './styles/harness.css',
   './styles/mobile.css', './styles/matrix.css',
   // pdf.js для чтения PDF в ассистенте: локальные копии вместо CDN —
   // офлайн-PWA разбирает файлы без сети
   './js/vendor/pdf.min.mjs', './js/vendor/pdf.worker.min.mjs',
   './js/data/firebase-auth.js',
+  // PWA-пульт Harness (ТЗ U5): адаптер Bridge-Firebase, чат, контроллер
+  // подтверждений и композиция маршрута
+  './js/harness/firebase.js',
+  './js/harness/chat.js',
+  './js/harness/approvals.js',
+  './js/harness/index.js',
   // Общие примитивы структуры значений (аудит 2026-11-13, YP-08)
   './js/core/struct.js',
   './js/sync/sync.js',

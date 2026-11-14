@@ -45,6 +45,9 @@ const ITEMS = [
   ['data-stats-view="stats-habits"', 'Привычки', '✅'],
   ['data-sleep-view', 'Цикл сна', '🌙'],
   ['data-matrix-view', 'Матрица Эйзенхауэра', '🗂️'],
+  // PWA-пульт Harness (ТЗ U5): вход с телефона, как у «Цикла сна» и
+  // «Матрицы» — свой data-атрибут, пункт следует общему паттерну панели
+  ['data-harness-view', 'ПК-агент', '🖥️'],
 ];
 
 function menuPanel() {
@@ -57,7 +60,7 @@ function menuPanel() {
 
 test('menu: index.html — у каждого пункта один эмодзи-слот и он перед текстом', () => {
   const buttons = menuPanel().match(/<button[^>]*class="stats-menu-item"[^>]*>.*?<\/button>/gs) || [];
-  assert.equal(buttons.length, 7, 'пунктов в панели: ' + buttons.length);
+  assert.equal(buttons.length, 8, 'пунктов в панели: ' + buttons.length);
   for (const item of buttons) {
     const slots = item.match(/<span class="stats-menu-emoji" aria-hidden="true">[^<]+<\/span>/g) || [];
     assert.equal(slots.length, 1, 'ровно один эмодзи-слот на пункт: ' + item.slice(0, 60));
@@ -66,7 +69,7 @@ test('menu: index.html — у каждого пункта один эмодзи-
     const inner = item.slice(item.indexOf('>') + 1, -9);
     assert.ok(inner.startsWith(slots[0]),
       'эмодзи стоит слева от названия: ' + item.slice(0, 60));
-    assert.match(item, /data-(stats|sleep|matrix)-view/, 'у пункта есть экран');
+    assert.match(item, /data-(stats|sleep|matrix|harness)-view/, 'у пункта есть экран');
   }
 });
 
@@ -84,12 +87,14 @@ test('menu: распределение эмодзи по пунктам совп
       .replace(/<span class="stats-menu-emoji" aria-hidden="true">[^<]*<\/span>/, '');
     const view = attrs['data-stats-view']
       || (Object.prototype.hasOwnProperty.call(attrs, 'data-sleep-view') ? 'sleep-view' : '')
-      || (Object.prototype.hasOwnProperty.call(attrs, 'data-matrix-view') ? 'matrix-view' : '');
+      || (Object.prototype.hasOwnProperty.call(attrs, 'data-matrix-view') ? 'matrix-view' : '')
+      || (Object.prototype.hasOwnProperty.call(attrs, 'data-harness-view') ? 'harness-view' : '');
     return { view, label, emoji: emoji ? emoji[1] : null };
   });
   for (const [attr, label, emoji] of ITEMS) {
     const key = attr.replace('data-stats-view="', '').replace('"', '')
-      .replace('data-sleep-view', 'sleep-view').replace('data-matrix-view', 'matrix-view');
+      .replace('data-sleep-view', 'sleep-view').replace('data-matrix-view', 'matrix-view')
+      .replace('data-harness-view', 'harness-view');
     const item = found.find(i => i.view === key);
     assert.ok(item, 'пункт найден: ' + key);
     assert.equal(item.emoji, emoji, key + ': значок пункта');

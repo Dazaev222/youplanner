@@ -31,6 +31,15 @@ export function bindNavEvents() {
     settingsButton.addEventListener('click', function () { switchAppView('settings'); });
   }
 
+  // PWA-пульт Harness: кнопка шапки на ПК. На телефоне вход — пункт
+  // «Меню» (панель статистики, делегирование ниже по data-harness-view).
+  // Кнопка «Назад» на экране Harness не имеет id (каркас U5.2) — её ставит
+  // сам mountHarness через селектор по aria-label
+  const harnessButton = document.getElementById('harness-btn');
+  if (harnessButton) {
+    harnessButton.addEventListener('click', function () { switchAppView('harness'); });
+  }
+
   const settingsBack = document.getElementById('settings-back');
   if (settingsBack) {
     settingsBack.addEventListener('click', function () { switchAppView('main'); });
@@ -108,6 +117,11 @@ export function bindNavEvents() {
       if (item.hasAttribute('data-matrix-view')) {
         closeStatsMenu();
         switchAppView('matrix');
+        return;
+      }
+      if (item.hasAttribute('data-harness-view')) {
+        closeStatsMenu();
+        switchAppView('harness');
         return;
       }
       if (item.hasAttribute('data-stats-view')) {
