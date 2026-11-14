@@ -1,0 +1,644 @@
+/* --- PWA-пульт Mobile Harness (ТЗ U5.3–U5.5) --------------------------------
+   Экран ПК-агента: чат-колонка внутри YouPlanner с модальным подтверждением
+   над полем ввода. Источник истины — подключённый styles/tokens.css: в этом
+   файле НЕТ новых HEX и новых токенов, радиусы/тени повторяют assistant.css.
+   Область Harness принудительно светлая: системная тёмная тема не должна
+   менять цвета (color-scheme: light). Глобальные файлы не редактируются:
+   все селекторы — только Harness. Файл подключён в index.html ПОСЛЕ
+   tokens.css и assistant.css. */
+
+/* Экран и модалка всегда светлые: тёмная тема системы не влияет */
+.harness-view,
+.harness-approval {
+  color-scheme: light;
+}
+
+/* Парное правило обязательно: display:flex/grid у контейнеров иначе
+   перебивает атрибут hidden, и неактивный экран просвечивает (U5.4.1) */
+.harness-view[hidden],
+.harness-view [hidden],
+.harness-approval[hidden] {
+  display: none !important;
+}
+
+/* Пока открыт Harness, каркас приложения — колонка на всю высоту окна
+   (как у ассистента, styles/assistant.css): глобальная шапка и экран делят
+   окно без прокрутки страницы. 100vh — fallback для старых Safari */
+body.view-harness #app {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  height: 100dvh;
+}
+
+.harness-view {
+  display: flex;
+  flex-direction: column;
+  flex: 1 1 auto;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  background: var(--bg);
+  color: var(--text);
+}
+
+/* --- Шапка ------------------------------------------------------------------ */
+
+.harness-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  flex-shrink: 0;
+  border-bottom: 1px solid var(--separator);
+  background: var(--bg);
+}
+
+.harness-head-info {
+  flex: 1 1 auto;
+  min-width: 0;
+}
+
+.harness-head h1 {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.4;
+  font-weight: 600;
+}
+
+/* Presence — существенный статус, поэтому --text-muted, не tertiary */
+.harness-head p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.harness-icon-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  min-width: 44px;
+  min-height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  cursor: pointer;
+  transition: background-color .15s, color .15s;
+}
+
+.harness-icon-btn:active {
+  background: var(--surface-pressed);
+}
+
+.harness-icon-btn svg {
+  display: block;
+}
+
+/* --- Лента -------------------------------------------------------------------- */
+
+.harness-messages {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 14px 16px 16px;
+}
+
+.harness-message-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.harness-message {
+  max-width: 78%;
+  padding: 10px 14px;
+  font-size: 15px;
+  line-height: 1.4;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  /* Параметры и ответы разрешено выделять и копировать: запрет
+     user-select старого чата не наследуется (U5.4.3) */
+  user-select: text;
+  -webkit-user-select: text;
+  animation: harness-msg-in .18s ease-out;
+}
+
+@keyframes harness-msg-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+}
+
+/* Сообщение владельца: акцентная пилюля справа, хвост в углу —
+   точное повторение assistant.css */
+.harness-message--owner {
+  align-self: flex-end;
+  border-radius: var(--radius-lg) var(--radius-lg) 4px var(--radius-lg);
+  background: var(--accent);
+  color: var(--on-accent);
+}
+
+/* Ответ агента: белая карточка слева с малой тенью ответа */
+.harness-message--agent {
+  align-self: flex-start;
+  border-radius: var(--radius-lg) var(--radius-lg) var(--radius-lg) 4px;
+  background: var(--surface-card);
+  color: var(--text);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
+}
+
+/* Карточка задания внутри сообщения: статус и подробности выполнения */
+.harness-task {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-card);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.harness-message--owner .harness-task {
+  background: rgba(255, 255, 255, 0.14);
+  box-shadow: none;
+}
+
+.harness-task summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-weight: 600;
+}
+
+/* Скрин-ридер озвучивает статус; визуально элемент скрыт */
+.harness-sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  padding: 0;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+/* --- Dock: плашки, обратная связь, композер -------------------------------------- */
+
+.harness-dock {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 12px 16px calc(14px + env(safe-area-inset-bottom, 0px));
+  border-top: 1px solid var(--separator);
+  background: var(--bg);
+}
+
+.harness-secondary {
+  align-self: flex-start;
+  min-height: 44px;
+  padding: 8px 16px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font: inherit;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color .15s, transform .15s ease;
+}
+
+.harness-secondary:active {
+  transform: scale(0.98);
+}
+
+#harness-feedback {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+/* Ошибка и просроченное — цветом И словами; цвет не единственный носитель */
+#harness-feedback.is-error {
+  color: var(--danger);
+}
+
+#harness-form {
+  display: flex;
+  margin: 0;
+}
+
+/* Капсула композера в стиле iOS/TickTick: серая пилюля, фокус подсвечивает
+   капсулу целиком (U5.3) */
+.harness-input-row {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  width: 100%;
+  padding: 5px 5px 5px 6px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-pill);
+  background: var(--surface-alt);
+  transition: background-color .15s, border-color .15s, box-shadow .15s;
+}
+
+.harness-input-row:focus-within {
+  border-color: var(--accent);
+  background: var(--surface-card);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+/* 16px против авто-зума iOS; рост по scrollHeight до ~5 строк */
+#harness-input {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 44px;
+  max-height: 126px;
+  padding: 7px 6px;
+  border: 0;
+  outline: none;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+  line-height: 1.4;
+  resize: none;
+  overflow-y: auto;
+}
+
+#harness-input::placeholder {
+  color: var(--text-muted);
+}
+
+#harness-send {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: var(--on-accent);
+  font: inherit;
+  cursor: pointer;
+  transition: transform .15s ease, filter .15s;
+}
+
+#harness-send svg {
+  display: block;
+}
+
+#harness-send:active {
+  transform: scale(0.98);
+}
+
+/* --- Меню выбора ПК ------------------------------------------------------------------ */
+
+.harness-device-menu {
+  position: fixed;
+  z-index: 1280;
+  min-width: 220px;
+  max-width: min(calc(100vw - 32px), 320px);
+  padding: 4px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
+  box-shadow: var(--shadow);
+}
+
+.harness-device-menu[hidden] {
+  display: none !important;
+}
+
+.harness-device-item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.harness-device-item .harness-device-presence {
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+/* Форма входа владельца (состояние auth-expired): строки внутри ленты */
+.harness-auth {
+  align-self: center;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: min(100%, 320px);
+  padding: 14px;
+  border-radius: var(--radius-md);
+  background: var(--surface-card);
+  box-shadow: var(--shadow-card);
+}
+
+.harness-auth p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.harness-auth input {
+  min-height: 44px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+  font: inherit;
+  font-size: 16px;
+}
+
+.harness-auth button {
+  min-height: 44px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--on-accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* --- Модальное подтверждение (U5.5) -----------------------------------------------
+   Позицию (top/left/width/max-height) считает js/harness: нижний край = верх
+   .harness-input-row − 8px. Здесь — базовые фиксированные координаты и вид. */
+
+.harness-approval {
+  position: fixed;
+  margin: 0;
+  padding: 16px;
+  /* display:flex — только при открытии: закрытый dialog не занимает слой */
+  display: none;
+  flex-direction: column;
+  gap: 12px;
+  overflow: hidden;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-lg);
+  background: var(--surface-card);
+  color: var(--text);
+  box-shadow: var(--shadow);
+  width: min(calc(100vw - 32px), 560px);
+}
+
+.harness-approval[open] {
+  display: flex;
+}
+
+.harness-approval::backdrop {
+  /* Единственный новый полупрозрачный слой; без blur */
+  background: rgba(20, 20, 40, 0.12);
+}
+
+.harness-approval-head {
+  flex-shrink: 0;
+}
+
+.harness-approval-head h2 {
+  margin: 0;
+  font-size: 16px;
+  line-height: 1.4;
+  font-weight: 600;
+  outline: none;
+}
+
+.harness-approval-counter {
+  margin: 4px 0 0 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.harness-approval-body {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.harness-approval-body p {
+  margin: 0 0 8px 0;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+.harness-approval-facts {
+  margin: 0 0 8px 0;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-line;
+  color: var(--text-muted);
+}
+
+.harness-approval-details summary {
+  min-height: 44px;
+  display: flex;
+  align-items: center;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+/* Точные параметры: моноширинный системный стек только для кода */
+.harness-approval-arguments {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-muted);
+  color: var(--text);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.harness-approval-footer {
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.harness-approval-state {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+.harness-approval-state.is-error {
+  color: var(--danger);
+}
+
+.harness-approval-actions {
+  display: flex;
+  gap: 8px;
+}
+
+/* До 359px кнопки решения ставятся вертикально (U5.4.5) */
+@media (max-width: 359px) {
+  .harness-approval-actions {
+    flex-direction: column;
+  }
+}
+
+.harness-reject {
+  flex: 1 1 50%;
+  min-height: 44px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--surface-alt);
+  color: var(--text);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.harness-approve {
+  flex: 1 1 50%;
+  min-height: 44px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--on-accent);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.harness-collapse {
+  min-height: 44px;
+  border: 0;
+  border-radius: var(--radius-sm);
+  background: transparent;
+  color: var(--text-muted);
+  font: inherit;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.harness-collapse:active {
+  background: var(--surface-pressed);
+}
+
+/* --- Hover только под (hover: hover); disabled не получает отклик (U5.3) --------------- */
+
+@media (hover: hover) {
+  .harness-icon-btn:hover:not(:disabled),
+  .harness-collapse:hover:not(:disabled) {
+    background: var(--surface-pressed);
+  }
+
+  .harness-secondary:hover:not(:disabled) {
+    background: var(--surface-pressed);
+  }
+
+  .harness-approve:hover:not(:disabled),
+  #harness-send:hover:not(:disabled),
+  .harness-auth button:hover:not(:disabled) {
+    filter: brightness(1.08);
+  }
+}
+
+/* --- Disabled: заливка и подпись без filter/opacity (U5.3) ------------------------------ */
+
+.harness-view button:disabled,
+.harness-approval button:disabled {
+  background: var(--surface-pressed);
+  color: var(--text-muted);
+  cursor: not-allowed;
+  filter: none;
+  transform: none;
+}
+
+/* --- Фокус всегда виден --------------------------------------------------------------- */
+
+.harness-view :focus-visible,
+.harness-approval :focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* --- Колонка от 768px: шапка/лента/dock в общей колонке 760px (U5.4.5) ------------------ */
+
+@media (min-width: 768px) {
+  .harness-head,
+  .harness-messages,
+  .harness-dock {
+    max-width: 760px;
+    width: 100%;
+    margin-inline: auto;
+  }
+}
+
+/* --- Телефон (порог 700px совпадает с isMobileView и mobile.css) --------------------------
+   Экран-колонка на весь телефон, как у ассистента: глобальная шапка
+   (логотип, недели) прячется — у экрана своя шапка с «Назад». Док получает
+   нижний запас под плавающий таб-бар (84px = 64 капсула + 20 отступ, как в
+   mobile.css ассистента), поле ввода никогда не уезжает под бар.
+   Правила сидят ЗДЕСЬ, а не в mobile.css: mobile.css не редактируется. */
+@media (max-width: 700px) {
+  body.view-harness #app {
+    padding: 0;
+  }
+
+  body.view-harness #header {
+    display: none;
+  }
+
+  .harness-view {
+    margin-top: 0;
+    padding: 0 12px;
+  }
+
+  .harness-dock {
+    padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+/* --- Уменьшенное движение: без анимаций и плавной прокрутки (U5.3) ----------------------- */
+
+@media (prefers-reduced-motion: reduce) {
+  .harness-message,
+  .harness-secondary,
+  #harness-send,
+  .harness-icon-btn {
+    animation: none;
+    transition: none;
+  }
+
+  .harness-messages {
+    scroll-behavior: auto;
+  }
+}
