@@ -32,9 +32,32 @@ export const UNKNOWN_OUTCOME_TEXT = 'Исход отправки неизвес�
 
 const ACTION_ID = 'act-1';
 
+/* access-v1 (A7.4.7): run_task.params — ровно {actions, access}; access —
+   ТОЧНО {policyVersion: целое, policyRequestId: строка} от свежего совпавшего
+   ack (index.js берёт его у контроллера доступа ДО первого await). Без access
+   (legacy-вызовы fixtures) params остаётся {actions} — старый вид fixture. */
+function normalizeCommandAccess(access) {
+  const version = access && access.policyVersion;
+  const requestId = access && access.policyRequestId;
+  if (!Number.isInteger(version) || version < 0 || typeof version === 'boolean') {
+    throw new TypeError('access.policyVersion — конечное целое число');
+  }
+  if (typeof requestId !== 'string' || !requestId) {
+    throw new TypeError('access.policyRequestId — непустая строка');
+  }
+  return { policyVersion: version, policyRequestId: requestId };
+}
+
+function withAccess(params, access) {
+  if (access === undefined || access === null) return params;
+  return Object.assign({}, params, {
+    access: normalizeCommandAccess(access),
+  });
+}
+
 // Обычная задача: model_task с текстом и снимком настроек (формат F6.2.5).
-export function buildModelTaskParams({ text, settings }) {
-  return {
+export function buildModelTaskParams({ text, settings, access }) {
+  return withAccess({
     actions: [{
       actionId: ACTION_ID,
       tool: 'model_task',
@@ -43,18 +66,19 @@ export function buildModelTaskParams({ text, settings }) {
         settings: JSON.parse(JSON.stringify(settings)),
       },
     }],
-  };
+  }, access);
 }
 
-// Проверочный режим: ровно fixture контракта (digest 5a6b4653…).
-export function buildVerificationParams() {
-  return {
+// Проверочный режим: ровно fixture контракта (digest 5a6b4653…) без access;
+// с access — params {actions, access} протокола access-v1.
+export function buildVerificationParams(access) {
+  return withAccess({
     actions: [{
       actionId: ACTION_ID,
       tool: 'guarded_append_line',
       params: { text: VERIFICATION_TEXT },
     }],
-  };
+  }, access);
 }
 
 // Глубокая копия снимка настроек ДО первого await создания команды:

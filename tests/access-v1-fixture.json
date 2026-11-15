@@ -1,0 +1,408 @@
+{
+  "contract": "0.5",
+  "protocol": "access-v1",
+  "schemaVersion": 1,
+  "source": "MASTER_TZ_HARNESS_V2.md Раздел 7 (A7.2/A7.4/A7.5/A7.9). Одинаковая копия в обоих проектах: telegram-bridge/тесты/access-v1-fixture.json и youplanner-new/tests/access-v1-fixture.json.",
+  "paths": {
+    "policy": "bridge/access_policy/{ownerUid}/{deviceId}",
+    "status": "bridge/access_status/{ownerUid}/{deviceId}"
+  },
+  "writers": {
+    "policy": "owner (auth.token.owner==true, auth.uid==$ownerUid)",
+    "status": "device (auth.token.device==true, auth.token.ownerUid==$ownerUid, auth.token.deviceId==$deviceId); владелец status не пишет"
+  },
+  "modes": [
+    "safe",
+    "medium",
+    "unrestricted"
+  ],
+  "states": [
+    "applying",
+    "applied",
+    "blocked",
+    "error"
+  ],
+  "reasons": [
+    "ok",
+    "policy_missing",
+    "policy_invalid",
+    "policy_changed",
+    "cloud_unreachable",
+    "docker_unavailable",
+    "image_missing",
+    "stop_unconfirmed",
+    "journal_unavailable",
+    "unsupported_contract"
+  ],
+  "dockerStates": [
+    "unknown",
+    "ready",
+    "unavailable",
+    "image_missing"
+  ],
+  "routes": [
+    "structured",
+    "docker",
+    "windows"
+  ],
+  "confirmationKind": "unrestricted_windows_v1",
+  "versionRange": [
+    1,
+    9007199254740991
+  ],
+  "requestIdPattern": "^[A-Za-z0-9_-]{1,128}$",
+  "unknownFieldsAllowed": false,
+  "numbers": "конечные целые JSON-числа; bool/строка вместо числа запрещены; route вычисляет агент по mode, поле route в команде запрещено",
+  "initialStatus": "До первого применения: observedVersion=0, observedRequestId=\"\", appliedVersion=0, appliedRequestId=\"\", effectiveMode=\"safe\" — локальный запрет запуска, НЕ автономное разрешение",
+  "freshness": {
+    "statusMaxAgeSec": 30,
+    "heartbeatMaxAgeSec": 30,
+    "statusUpdateIntervalSec": 10
+  },
+  "categories": {
+    "read_file": "read",
+    "write_file": "write",
+    "edit": "write",
+    "append_line": "write",
+    "guarded_append_line": "write",
+    "run_python": "execute",
+    "model_task": "external_request",
+    "prepare_python_workspace": "read"
+  },
+  "matrix": {
+    "read_file": {
+      "category": "read",
+      "safe": {
+        "approval": true,
+        "route": "structured"
+      },
+      "medium": {
+        "approval": false,
+        "route": "structured"
+      },
+      "unrestricted": {
+        "approval": false,
+        "route": "structured"
+      }
+    },
+    "write_file": {
+      "category": "write",
+      "safe": {
+        "approval": true,
+        "route": "structured"
+      },
+      "medium": {
+        "approval": true,
+        "route": "structured"
+      },
+      "unrestricted": {
+        "approval": false,
+        "route": "structured"
+      }
+    },
+    "edit": {
+      "category": "write",
+      "safe": {
+        "approval": true,
+        "route": "structured"
+      },
+      "medium": {
+        "approval": true,
+        "route": "structured"
+      },
+      "unrestricted": {
+        "approval": false,
+        "route": "structured"
+      }
+    },
+    "append_line": {
+      "category": "write",
+      "safe": {
+        "approval": true,
+        "route": "structured"
+      },
+      "medium": {
+        "approval": true,
+        "route": "structured"
+      },
+      "unrestricted": {
+        "approval": false,
+        "route": "structured"
+      }
+    },
+    "guarded_append_line": {
+      "category": "write",
+      "safe": {
+        "approval": true,
+        "route": "structured"
+      },
+      "medium": {
+        "approval": true,
+        "route": "structured"
+      },
+      "unrestricted": {
+        "approval": false,
+        "route": "structured"
+      }
+    },
+    "run_python": {
+      "category": "execute",
+      "safe": {
+        "approval": true,
+        "route": "docker"
+      },
+      "medium": {
+        "approval": true,
+        "route": "docker"
+      },
+      "unrestricted": {
+        "approval": false,
+        "route": "windows"
+      }
+    },
+    "model_task": {
+      "category": "external_request",
+      "safe": {
+        "approval": true,
+        "route": "structured"
+      },
+      "medium": {
+        "approval": true,
+        "route": "structured"
+      },
+      "unrestricted": {
+        "approval": false,
+        "route": "structured"
+      }
+    },
+    "prepare_python_workspace": {
+      "category": "read",
+      "safe": {
+        "approval": true,
+        "route": "structured"
+      },
+      "medium": {
+        "approval": false,
+        "route": "structured"
+      },
+      "unrestricted": {
+        "approval": false,
+        "route": "structured"
+      }
+    }
+  },
+  "unknownTool": "отказ во всех режимах, включая unrestricted; ping/heartbeat прав на инструменты не дают",
+  "runTaskParams": {
+    "exact": {
+      "actions": "1..16 действий текущей строгой схемы",
+      "access": {
+        "policyVersion": "целое",
+        "policyRequestId": "string"
+      }
+    },
+    "legacy": "run_task без access не исполняется: policy_context_missing; смена режима не легализует старую очередь"
+  },
+  "approvalBinding": {
+    "preconditionsAccess": {
+      "policyVersion": "целое",
+      "policyRequestId": "string",
+      "mode": "safe|medium|unrestricted",
+      "route": "structured|docker|windows"
+    },
+    "digest": "approval_digest прежний {tool,params,cwd?,targets?} плюс access (именованный аргумент); consume проверяет digest И текущую политику, не только digest"
+  },
+  "grantContext": "голый approval_granted=true без контекста запрещён; grant несёт approvalId/digest/attempt/action/policyVersion/policyRequestId/route и полностью проверяется на продолжении",
+  "policyExampleSafe": {
+    "schemaVersion": 1,
+    "version": 1,
+    "requestId": "pol-1",
+    "mode": "safe",
+    "requestedBy": "OWNER_UID",
+    "requestedAt": 1794693600000
+  },
+  "policyExampleMedium": {
+    "schemaVersion": 1,
+    "version": 7,
+    "requestId": "pol-7f24",
+    "mode": "medium",
+    "requestedBy": "OWNER_UID",
+    "requestedAt": 1794693600000
+  },
+  "policyExampleUnrestricted": {
+    "schemaVersion": 1,
+    "version": 9,
+    "requestId": "pol-9x11",
+    "mode": "unrestricted",
+    "requestedBy": "OWNER_UID",
+    "requestedAt": 1794693600100,
+    "confirmation": {
+      "kind": "unrestricted_windows_v1",
+      "requestId": "pol-9x11",
+      "confirmedBy": "OWNER_UID",
+      "confirmedAt": 1794693600100
+    }
+  },
+  "statusExampleApplied": {
+    "schemaVersion": 1,
+    "observedVersion": 7,
+    "observedRequestId": "pol-7f24",
+    "appliedVersion": 7,
+    "appliedRequestId": "pol-7f24",
+    "effectiveMode": "medium",
+    "state": "applied",
+    "reason": "ok",
+    "agentSessionId": "boot-19c2",
+    "updatedAt": 1794693600123,
+    "docker": {
+      "state": "ready",
+      "checkedAt": 1794693600100
+    }
+  },
+  "statusExampleInitial": {
+    "schemaVersion": 1,
+    "observedVersion": 0,
+    "observedRequestId": "",
+    "appliedVersion": 0,
+    "appliedRequestId": "",
+    "effectiveMode": "safe",
+    "state": "applying",
+    "reason": "policy_missing",
+    "agentSessionId": "boot-19c2",
+    "updatedAt": 0,
+    "docker": {
+      "state": "unknown",
+      "checkedAt": 0
+    }
+  },
+  "commandExample": {
+    "type": "run_task",
+    "params": {
+      "actions": [
+        {
+          "actionId": "act-1",
+          "tool": "read_file",
+          "params": {
+            "path": "notes.txt"
+          }
+        }
+      ],
+      "access": {
+        "policyVersion": 7,
+        "policyRequestId": "pol-7f24"
+      }
+    }
+  },
+  "sessionRules": "Новая задача только при совпавшей сессии (presence.agentSessionId == access_status.agentSessionId) + свежих временах (≤30 с) + state=applied; ack после рестарта не подтверждает новый процесс; кэш unrestricted не даёт автономной работы после рестарта — сверка Firebase + confirmation + ack новой agentSessionId",
+  "journal": {
+    "schemaVersion": 2,
+    "table": "harness_access_audit",
+    "key": "(owner_uid, device_id, command_id, action_id, attempt_id)",
+    "columns": [
+      "policy_version",
+      "policy_request_id",
+      "mode",
+      "route",
+      "approval_id",
+      "admission_ms",
+      "outcome"
+    ],
+    "api": [
+      "record_access_admission",
+      "record_access_outcome"
+    ],
+    "rules": "admission до эффекта; отказ durable-записи запрещает start; admission не заменяет begin_effect/step_begin и не даёт права повторного запуска; миграция v1→2 транзакционная, команды/доставки не теряет; неизвестная будущая схема — отказ"
+  },
+  "deviationsOwner": [
+    "read_file/write_file/edit исполняются НАПРЯМУЮ в Windows поверх границ sandbox.resolve_path (включая hardlink st_nlink>1); write_file/edit — новые инструменты категории write; в Safe/Medium каждый вызов через Approval, в Unrestricted — без Approval со всеми остальными ограничениями",
+    "run_python в Safe/Medium — только Docker со snapshot-копией файлов (Задача B), без автоматического экспорта и без bind-mount; предупреждение «изменения не сохраняются в исходную папку»"
+  ],
+  "policy": {
+    "safe": {
+      "schemaVersion": 1,
+      "version": 1,
+      "requestId": "pol-1safe0000000001",
+      "mode": "safe",
+      "requestedBy": "uid-owner-1",
+      "requestedAt": 1763000100000
+    },
+    "medium": {
+      "schemaVersion": 1,
+      "version": 7,
+      "requestId": "pol-7f24",
+      "mode": "medium",
+      "requestedBy": "uid-owner-1",
+      "requestedAt": 1763000200000
+    },
+    "unrestricted": {
+      "schemaVersion": 1,
+      "version": 8,
+      "requestId": "pol-8unrestr000001",
+      "mode": "unrestricted",
+      "requestedBy": "uid-owner-1",
+      "requestedAt": 1763000300000,
+      "confirmation": {
+        "kind": "unrestricted_windows_v1",
+        "requestId": "pol-8unrestr000001",
+        "confirmedBy": "uid-owner-1",
+        "confirmedAt": 1763000300000
+      }
+    }
+  },
+  "status": {
+    "applied": {
+      "schemaVersion": 1,
+      "observedVersion": 7,
+      "observedRequestId": "pol-7f24",
+      "appliedVersion": 7,
+      "appliedRequestId": "pol-7f24",
+      "effectiveMode": "medium",
+      "state": "applied",
+      "reason": "ok",
+      "agentSessionId": "boot-19c2",
+      "updatedAt": 1763000300123,
+      "docker": {
+        "state": "ready",
+        "checkedAt": 1763000300100
+      }
+    },
+    "blocked": {
+      "schemaVersion": 1,
+      "observedVersion": 8,
+      "observedRequestId": "pol-8unrestr000001",
+      "appliedVersion": 7,
+      "appliedRequestId": "pol-7f24",
+      "effectiveMode": "medium",
+      "state": "blocked",
+      "reason": "stop_unconfirmed",
+      "agentSessionId": "boot-19c2",
+      "updatedAt": 1763000400000,
+      "docker": {
+        "state": "unavailable",
+        "checkedAt": 1763000399000
+      }
+    },
+    "beforeFirstApply": {
+      "schemaVersion": 1,
+      "observedVersion": 0,
+      "observedRequestId": "",
+      "appliedVersion": 0,
+      "appliedRequestId": "",
+      "effectiveMode": "safe",
+      "state": "applying",
+      "reason": "ok",
+      "agentSessionId": "boot-19c2",
+      "updatedAt": 1763000100000,
+      "docker": {
+        "state": "unknown",
+        "checkedAt": 0
+      }
+    }
+  },
+  "command": {
+    "run_task_params_access": {
+      "policyVersion": 7,
+      "policyRequestId": "pol-7f24"
+    }
+  },
+  "comment": "Фикстура контракта access-v1 (MASTER_TZ_HARNESS_V2.md Раздел 7, A7.1.2 — одинаковая в обоих проектах). Плоские ключи — эталон контракта (BR-гейт), вложенные policy/status/command — примеры для валидаторов YP. Числа времени — произвольные валидные миллисекунды, не значения для hardcode. Валидация: тесты/harness_access_test.py (BR) и tests/harness-access.test.mjs (YP)."
+}

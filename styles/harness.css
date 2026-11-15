@@ -767,6 +767,155 @@ body.view-harness #app {
   cursor: pointer;
 }
 
+/* --- Доступ к ПК (A7.3.8): группа в форме настроек, кнопка в шапке чата.
+   Токены существующей темы: --text/--text-muted, --bg/--surface-card,
+   --accent/--on-accent, --danger, --surface-muted, --border-soft,
+   --radius-md; без новых глобальных токенов/тем. --------------------------- */
+
+#harness-access-group {
+  min-width: 0;
+  border: 0;
+  padding: 0;
+  margin: 0 0 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+#harness-access-group legend {
+  font-weight: 600;
+  margin-bottom: 8px;
+  padding: 0;
+  font-size: 15px;
+  color: var(--text);
+  outline: none;
+}
+
+/* Radio-подписи: touch-зона 44px, шрифт 16px против зума iOS */
+.harness-access-option {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  font-size: 16px;
+  color: var(--text);
+}
+
+.harness-access-option input[type="radio"] {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--accent);
+  flex-shrink: 0;
+}
+
+#harness-access-status {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text-muted);
+}
+
+/* Ошибки var(--danger) и словами — цвет не единственный носитель */
+#harness-access-error {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--danger);
+}
+
+/* Inline-предупреждение unrestricted (A7.3.3): не Approval и не модалка */
+#harness-access-confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background: var(--surface-muted);
+  color: var(--text);
+}
+
+#harness-access-confirm[hidden] {
+  display: none;
+}
+
+#harness-access-confirm p {
+  margin: 0;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--text);
+}
+
+.harness-access-check {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  font-size: 16px;
+  color: var(--text);
+}
+
+.harness-access-check input[type="checkbox"] {
+  width: 20px;
+  height: 20px;
+  margin: 0;
+  accent-color: var(--accent);
+  flex-shrink: 0;
+}
+
+#harness-access-confirm-submit {
+  min-height: 44px;
+  padding: 12px 16px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--on-accent);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+#harness-access-confirm-cancel {
+  min-height: 44px;
+  padding: 12px 16px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--surface-alt);
+  color: var(--text);
+  font: inherit;
+  font-size: 16px;
+  cursor: pointer;
+}
+
+#harness-access-apply {
+  min-height: 44px;
+  padding: 12px 16px;
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--on-accent);
+  font: inherit;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+/* Кнопка шапки чата: показывает активный режим/ожидание (A7.3.2) */
+#harness-access-open {
+  min-height: 44px;
+  padding: 6px 12px;
+  border: 0;
+  border-radius: var(--radius-pill);
+  background: var(--accent-soft);
+  color: var(--accent);
+  font: inherit;
+  font-size: 14px;
+  cursor: pointer;
+  flex-shrink: 0;
+}
+
 /* Inline-блок dirty-Back (F6.2.8): не модалка, внутри потока формы */
 .harness-settings-confirm {
   display: flex;

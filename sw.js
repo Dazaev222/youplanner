@@ -143,7 +143,14 @@
 // Cache Storage); никаких background sync решений (U5.6.8).
 // v61 (v60 -> v61): F6 — геометрия iOS и «Настройки модели»: js/harness/
 // viewport.js, js/harness/settings.js, js/harness/settings-view.js в precache.
-const CACHE = 'youplanner-v61';
+// v62 (v61 -> v62): A7 access-v1 — PWA-переключатель уровней доступа:
+// js/harness/access.js (валидация policy/status, контроллер CAS, билдер
+// access) и js/harness/access-view.js (группа «Доступ к ПК» и кнопка шапки)
+// в precache; в js/harness/firebase.js — readAccessPolicy/writeAccessPolicy
+// (ETag/If-Match) и SSE-обработчики put/patch/cancel/auth_revoked. Протокол
+// access-v1 несовместим со старыми клиентами: на старой offline PWA —
+// запрет отправки legacy-команд (UI показывает необходимость обновления).
+const CACHE = 'youplanner-v62';
 // Иконки — все из manifest.json: отсутствующая в кэше иконка ломала бы
 // офлайн-установку PWA (аудит 2026-10-31: icon-512.png не кэшировался)
 const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon-512.png', './icon.svg',
@@ -170,6 +177,10 @@ const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './ic
   './js/harness/viewport.js',
   './js/harness/settings.js',
   './js/harness/settings-view.js',
+  // A7 access-v1: чистый модуль политики доступа и его DOM (группа в
+  // настройках, кнопка шапки, inline-предупреждение unrestricted)
+  './js/harness/access.js',
+  './js/harness/access-view.js',
   './js/harness/index.js',
   // Общие примитивы структуры значений (аудит 2026-11-13, YP-08)
   './js/core/struct.js',

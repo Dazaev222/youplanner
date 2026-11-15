@@ -13,6 +13,8 @@
    приложения, доступ закрывают Rules RTDB и Auth). */
 
 import { createApprovalController } from './approvals.js';
+import { createAccessController } from './access.js';
+import { createAccessView } from './access-view.js';
 import { createChat, statusFor, FEEDBACK_LOADING_NOTE } from './chat.js';
 import {
   UNKNOWN_OUTCOME_TEXT,
@@ -140,6 +142,11 @@ export function mountHarness({ onBack } = {}) {
   let approvals = null;
   let settings = null;          // контроллер DOM-формы настроек (F6.2)
   let viewport = null;
+  // A7 access-v1: контроллер политики (валидация/CAS/билдер) и его DOM.
+  // Пересоздаются на каждую сессию (owner/device), гасятся на logout/unmount.
+  let accessController = null;
+  let accessView = null;
+  let resubscribeScheduled = false;
   const unsubscribes = [];
   // Модель ленты: команды по commandId, статусы по execution/result.
   const feed = { commands: new Map(), executions: new Map(), results: new Map() };
@@ -453,6 +460,18 @@ export function mountHarness({ onBack } = {}) {
     }
   }
 
+  // A7.2.7: auth_revoked — токен отозван, SSE-поток не восстановится сам.
+  // Refresh токена и ПЕРЕСОЗДАНИЕ подписок; на logout/generation гасится.
+  function scheduleResubscribe() {
+    if (resubscribeScheduled || destroyed) return;
+    resubscribeScheduled = true;
+    const finish = function () {
+      resubscribeScheduled = false;
+      if (!destroyed && adapter.getAccount()) subscribeAll();
+    };
+    Promise.resolve(refreshSession()).then(finish, finish);
+  }
+
   function subscribeAll() {
     clearSubscriptions();
     const gen = generation;
@@ -460,15 +479,17 @@ export function mountHarness({ onBack } = {}) {
     const deviceId = currentDeviceId();
 
     // Узкие подписки только своего среза (U5.8). Каждая проверяет generation:
-    // ответ прошлой сессии не должен трогать интерфейс.
+    // ответ прошлой сессии не должен трогать интерфейс. auth_revoked —
+    // пересоздание потока после refresh токена (A7.2.7); обычный разрыв SSE
+    // RTDB переподключает сам.
     const bind = (spec, handler) => {
       try {
         unsubscribes.push(adapter.subscribe(spec, (data) => {
           if (destroyed || gen !== generation) return;
           handler(data || {});
-        }, () => {
+        }, (error) => {
           if (destroyed || gen !== generation) return;
-          // Разрыв SSE: RTDB переподключается сам; статус соединения честный.
+          if (error && error.code === 'auth_revoked') scheduleResubscribe();
         }));
       } catch (e) {
         announce('Подписка недоступна: ' + (e && e.message ? e.message : 'ошибка'));
@@ -504,7 +525,18 @@ export function mountHarness({ onBack } = {}) {
       const items = Object.values(data).filter((item) => item && item.approvalId);
       approvals.applySnapshot(items);
     });
-    bind({ kind: 'presence', ownerUid: uid, deviceId }, renderPresence);
+    // A7.2/A7.9: два новых узла access-v1 по owner/device; presence дополнительно
+    // feeding в контроллер доступа (agentSessionId сравнивается с ack).
+    bind({ kind: 'access_policy', ownerUid: uid, deviceId }, (data) => {
+      if (accessController) accessController.observePolicy(data);
+    });
+    bind({ kind: 'access_status', ownerUid: uid, deviceId }, (data) => {
+      if (accessController) accessController.observeStatus(data);
+    });
+    bind({ kind: 'presence', ownerUid: uid, deviceId }, (data) => {
+      if (accessController) accessController.observePresence(data);
+      renderPresence(data);
+    });
 
     presenceTimer = setInterval(function () {
       if (destroyed || gen !== generation) return;
@@ -616,24 +648,39 @@ export function mountHarness({ onBack } = {}) {
   }
 
   async function sendTask(text) {
-    // Снимок активных настроек и params строятся синхронно, до первого
-    // асинхронного шага создания команды (F6.3.7): изменение настроек сразу
-    // после «Отправить» не меняет payload/digest уже созданной задачи;
-    // следующая задача возьмёт новый снимок.
+    // Снимок активных настроек и access фиксируются синхронно, до первого
+    // асинхронного шага создания команды (F6.3.7, A7.4.8): изменение настроек
+    // или режима доступа сразу после «Отправить» не меняет payload/digest
+    // уже созданной задачи; следующая задача возьмёт новые снимки.
+    // Без свежего совпавшего ack отправка запрещена (A7.4.8/A7.9.1).
     const snapshot = activeSettingsSnapshot();
+    const accessSnapshot = accessForCommand();
+    if (!accessSnapshot.ok) {
+      const err = new Error(accessRefusalText(accessSnapshot.reason));
+      err.code = 'access';
+      throw err;
+    }
     const params = buildModelTaskParams({
       text: String(text),
       settings: snapshot,
+      access: accessSnapshot.access,
     });
     return dispatchTask({ text: String(text), params });
   }
 
   // Проверочный режим (метка «Проверка контура — запись строки» в меню
-  // устройств): ровно fixture контракта, не ответ модели и не обычный чат.
+  // устройств): ровно fixture контракта + access протокола access-v1,
+  // не ответ модели и не обычный чат.
   async function sendVerification() {
+    const accessSnapshot = accessForCommand();
+    if (!accessSnapshot.ok) {
+      const err = new Error(accessRefusalText(accessSnapshot.reason));
+      err.code = 'access';
+      throw err;
+    }
     return dispatchTask({
       text: VERIFICATION_LABEL,
-      params: buildVerificationParams(),
+      params: buildVerificationParams(accessSnapshot.access),
     });
   }
 
@@ -909,14 +956,18 @@ export function mountHarness({ onBack } = {}) {
   bind(window, 'resize', scheduleDialogLayout);
   bind(window, 'orientationchange', scheduleDialogLayout);
 
-  // Возврат из фона и reconnect: свежее чтение approvals и повторная
-  // проверка дедлайна до разблокировки (U5.6.7).
+  // Возврат из фона и reconnect: свежее чтение approvals, повторная
+  // проверка дедлайна до разблокировки (U5.6.7) и перечитывание обоих
+  // узлов доступа — policy/status (A7.9.1).
   bind(document, 'visibilitychange', async function () {
     if (destroyed || document.visibilityState !== 'visible') return;
     const gen = generation;
     await refreshSession();
     if (gen !== generation || destroyed) return;
     await refreshApprovals();
+    if (accessController && gen === generation && !destroyed) {
+      accessController.refresh().catch(function () { /* честный статус */ });
+    }
   });
   bind(window, 'online', function () {
     refreshSession();
@@ -924,6 +975,78 @@ export function mountHarness({ onBack } = {}) {
   bind(window, 'offline', function () {
     approvals.setConnection('offline');
   });
+
+  /* --- Доступ к ПК (A7.3, A7.4.8) ---------------------------------------------------------------- */
+
+  // Контроллер доступа по owner/device текущей сессии + DOM-группа в
+  // настройках. mount ТОЛЬКО читает (A7.3.7): существующий unrestricted
+  // никогда не затирается safe автоматически.
+  function createAccess() {
+    destroyAccess();
+    accessController = createAccessController({
+      transport: {
+        readPolicy: ({ ownerUid, deviceId }) =>
+          adapter.readAccessPolicy({ ownerUid, deviceId }),
+        readStatus: ({ ownerUid, deviceId }) =>
+          adapter.readAccessStatus({ ownerUid, deviceId }),
+        writePolicy: ({ ownerUid, deviceId, expectedEtag, policy }) =>
+          adapter.writeAccessPolicy({ ownerUid, deviceId, expectedEtag, policy }),
+      },
+      ownerUid: ownerUid(),
+      deviceId: currentDeviceId(),
+      serverNow: () => adapter.serverNow(),
+    });
+    accessView = createAccessView({
+      elements: {
+        form: document.getElementById('harness-settings-form'),
+        chatHead: view.querySelector('.harness-head'),
+      },
+      deps: {
+        doc: document,
+        controller: accessController,
+        isOffline: () =>
+          (typeof navigator !== 'undefined' && navigator.onLine === false),
+        isAuthOk: () => !destroyed && Boolean(adapter && adapter.getAccount()),
+        announce,
+        openSettings,
+        serverNow: () => adapter.serverNow(),
+      },
+    });
+    accessView.mount();
+  }
+
+  function destroyAccess() {
+    if (accessView) {
+      accessView.destroy();
+      accessView = null;
+    }
+    if (accessController) {
+      accessController.destroy();
+      accessController = null;
+    }
+  }
+
+  // A7.4.8: снимок access для команды — ТОЛЬКО от свежего совпавшего ack
+  // (state=applied, версии и requestId равны, updatedAt/heartbeat ≤ 30 с,
+  // agentSessionId presence совпадает с ack). Вызывается СИНХРОННО в
+  // sendTask/sendVerification до первого await — фиксируется одновременно
+  // со settings; неизвестная политика — запрет отправки.
+  function accessForCommand() {
+    if (!accessController) return { ok: false, reason: 'no-status' };
+    return accessController.buildCommandAccess();
+  }
+
+  function accessRefusalText(reason) {
+    if (reason === 'not-applied' || reason === 'version-mismatch' ||
+        reason === 'policy-mismatch') {
+      return 'ПК ещё не подтвердил выбранный режим доступа — задача не отправлена';
+    }
+    if (reason === 'stale-status' || reason === 'stale-presence' ||
+        reason === 'session-mismatch' || reason === 'no-status') {
+      return 'Нет свежего подтверждения от ПК (сессия/heartbeat) — задача не отправлена';
+    }
+    return 'Режим доступа ПК неизвестен — задача не отправлена';
+  }
 
   /* --- Жизненный цикл сессии ---------------------------------------------------------------------- */
 
@@ -979,9 +1102,11 @@ export function mountHarness({ onBack } = {}) {
       if (el.pendingChip) el.pendingChip.hidden = true;
       // Logout: форма и активная память настроек очищаются, до нового входа
       // чужие значения не показываются (F6.2.7). Pending прошлой сессии
-      // не смешивается с новой (F6.3.11).
+      // не смешивается с новой (F6.3.11). Группа доступа и её контроллер
+      // гасятся вместе с сессией (teardown на logout, A7.2.7).
       closeSettings();
       settings.reset();
+      destroyAccess();
       pendingStore = null;
       renderPendingButton();
       return;
@@ -1007,6 +1132,9 @@ export function mountHarness({ onBack } = {}) {
     pendingStore.load();
     renderPendingButton();
     approvals.setConnection('online');
+    // A7.3: группа «Доступ к ПК» строится на сессию; mount читает policy/
+    // status, подписки (ниже) несут live-обновления обоих узлов.
+    createAccess();
     subscribeAll();
     renderPresence(lastPresence);
     refreshApprovals();
@@ -1056,6 +1184,7 @@ export function mountHarness({ onBack } = {}) {
         settings = null;
       }
       settingsStore = null;
+      destroyAccess();
       pendingStore = null;
       statusNodes.clear();
       feed.commands.clear();

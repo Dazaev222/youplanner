@@ -12,13 +12,18 @@
    «SDK transaction ЛИБО REST-пара GET ?x-firebase-etag=true → PUT/PATCH c
    If-Match». Решение владельца — PATCH {decision, decidedAt} с If-Match.
 
-   Пути (CONTRACT-0.5 §3):
+   Пути (CONTRACT-0.5 §3, §10 access-v1):
      bridge/commands/{ownerUid}/{deviceId}/{commandId}   — create-only владелец
      bridge/executions/{ownerUid}/{deviceId}/{commandId} — читаем
      bridge/approvals_v2/{ownerUid}/{approvalId}         — read + decision
      bridge/results/{ownerUid}/{deviceId}/{commandId}/{attemptId} — читаем
      bridge/device_presence/{ownerUid}/{deviceId}        — heartbeat
-   Подписки — EventSource (RTDB REST SSE, ?auth=<idToken>).
+     bridge/access_policy/{ownerUid}/{deviceId}          — пишет ТОЛЬКО владелец (ETag/If-Match CAS)
+     bridge/access_status/{ownerUid}/{deviceId}          — пишет ТОЛЬКО устройство (читаем)
+   Подписки — EventSource (RTDB REST SSE, ?auth=<idToken>). RTDB выдаёт
+   ИМЕНОВАННЫЕ события put/patch/cancel/auth_revoked: подписка применяет
+   reducer {path, data} и отдаёт наверх собранный полный снимок узла.
+   Snapshot-replacement без обработки path запрещён (A7.2.7).
 
    Токены не логируются: все сообщения ошибок проходят redact() по списку
    секретов, увиденных этой фабрикой. */
@@ -291,6 +296,60 @@ export function createHarnessFirebase({ config, fetchImpl, storage, now }) {
     return { ok: true };
   };
 
+  /* --- Access-v1: политика (CAS владелеца) и статус устройства (A7.2.5) ------- */
+
+  // GET с X-Firebase-ETag:true — возвращает {data, etag}: etag нужен для
+  // следующего условного PUT (единственная CAS-пара контракта §6).
+  api.readAccessPolicy = async function readAccessPolicy({ ownerUid, deviceId }) {
+    const response = await request(accessPolicyPath(ownerUid, deviceId), {
+      method: 'GET',
+      headers: { 'X-Firebase-ETag': 'true' },
+    });
+    noteServerDate(response);
+    const data = await response.json();
+    return {
+      ok: true,
+      data,
+      etag: response.headers ? response.headers.get('etag') : null,
+    };
+  };
+
+  // Единственный способ записи политики — PUT; If-Match при известном etag.
+  // PATCH+If-Match ЗАПРЕЩЁН (RTDB его не поддерживает — проверено 2026-11-14,
+  // см. decideApproval выше) и здесь никогда не используется.
+  api.writeAccessPolicy = async function writeAccessPolicy(
+    { ownerUid, deviceId, expectedEtag, policy }) {
+    if (!policy || typeof policy !== 'object') {
+      throw normalizeError(new Error('политика не построена'));
+    }
+    const headers = { 'Content-Type': 'application/json' };
+    if (expectedEtag) headers['If-Match'] = String(expectedEtag);
+    const response = await request(accessPolicyPath(ownerUid, deviceId), {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify(policy),
+    });
+    return {
+      ok: true,
+      etag: response.headers ? response.headers.get('etag') : null,
+    };
+  };
+
+  // Статус пишет устройство; владелец только читает (свежесть/ack).
+  api.readAccessStatus = async function readAccessStatus({ ownerUid, deviceId }) {
+    const response = await request(
+      'bridge/access_status/' + encodeURIComponent(String(ownerUid)) + '/' +
+      encodeURIComponent(String(deviceId)), { method: 'GET' });
+    noteServerDate(response);
+    const data = await response.json();
+    return { ok: true, data };
+  };
+
+  function accessPolicyPath(ownerUid, deviceId) {
+    return 'bridge/access_policy/' + encodeURIComponent(String(ownerUid)) + '/' +
+      encodeURIComponent(String(deviceId));
+  }
+
   api.readExecution = async function readExecution({ ownerUid, deviceId, commandId }) {
     const response = await request(
       'bridge/executions/' + ownerUid + '/' + deviceId + '/' + commandId,
@@ -457,8 +516,8 @@ export function createHarnessFirebase({ config, fetchImpl, storage, now }) {
     state.token = { value: token, expiresAt: clock() + 3600 * 1000 };
   };
 
-  // spec: { kind: 'commands'|'executions'|'results'|'approvals'|'presence',
-  //         ownerUid, deviceId?, commandId? }
+  // spec: { kind: 'commands'|'executions'|'results'|'approvals'|'presence'|
+  //         'access_policy'|'access_status', ownerUid, deviceId?, commandId? }
   function specToPath(spec) {
     const owner = encodeURIComponent(String(spec.ownerUid));
     const device = spec.deviceId ? encodeURIComponent(String(spec.deviceId)) : null;
@@ -473,9 +532,74 @@ export function createHarnessFirebase({ config, fetchImpl, storage, now }) {
         return 'bridge/approvals_v2/' + owner;
       case 'presence':
         return 'bridge/device_presence/' + owner + '/' + device;
+      case 'access_policy':
+        return accessPolicyPath(spec.ownerUid, spec.deviceId);
+      case 'access_status':
+        return 'bridge/access_status/' + owner + '/' + device;
       default:
         throw new Error('неизвестный вид подписки: ' + spec.kind);
     }
+  }
+
+  /* --- Reducer SSE-событий RTDB (A7.2.7) ------------------------------------------------- */
+
+  // RTDB REST SSE шлёт ИМЕНОВАННЫЕ события: put {path, data} и
+  // patch {path, data} (пути — относительные внутри подписанного узла),
+  // плюс cancel и auth_revoked. Snapshot-replacement без обработки path
+  // запрещён: reducer применяет путь к накопленному снимку и отдаёт наверх
+  // ПОЛНЫЙ узел — существующие callers читают snapshot как и раньше.
+  function asObject(value) {
+    return (value && typeof value === 'object' && !Array.isArray(value))
+      ? value : {};
+  }
+
+  function putAtPath(snapshot, segments, value) {
+    const key = segments[0];
+    if (segments.length === 1) {
+      if (value === null || value === undefined) {
+        const copy = Object.assign({}, snapshot);
+        delete copy[key];
+        return copy;
+      }
+      return Object.assign({}, snapshot, { [key]: value });
+    }
+    const child = asObject(snapshot[key]);
+    return Object.assign({}, snapshot, {
+      [key]: putAtPath(child, segments.slice(1), value),
+    });
+  }
+
+  function patchAtPath(snapshot, segments, patchData) {
+    const key = segments[0];
+    if (segments.length === 1) {
+      const child = asObject(snapshot[key]);
+      return Object.assign({}, snapshot, {
+        [key]: Object.assign({}, child, asObject(patchData)),
+      });
+    }
+    const child = asObject(snapshot[key]);
+    return Object.assign({}, snapshot, {
+      [key]: patchAtPath(child, segments.slice(1), patchData),
+    });
+  }
+
+  function reduceRtdbEvent(snapshot, kind, payload) {
+    if (!payload || typeof payload !== 'object') return snapshot;
+    const path = typeof payload.path === 'string' ? payload.path : '';
+    const segments = path.split('/').filter((s) => s.length > 0);
+    if (kind === 'put') {
+      if (payload.data === undefined) return snapshot;
+      if (segments.length === 0) return payload.data;   // замена корня
+      return putAtPath(asObject(snapshot), segments, payload.data);
+    }
+    if (kind === 'patch') {
+      if (segments.length === 0) {
+        // patch корня — поверхностное слияние, не замена.
+        return Object.assign({}, asObject(snapshot), asObject(payload.data));
+      }
+      return patchAtPath(asObject(snapshot), segments, payload.data);
+    }
+    return snapshot;
   }
 
   api.subscribe = function subscribe(spec, onData, onError) {
@@ -487,15 +611,48 @@ export function createHarnessFirebase({ config, fetchImpl, storage, now }) {
     const token = currentToken();
     const source = new state.eventSourceImpl(
       baseUrl + '/' + path + '.json' + authQuery(token));
-    source.onmessage = function (event) {
-      let payload = null;
-      try {
-        payload = JSON.parse(event.data);
-      } catch (e) {
-        return;   // битый кадр пропускаем, подписка живёт
+    if (typeof onData === 'function') {
+      // Накопленный снимок узла: put/patch применяются к нему по path.
+      let snapshot;
+      const handleNamed = function (kind, event) {
+        let payload = null;
+        try {
+          payload = JSON.parse(event.data);
+        } catch (e) {
+          return;   // битый кадр пропускаем, подписка живёт
+        }
+        if (kind === 'cancel' || kind === 'auth_revoked') {
+          if (typeof onError === 'function') {
+            const err = new Error(kind === 'cancel'
+              ? 'Чтение узла отклонено правилами'
+              : 'Токен отозван: нужна пересозданная подписка');
+            err.code = kind;
+            onError(err);
+          }
+          return;
+        }
+        snapshot = reduceRtdbEvent(snapshot, kind, payload);
+        if (snapshot !== undefined) onData(snapshot);
+      };
+      // Легаси-совместимость: default-события (фейки старых тестов) доставляют
+      // payload как есть, без reducer. Реальный RTDB default-события не шлёт.
+      source.onmessage = function (event) {
+        let payload = null;
+        try {
+          payload = JSON.parse(event.data);
+        } catch (e) {
+          return;   // битый кадр пропускаем, подписка живёт
+        }
+        onData(payload);
+      };
+      if (typeof source.addEventListener === 'function') {
+        for (const kind of ['put', 'patch', 'cancel', 'auth_revoked']) {
+          source.addEventListener(kind, function (event) {
+            handleNamed(kind, event);
+          });
+        }
       }
-      if (typeof onData === 'function') onData(payload);
-    };
+    }
     if (typeof onError === 'function') {
       source.onerror = function (event) { onError(event); };
     }

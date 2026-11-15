@@ -304,3 +304,125 @@ approved → consumed | expired | cancelled
 - Публикация Rules, настройка Auth/ролей и включение опасного исполнения — отдельно и явно владельцем (P2.2, P4.4); Harness по умолчанию выключен.
 - Этот документ не задаёт реализацию PWA-клиента, журнала B1 и гейта инструментов — только путь/схему/переходы/роли/CAS.
 - Правки контракта: новая версия документа, идентично в обоих проектах, с перечислением изменённых пунктов.
+---
+
+## 10. access-v1: политика доступа, подтверждение ПК и привязка команды
+
+Дополнение access-v1 (ТЗ `MASTER_TZ_HARNESS_V2.md` §7, A7.2/A7.4/A7.5/A7.9).
+Статус: протокол **access-v1**; capabilities меняются — старые PWA/агент несовместимы,
+развёртывание согласованной парой, деплой отдельно владельцем. Эталонная JSON-фикстура:
+`тесты/access-v1-fixture.json` (BR) и `tests/access-v1-fixture.json` (YP) — одинаковое содержимое.
+
+### 10.1 Пути и роли
+
+| Узел | Пишет | Читают |
+|---|---|---|
+| `bridge/access_policy/{ownerUid}/{deviceId}` | только владелец (`auth.token.owner==true` и `auth.uid==$ownerUid`) | владелец, устройство этого ownerUid+deviceId |
+| `bridge/access_status/{ownerUid}/{deviceId}` | только устройство (`auth.token.device==true`, `ownerUid`, `deviceId` из токена) | владелец, устройство |
+
+Узлы раздельные: желаемая политика и состояние применения не смешиваются в одной перезаписываемой
+записи. Удаление записей и запись родителя `bridge` запрещены; неизвестные поля запрещены
+(`$other: validate=false`); числа — конечные целые JSON-числа, не bool/строка.
+
+### 10.2 Политика access_policy
+
+```json
+{
+  "schemaVersion": 1,
+  "version": 7,
+  "requestId": "pol-7f24",
+  "mode": "medium",
+  "requestedBy": "OWNER_UID",
+  "requestedAt": 1794693600000
+}
+```
+
+- `schemaVersion` строго 1; `version` — целое 1..9007199254740991; `requestId` — алфавит
+  `[A-Za-z0-9_-]`, длина 1..128, уникальный; `mode` строго `safe|medium|unrestricted`;
+  `requestedBy`/`confirmedBy` == авторизованному владельцу; время — миллисекунды Firebase.
+- Для `unrestricted` ОБЯЗАТЕЛЬНА добавка к той же записи:
+  `"confirmation": {"kind":"unrestricted_windows_v1","requestId":"pol-9x11","confirmedBy":"OWNER_UID","confirmedAt":1794693600100}` —
+  `kind` строго указанный, `requestId` совпадает с `requestId` политики, `confirmedAt==requestedAt`.
+  В `safe`/`medium` поле `confirmation` запрещено.
+- Правила версий: создать только `version=1`; обновить только `version=старое+1` и с НОВЫМ
+  `requestId`. Маршрут исполнения (`route`) вычисляет АГЕНТ по `mode`; поле клиента запрещено.
+
+### 10.3 Состояние access_status
+
+```json
+{
+  "schemaVersion": 1,
+  "observedVersion": 7,
+  "observedRequestId": "pol-7f24",
+  "appliedVersion": 7,
+  "appliedRequestId": "pol-7f24",
+  "effectiveMode": "medium",
+  "state": "applied",
+  "reason": "ok",
+  "agentSessionId": "boot-19c2",
+  "updatedAt": 1794693600123,
+  "docker": {"state": "ready", "checkedAt": 1794693600100}
+}
+```
+
+- `state`: `applying|applied|blocked|error`; `reason`:
+  `ok|policy_missing|policy_invalid|policy_changed|cloud_unreachable|docker_unavailable|image_missing|stop_unconfirmed|journal_unavailable|unsupported_contract`;
+  `docker.state`: `unknown|ready|unavailable|image_missing`.
+- До первого применения: `appliedVersion=0`, `appliedRequestId=""`, `effectiveMode="safe"` —
+  локальный запрет запуска, НЕ автономное разрешение. `observedVersion=0/observedRequestId=""`
+  при отсутствии записи. Неизвестная схема запрещает инструменты.
+- Ack `state=applied` ссылается на текущую политику (version/requestId/mode через `root`);
+  `appliedVersion ≤ observedVersion`. Старый ack после рестарта не подтверждает новый процесс.
+- `updatedAt`/`checkedAt` — server timestamp.
+
+### 10.4 Свежесть и сессия (A7.9.1)
+
+`access_status.updatedAt` не старше 30 с от serverNow; `presence.heartbeatAt` не старше 30 с.
+Агент обновляет `access_status` раз в 10 с и сразу при переходах. В `device_presence`
+добавлен обязательный для access-v1 `agentSessionId`, равный `access_status.agentSessionId`.
+Новая задача — только при совпавшей сессии + свежих временах + `state=applied`.
+
+### 10.5 Команда и привязка политики
+
+`run_task.params` ТОЧНО `{actions, access}`; `access` ТОЧНО `{policyVersion, policyRequestId}`.
+Пример:
+
+```json
+{"type":"run_task","params":{"actions":[{"actionId":"act-1","tool":"read_file","params":{"path":"notes.txt"}}],"access":{"policyVersion":7,"policyRequestId":"pol-7f24"}}}
+```
+
+Legacy-команды без `access` НЕ исполняются — `policy_context_missing`. Смена режима не
+легализует старую очередь. `ping` остаётся без параметров и прав не даёт. Approval привязан
+к политике через `preconditions.access = {policyVersion, policyRequestId, mode, route}`;
+`approval_digest` при наличии именованного аргумента `access` хеширует прежний
+`{tool,params,cwd?,targets?}` плюс `access`. Голый `approval_granted=true` без контекста
+запрещён: grant несёт `approvalId/digest/attempt/action/policyVersion/policyRequestId/route`.
+
+### 10.6 Матрица инструментов (категория → Safe/Medium/Unrestricted)
+
+| Инструмент | Категория | Safe | Medium | Unrestricted |
+|---|---|---|---|---|
+| read_file | read | Approval | без Approval | без Approval |
+| write_file (девиация владельца: прямой Windows) | write | Approval | Approval | без Approval |
+| edit (девиация владельца: прямой Windows) | write | Approval | Approval | без Approval |
+| append_line, guarded_append_line | write | Approval | Approval | без Approval |
+| run_python | execute | Approval + Docker | Approval + Docker | Windows без Approval |
+| model_task | external_request | Approval | Approval | без Approval |
+| prepare_python_workspace | read | Approval | без Approval | без Approval |
+
+Неизвестный инструмент — отказ во всех режимах, включая unrestricted. `run_python`:
+`route=docker` в safe/medium, `route=windows` в unrestricted с валидным confirmation,
+для остальных `route=structured`; ошибки Docker/Approval route не меняют.
+Девиации владельца: `write_file {path, content}` и `edit {path, old, new}` исполняются
+напрямую в Windows поверх границ `sandbox.resolve_path` (включая проверку hardlink
+`st_nlink>1`); `edit` требует ровно одного вхождения `old` (коды `edit_not_found`/
+`edit_ambiguous`). `prepare_python_workspace` — params строго `{}`.
+
+### 10.7 Журнал (schemaVersion 2)
+
+`облако/journal.py`: транзакционная миграция 1→2 в той же БД, таблица
+`harness_access_audit` с ключом `(owner_uid, device_id, command_id, action_id, attempt_id)`;
+API `record_access_admission(...)` / `record_access_outcome(...)` через существующий
+писатель. Admission — ДО эффекта; отказ durable-записи запрещает start; admission не
+заменяет `begin_effect`/`step_begin` и не даёт права повторного запуска. Миграция не
+теряет команды/доставки; неизвестная будущая схема — отказ.
