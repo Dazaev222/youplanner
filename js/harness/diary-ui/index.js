@@ -54,7 +54,7 @@ export function mountDiary({ onBack, version = '', initialScreen = 'home', compo
     const hero = el('section', undefined, 'diary-hero');
     const graphic = el('div', undefined, 'diary-ring');
     // Статичное дерево, не анимация роста.
-    graphic.innerHTML = '<svg viewBox="0 0 200 200" aria-hidden="true"><circle class="diary-track" cx="100" cy="100" r="88"/><circle class="diary-progress" cx="100" cy="100" r="88"/><path class="diary-tree" d="M100 142V80m0 32-23-18m23 8 22-21M75 143h50"/><circle class="diary-leaf" cx="77" cy="73" r="24"/><circle class="diary-leaf" cx="121" cy="67" r="26"/><circle class="diary-leaf" cx="98" cy="47" r="25"/></svg>';
+    graphic.innerHTML = '<svg viewBox="0 0 200 200" aria-hidden="true"><circle class="diary-track" cx="100" cy="100" r="88"/><circle class="diary-progress" cx="100" cy="100" r="88"/><image href="js/harness/diary-ui/tree-reference.png" x="41" y="50" width="114" height="108" preserveAspectRatio="xMidYMid meet"/></svg>';
     ring = graphic.querySelector('.diary-progress'); monthLabel = el('p', '', 'diary-muted');
     const clock = el('div', undefined, 'diary-clock'); clock.setAttribute('aria-label', 'Время воздержания'); clockNodes = [];
     ['Дни', 'Часы', 'Мин', 'Сек'].forEach((label, i) => {
