@@ -408,11 +408,11 @@ export function createCommands({
         }
       }
 
-      const effective = {
-        ...target.record,
-        ...normalizedChanges,
-      };
-      if (normalizedChanges.reason !== undefined || normalizedChanges.triggerId !== undefined) {
+      const { source, headOperationId: ignoredHead, ...currentEvent } = targetEffective;
+      const { removeTrigger, ...eventChanges } = normalizedChanges;
+      const effective = { ...currentEvent, ...eventChanges };
+      if (removeTrigger === true) delete effective.triggerId;
+      if (normalizedChanges.reason !== undefined || normalizedChanges.triggerId !== undefined || removeTrigger === true) {
         const effectiveChecked = validateEvent(effective);
         if (!effectiveChecked.ok) return effectiveChecked;
         if (normalizedChanges.triggerId

@@ -38,6 +38,13 @@ function writeRule(node) {
   return String(node['.write']);
 }
 
+test('removeTrigger разрешён только как true в editEvent без triggerId', () => {
+  const { journal } = diaryRulesOf(readRulesFile('database.rules.json'));
+  const changes = journal.mutations.$entityKey.$predecessorOperationId.changes;
+  assert.ok(changes['.validate'].includes("newData.hasChild('removeTrigger')"));
+  assert.equal(changes.removeTrigger?.['.validate'], "newData.val() === true && newData.parent().parent().child('type').val() === 'editEvent' && !newData.parent().hasChild('triggerId')");
+});
+
 test('diaryV1 существует в публичных и локальных правилах', () => {
   for (const name of ['database.rules.json', 'database.rules.local.json']) {
     const rules = readRulesFile(name);

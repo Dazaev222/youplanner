@@ -1,0 +1,18 @@
+<!doctype html><html lang="ru"><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Проверка дневника</title><link rel="stylesheet" href="../styles/tokens.css"><link rel="stylesheet" href="../styles/diary.css"><style>*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui,sans-serif;background:var(--bg);line-height:1.5}button,input,textarea,select{font-family:inherit}</style><body class="view-diary"><section id="diary-view"></section><script type="module">
+import { mountDiary } from '../js/harness/diary-ui/index.js';
+import { createDiaryStore } from '../js/harness/diary/indexeddb-store.js';
+import { createFirebaseRepository } from '../js/harness/diary/firebase-repository.js';
+import { createDiaryService } from '../js/harness/diary/index.js';
+import { createMemoryServer } from './helpers/diary-memory-server.mjs';
+const server = createMemoryServer();
+const clock = { now:()=>Date.now() };
+const store = createDiaryStore({indexedDB, name:'diary-ui-test-'+crypto.randomUUID(),clock}); await store.open();
+const service=createDiaryService({auth:{getUid:()=> 'test-owner'},repository:createFirebaseRepository({transport:server.transport}),store,clock,journalId:'test-journal',deviceId:'test-device'});
+if(!new URLSearchParams(location.search).has('first')){
+ await service.initializeDiary({duration:'10:30',timeZone:'Europe/Moscow'});
+ const trigger=await service.createTrigger({name:'Стресс'});
+ await service.confirmRelapse({triggerId:trigger.value.trigger.triggerId,reason:'Тестовая запись, не личные данные'});
+ await service.synchronize();
+}
+mountDiary({onBack:()=>location.href='diary-ui-preview.html',version:'проверка',compositionFactory:async()=>({ok:true,value:{service,store,clock}})});
+</script></body></html>

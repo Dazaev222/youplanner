@@ -35,6 +35,7 @@ export function bindNavEvents() {
   // «Меню» (панель статистики, делегирование ниже по data-harness-view).
   // Кнопка «Назад» на экране Harness не имеет id (каркас U5.2) — её ставит
   // сам mountHarness через селектор по aria-label
+  document.getElementById('diary-btn')?.addEventListener('click', () => switchAppView('diary'));
   const harnessButton = document.getElementById('harness-btn');
   if (harnessButton) {
     harnessButton.addEventListener('click', function () { switchAppView('harness'); });
@@ -118,6 +119,9 @@ export function bindNavEvents() {
         closeStatsMenu();
         switchAppView('matrix');
         return;
+      }
+      if (item.hasAttribute('data-diary-view')) {
+        closeStatsMenu(); switchAppView('diary'); return;
       }
       if (item.hasAttribute('data-harness-view')) {
         closeStatsMenu();

@@ -173,7 +173,7 @@
                     ".validate": "newData.isString()"
                   },
                   "changes": {
-                    ".validate": "((newData.parent().child('type').val() === 'editEvent' && (newData.hasChild('occurredAtMs') || newData.hasChild('reason') || newData.hasChild('triggerId')) && !newData.hasChild('name') && !newData.hasChild('categories') && !newData.hasChild('triggerMappings') && !newData.hasChild('sourceAnalysisId')) || (newData.parent().child('type').val() === 'renameTrigger' && newData.hasChild('name') && !newData.hasChild('occurredAtMs') && !newData.hasChild('reason') && !newData.hasChild('triggerId') && !newData.hasChild('categories') && !newData.hasChild('triggerMappings') && !newData.hasChild('sourceAnalysisId')) || (newData.parent().child('type').val() === 'applyCategoryPolicy' && newData.hasChild('categories') && newData.hasChild('triggerMappings') && !newData.hasChild('occurredAtMs') && !newData.hasChild('reason') && !newData.hasChild('triggerId') && !newData.hasChild('name')))",
+                    ".validate": "((newData.parent().child('type').val() === 'editEvent' && (newData.hasChild('occurredAtMs') || newData.hasChild('reason') || newData.hasChild('triggerId') || newData.hasChild('removeTrigger')) && !newData.hasChild('name') && !newData.hasChild('categories') && !newData.hasChild('triggerMappings') && !newData.hasChild('sourceAnalysisId')) || (newData.parent().child('type').val() === 'renameTrigger' && newData.hasChild('name') && !newData.hasChild('occurredAtMs') && !newData.hasChild('reason') && !newData.hasChild('triggerId') && !newData.hasChild('categories') && !newData.hasChild('triggerMappings') && !newData.hasChild('sourceAnalysisId')) || (newData.parent().child('type').val() === 'applyCategoryPolicy' && newData.hasChild('categories') && newData.hasChild('triggerMappings') && !newData.hasChild('occurredAtMs') && !newData.hasChild('reason') && !newData.hasChild('triggerId') && !newData.hasChild('name')))",
                     "occurredAtMs": {
                       ".validate": "newData.isNumber() && newData.val() >= 0"
                     },
@@ -182,6 +182,9 @@
                     },
                     "triggerId": {
                       ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 768"
+                    },
+                    "removeTrigger": {
+                      ".validate": "newData.val() === true && newData.parent().parent().child('type').val() === 'editEvent' && !newData.parent().hasChild('triggerId')"
                     },
                     "name": {
                       ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 200"

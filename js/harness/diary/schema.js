@@ -383,8 +383,8 @@ export function validateChanges(type, rawChanges) {
 
   if (type === 'editEvent') {
     for (const key of keys) {
-      if (!['occurredAtMs', 'reason', 'triggerId'].includes(key)) {
-        return invalid(`changes.${key}`, 'editEvent меняет только occurredAtMs/reason/triggerId');
+      if (!['occurredAtMs', 'reason', 'triggerId', 'removeTrigger'].includes(key)) {
+        return invalid(`changes.${key}`, 'editEvent меняет только occurredAtMs/reason/triggerId/removeTrigger');
       }
     }
     if (has(changes, 'occurredAtMs') && !isSafeInt(changes.occurredAtMs)) {
@@ -399,7 +399,11 @@ export function validateChanges(type, rawChanges) {
         return invalid('changes.triggerId', 'Недопустимый triggerId');
       }
     }
-    if (!has(changes, 'occurredAtMs') && !has(changes, 'reason') && !has(changes, 'triggerId')) {
+    // Явный маркер переживает нормализацию и транспорт RTDB (в отличие от null).
+    if (has(changes, 'removeTrigger') && (changes.removeTrigger !== true || has(changes, 'triggerId'))) {
+      return invalid('changes.removeTrigger', 'removeTrigger должен быть true без triggerId');
+    }
+    if (!has(changes, 'occurredAtMs') && !has(changes, 'reason') && !has(changes, 'triggerId') && changes.removeTrigger !== true) {
       return invalid('changes', 'Нет допустимых изменений');
     }
     return null;

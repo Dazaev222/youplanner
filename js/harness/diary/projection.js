@@ -106,6 +106,7 @@ export function effectiveEvent(source, operations = []) {
         effective[key] = changes[key];
       }
     }
+    if (changes.removeTrigger === true) delete effective.triggerId;
     headOperationId = operation.operationId;
   }
   effective.source = source;

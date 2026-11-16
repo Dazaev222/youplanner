@@ -60,7 +60,7 @@ function menuPanel() {
 
 test('menu: index.html — у каждого пункта один эмодзи-слот и он перед текстом', () => {
   const buttons = menuPanel().match(/<button[^>]*class="stats-menu-item"[^>]*>.*?<\/button>/gs) || [];
-  assert.equal(buttons.length, 8, 'пунктов в панели: ' + buttons.length);
+  assert.equal(buttons.length, 9, 'пунктов в панели: ' + buttons.length);
   for (const item of buttons) {
     const slots = item.match(/<span class="stats-menu-emoji" aria-hidden="true">[^<]+<\/span>/g) || [];
     assert.equal(slots.length, 1, 'ровно один эмодзи-слот на пункт: ' + item.slice(0, 60));
@@ -69,7 +69,7 @@ test('menu: index.html — у каждого пункта один эмодзи-
     const inner = item.slice(item.indexOf('>') + 1, -9);
     assert.ok(inner.startsWith(slots[0]),
       'эмодзи стоит слева от названия: ' + item.slice(0, 60));
-    assert.match(item, /data-(stats|sleep|matrix|harness)-view/, 'у пункта есть экран');
+    assert.match(item, /data-(stats|sleep|matrix|harness|diary)-view/, 'у пункта есть экран');
   }
 });
 

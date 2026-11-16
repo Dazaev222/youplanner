@@ -150,7 +150,8 @@
 // (ETag/If-Match) и SSE-обработчики put/patch/cancel/auth_revoked. Протокол
 // access-v1 несовместим со старыми клиентами: на старой offline PWA —
 // запрет отправки legacy-команд (UI показывает необходимость обновления).
-const CACHE = 'youplanner-v62';
+// v63: оболочка дневника и готовый сервис данных, включая офлайн-зависимости.
+const CACHE = 'youplanner-v63';
 // Иконки — все из manifest.json: отсутствующая в кэше иконка ломала бы
 // офлайн-установку PWA (аудит 2026-10-31: icon-512.png не кэшировался)
 const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon-512.png', './icon.svg',
@@ -182,6 +183,18 @@ const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './ic
   './js/harness/access.js',
   './js/harness/access-view.js',
   './js/harness/index.js',
+  './styles/diary.css',
+  './js/harness/diary-ui/index.js', './js/harness/diary-ui/session.js',
+  './js/harness/diary-ui/dom.js', './js/harness/diary-ui/dialogs.js',
+  './js/harness/diary-ui/history.js', './js/harness/diary-ui/view-model.js',
+  './js/harness/diary-ui/milestones.js', './js/harness/diary-ui/settings.js', './js/harness/diary-ui/categories.js', './js/harness/diary-ui/analysis.js', './js/harness/diary-ui/overview.js',
+  './js/harness/diary/index.js', './js/harness/diary/composition.js',
+  './js/harness/diary/analysis.js', './js/harness/diary/backup.js',
+  './js/harness/diary/canonical.js', './js/harness/diary/clock.js',
+  './js/harness/diary/commands.js', './js/harness/diary/errors.js',
+  './js/harness/diary/firebase-repository.js', './js/harness/diary/ids.js',
+  './js/harness/diary/indexeddb-store.js', './js/harness/diary/projection.js',
+  './js/harness/diary/schema.js', './js/harness/diary/statistics.js', './js/harness/diary/sync.js',
   // Общие примитивы структуры значений (аудит 2026-11-13, YP-08)
   './js/core/struct.js',
   './js/sync/sync.js',

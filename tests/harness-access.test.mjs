@@ -1280,9 +1280,9 @@ test('A7.3.5: timeout в view — «Исход изменения неизвес
 
 /* --- sw.js и стили (A7.9.4/A7.3.8) ----------------------------------------------------------- */
 
-test('A7.9.4: sw.js — версия кеша v62, access.js/access-view.js в ASSETS', () => {
+test('A7.9.4: sw.js — версия кеша v63, access.js/access-view.js в ASSETS', () => {
   const source = readFileSync(SW_PATH, 'utf8');
-  assert.match(source, /const CACHE = 'youplanner-v62';/);
+  assert.match(source, /const CACHE = 'youplanner-v63';/);
   assert.match(source, /v62 \(v61 -> v62\)/, 'комментарий по конвенции версий');
   assert.match(source, /'\.\/js\/harness\/access\.js'/, 'access.js в precache');
   assert.match(source, /'\.\/js\/harness\/access-view\.js'/, 'access-view.js в precache');

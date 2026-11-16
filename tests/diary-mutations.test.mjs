@@ -51,6 +51,37 @@ async function setupWithEvents() {
   return { server, a, firstId: first.value.event.eventId, secondId: second.value.event.eventId };
 }
 
+test('removeTrigger: снятие, повторное чтение, восстановление и запрет пустого события', async () => {
+  const { a, server, firstId } = await setupWithEvents();
+  const created = await a.service.createTrigger({ name: 'Стресс' });
+  const triggerId = created.value.trigger.triggerId;
+  await a.service.synchronize();
+  async function edit(changes) {
+    const prepared = await a.service.prepareMutation({ entityKey: `event_${firstId}`, changes });
+    assert.equal(prepared.ok, true, JSON.stringify(prepared));
+    const committed = await a.service.commitMutation(prepared.value, true);
+    assert.equal(committed.ok, true, JSON.stringify(committed));
+  }
+  await edit({ triggerId });
+  await edit({ removeTrigger: true, reason: 'Только причина' });
+  let event = (await a.service.getProjection()).events.find(e => e.eventId === firstId);
+  assert.equal(event.triggerId, undefined);
+  assert.equal(event.reason, 'Только причина');
+  const b = await makeDevice(server, 'reader');
+  await b.service.synchronize();
+  event = (await b.service.getProjection()).events.find(e => e.eventId === firstId);
+  assert.equal(event.triggerId, undefined, 'маркер сохраняется после передачи через RTDB');
+  const empty = await a.service.prepareMutation({ entityKey: `event_${firstId}`, changes: { reason: '  ' } });
+  assert.equal(empty.ok, false, 'проверяется эффективная запись, не исходник');
+  const ambiguous = await a.service.prepareMutation({ entityKey: `event_${firstId}`, changes: { removeTrigger: true, triggerId } });
+  assert.equal(ambiguous.ok, false);
+  await edit({ triggerId });
+  await edit({ removeTrigger: true });
+  event = (await a.service.getProjection()).events.find(e => e.eventId === firstId);
+  assert.equal(event.triggerId, undefined);
+  assert.equal(event.source.reason, 'Первый', 'исходник неизменен');
+});
+
 test('prepareMutation: offline отказ, outbox не растёт', async () => {
   const { server, a, firstId } = await setupWithEvents();
   const before = (await a.store.readSnapshot({ uid: UID, journalId: JOURNAL })).outbox.length;

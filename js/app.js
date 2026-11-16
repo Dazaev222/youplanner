@@ -51,6 +51,8 @@ import { bindScreensEvents } from './events/screens-events.js';
 // PWA-пульт Harness (ТЗ U5): mountHarness ставит подписки/жизненный цикл
 // при входе на маршрут; unmount возвращает экран в чистое состояние.
 import { mountHarness } from './harness/index.js';
+// Дневник загружается при входе: не утяжеляет запуск основного трекера.
+let diaryLoadGeneration = 0;
 
 /* --- Статус ручной синхронизации в Настройках ------------------------------ */
 
@@ -312,7 +314,12 @@ const ROUTE_RENDER = {
   'qaza': function () { ensureQazaState(); renderQazaView(); },
   'edit-habits': function () { appState.habits = loadHabits(); renderHabitsEditList(); },
   'settings': renderSettingsView,
-  'stats': renderStatsView,
+  'stats': function () {
+    renderStatsView();
+    const link = document.getElementById('diary-overview-open');
+    if (link) link.onclick = () => { diaryInitialScreen = 'statistics'; switchAppView('diary'); };
+    import('./harness/diary-ui/overview.js').then(m => m.loadDiaryOverview(document.getElementById('diary-overview-text'))).catch(() => {});
+  },
   'stats-qaza': renderStatsQazaView,
   // Вход в список обнуляет выбранную привычку: карточка открывается только
   // тапом по строке, а не остатком прошлого захода
@@ -331,6 +338,18 @@ const ROUTE_RENDER = {
   'fast': function () { resetFastForm(); renderFastView(); },
   // Ассистенту на входе нужно только обновить подпись про ключ
   'assistant': renderAssistantView,
+  'diary': function () {
+    if (diarySession) return;
+    const generation = ++diaryLoadGeneration;
+    import('./harness/diary-ui/index.js').then(({ mountDiary }) => {
+      if (generation === diaryLoadGeneration && currentView === 'diary') {
+        diarySession = mountDiary({ onBack: () => switchAppView('main'), version: APP_VERSION, initialScreen: diaryInitialScreen });
+        diaryInitialScreen = 'home';
+      }
+    }).catch(() => {
+      if (generation === diaryLoadGeneration) document.getElementById('diary-view').textContent = 'Не удалось загрузить дневник. Вернитесь и повторите вход';
+    });
+  },
   // Harness: вход на маршрут поднимает сессию (Auth/device/подписки),
   // выход из маршрута её полностью гасит — см. switchAppView ниже
   'harness': function () {
@@ -343,6 +362,8 @@ const ROUTE_RENDER = {
 // Активная сессия Harness (mountHarness → { unmount }). Одна на маршрут:
 // при уходе с экрана unmount чистит таймеры/подписки/dialog (U5.9.1).
 let harnessSession = null;
+let diarySession = null;
+let diaryInitialScreen = 'home';
 
 // Предупреждение о битом имени экрана уже выведено (switchAppView)
 let warnedUnknownView = false;
@@ -395,6 +416,10 @@ export function switchAppView(name) {
   // гамбургера, — и «Назад» должен вернуть в тот, откуда вошли
   if (name === 'sleep' && currentView !== 'sleep') sleepReturnView = currentView;
 
+  if (name !== 'diary') diaryLoadGeneration++;
+  if (currentView === 'diary' && name !== 'diary' && diarySession) {
+    diarySession.unmount(); diarySession = null;
+  }
   applyScreen(name, currentView);
   const render = ROUTE_RENDER[name];
   if (render) render();

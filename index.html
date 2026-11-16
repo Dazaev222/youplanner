@@ -83,6 +83,7 @@
   <link rel="stylesheet" href="styles/habits-edit.css">
   <link rel="stylesheet" href="styles/assistant.css">
   <link rel="stylesheet" href="styles/harness.css">
+  <link rel="stylesheet" href="styles/diary.css">
   <link rel="stylesheet" href="styles/mobile.css">
 </head>
 <body>
@@ -112,6 +113,7 @@
     <div id="header-actions">
       <button id="assistant-btn" class="btn btn-secondary">Ассистент</button>
       <button id="harness-btn" class="btn btn-secondary">ПК-агент</button>
+      <button id="diary-btn" class="btn btn-secondary">Дневник</button>
       <button id="qaza-btn" class="btn btn-secondary">Каза-намазы</button>
       <button id="schedule-btn" class="btn btn-secondary">Расписание</button>
       <button id="settings-btn" class="btn btn-secondary">Настройки</button>
@@ -692,6 +694,11 @@
         </button>
       </li>
     </ul>
+    <section id="diary-overview" aria-label="Статистика дневника">
+      <h3>Дневник привычек</h3>
+      <p id="diary-overview-text">Загрузка дневника…</p>
+      <button type="button" id="diary-overview-open" class="btn btn-secondary">Статистика дневника</button>
+    </section>
   </section>
 
   <!-- Категория «Статистика → Каза-намазы». Источник данных — поле h6
@@ -877,6 +884,7 @@
        (bridge/* проекта telegram-claude-tunnel) и свои модули js/harness.
        Подтверждения живут в отдельном dialog РЯДОМ с корневой оболочкой
        (#app), не внутри скрываемой вкладки. -->
+  <section id="diary-view" aria-label="Дневник привычек" hidden></section>
   <section id="harness-view" class="harness-view" aria-labelledby="harness-title" hidden>
     <!-- F6.2: панель чата и панель настроек — две переключаемые панели одного
          маршрута. Переход в настройки скрывает chat-panel без unmount сессии;
@@ -1023,6 +1031,7 @@
     <button type="button" class="stats-menu-item" data-matrix-view><span class="stats-menu-emoji" aria-hidden="true">🗂️</span>Матрица Эйзенхауэра</button>
     <!-- ПК-агент (Harness): на телефоне это второй вход после шапки ПК —
          экран чата с ПК и подтверждений опасных действий -->
+    <button type="button" class="stats-menu-item" data-diary-view><span class="stats-menu-emoji" aria-hidden="true">📖</span>Дневник привычек</button>
     <button type="button" class="stats-menu-item" data-harness-view><span class="stats-menu-emoji" aria-hidden="true">🖥️</span>ПК-агент</button>
   </aside>
 

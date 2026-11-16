@@ -44,7 +44,8 @@ export const SCREENS = {
   // PWA-пульт Harness (ТЗ U5): чат с ПК-агентом и подтверждения опасных
   // действий. Вход — кнопка шапки на ПК и пункт «Меню» на телефоне,
   // поэтому вкладка — главная
-  'harness': { el: 'harness-view', tab: 'main', bodyClass: 'view-harness' },
+  'harness': { el: 'harness-view', tab: 'main', bodyClass: 'view-harness', fullscreen: true },
+  'diary': { el: 'diary-view', tab: 'main', bodyClass: 'view-diary', fullscreen: true },
 };
 
 // Вкладка для экрана. `from` — экран, с которого пришли (currentView до
@@ -87,7 +88,9 @@ export function applyScreen(name, from) {
   // таб-бар — только на телефоне
   const mobile = isMobileView();
   setHidden('mobile-day-tabs', !isMain || !mobile);
-  setHidden('tab-bar', !mobile);
+  setHidden('tab-bar', !mobile || Boolean(SCREENS[name] && SCREENS[name].fullscreen));
+  setHidden('header', Boolean(SCREENS[name] && SCREENS[name].fullscreen));
+  setHidden('diary-btn', !isMain);
 
   const tab = tabFor(name, from);
   document.querySelectorAll('#tab-bar .tab-item').forEach(function (item) {
@@ -99,7 +102,7 @@ export function applyScreen(name, from) {
   // читается по экрану. Список ниже — единственный источник правды: экран с
   // bodyClass вне этого списка получал бы пустой <body> и шапку поверх себя.
   const classes = ['view-qaza', 'view-prayer', 'view-fast', 'view-settings',
-    'view-stats', 'view-matrix', 'view-assistant', 'view-harness'];
+    'view-stats', 'view-matrix', 'view-assistant', 'view-harness', 'view-diary'];
   const active = Object.prototype.hasOwnProperty.call(SCREENS, name)
     ? SCREENS[name].bodyClass
     : null;
