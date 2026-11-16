@@ -37,6 +37,231 @@
     "youplanner-d8aaea12-60e6-4ac9-973c-46c19b387cd9-backups": {
       ".read": "auth != null && auth.uid === \"OWNER_UID\"",
       ".write": "auth != null && auth.uid === \"OWNER_UID\""
+    },
+    "diaryV1": {
+      "$ownerUid": {
+        ".read": "auth != null && auth.uid === $ownerUid && auth.uid === \"OWNER_UID\"",
+        "journals": {
+          "$journalId": {
+            "initialization": {
+              ".write": "auth != null && auth.uid === $ownerUid && auth.uid === \"OWNER_UID\" && !data.exists() && newData.exists()",
+              ".validate": "newData.child('schemaVersion').val() === 1 && newData.child('journalId').val() === $journalId && newData.child('startedAtMs').isNumber() && newData.child('startedAtMs').val() >= 0 && newData.child('initialDurationMs').isNumber() && newData.child('initialDurationMs').val() >= 0 && newData.child('createdAtMs').isNumber() && newData.child('createdAtMs').val() === newData.child('startedAtMs').val() + newData.child('initialDurationMs').val() && newData.child('timeZone').isString() && newData.child('timeZone').val().length > 0 && newData.child('timeZone').val().length <= 64 && newData.child('deviceId').isString() && newData.child('deviceId').val().length > 0 && newData.child('deviceId').val().length <= 128 && newData.child('acceptedAtMs').val() === now",
+              "schemaVersion": {
+                ".validate": "newData.isNumber()"
+              },
+              "journalId": {
+                ".validate": "newData.isString()"
+              },
+              "startedAtMs": {
+                ".validate": "newData.isNumber()"
+              },
+              "initialDurationMs": {
+                ".validate": "newData.isNumber()"
+              },
+              "createdAtMs": {
+                ".validate": "newData.isNumber()"
+              },
+              "timeZone": {
+                ".validate": "newData.isString()"
+              },
+              "deviceId": {
+                ".validate": "newData.isString()"
+              },
+              "acceptedAtMs": {
+                ".validate": "newData.isNumber()"
+              },
+              "originImportId": {
+                ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 768"
+              },
+              "$other": {
+                ".validate": false
+              }
+            },
+            "events": {
+              "$eventId": {
+                ".write": "auth != null && auth.uid === $ownerUid && auth.uid === \"OWNER_UID\" && !data.exists() && newData.exists()",
+                ".validate": "newData.child('schemaVersion').val() === 1 && newData.child('eventId').val() === $eventId && newData.child('occurredAtMs').isNumber() && newData.child('occurredAtMs').val() >= 0 && newData.child('deviceId').isString() && newData.child('deviceId').val().length > 0 && newData.child('deviceId').val().length <= 128 && newData.child('createdAtMs').isNumber() && newData.child('createdAtMs').val() >= 0 && newData.child('acceptedAtMs').val() === now && newData.child('categoryPolicyOperationId').isString() && newData.child('categoryPolicyOperationId').val().length > 0 && newData.child('categoryPolicyOperationId').val().length <= 768 && (newData.child('triggerId').exists() || (newData.child('reason').exists() && newData.child('reason').val().length > 0)) && (!newData.child('categoryId').exists() || newData.child('categoryPolicyOperationId').val() !== 'initial')",
+                "schemaVersion": {
+                  ".validate": "newData.isNumber()"
+                },
+                "eventId": {
+                  ".validate": "newData.isString()"
+                },
+                "occurredAtMs": {
+                  ".validate": "newData.isNumber()"
+                },
+                "reason": {
+                  ".validate": "newData.isString() && newData.val().length <= 4000"
+                },
+                "triggerId": {
+                  ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 768"
+                },
+                "categoryPolicyOperationId": {
+                  ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 768"
+                },
+                "categoryId": {
+                  ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 768"
+                },
+                "deviceId": {
+                  ".validate": "newData.isString()"
+                },
+                "createdAtMs": {
+                  ".validate": "newData.isNumber()"
+                },
+                "acceptedAtMs": {
+                  ".validate": "newData.isNumber()"
+                },
+                "originImportId": {
+                  ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 768"
+                },
+                "$other": {
+                  ".validate": false
+                }
+              }
+            },
+            "triggerCreations": {
+              "$triggerId": {
+                ".write": "auth != null && auth.uid === $ownerUid && auth.uid === \"OWNER_UID\" && !data.exists() && newData.exists()",
+                ".validate": "newData.child('schemaVersion').val() === 1 && newData.child('triggerId').val() === $triggerId && newData.child('triggerId').val().matches(/^trigger-/) && newData.child('name').isString() && newData.child('name').val().length > 0 && newData.child('name').val().length <= 200 && newData.child('createdAtMs').isNumber() && newData.child('createdAtMs').val() >= 0 && newData.child('deviceId').isString() && newData.child('deviceId').val().length > 0 && newData.child('deviceId').val().length <= 128 && newData.child('acceptedAtMs').val() === now",
+                "schemaVersion": {
+                  ".validate": "newData.isNumber()"
+                },
+                "triggerId": {
+                  ".validate": "newData.isString()"
+                },
+                "name": {
+                  ".validate": "newData.isString()"
+                },
+                "createdAtMs": {
+                  ".validate": "newData.isNumber()"
+                },
+                "deviceId": {
+                  ".validate": "newData.isString()"
+                },
+                "acceptedAtMs": {
+                  ".validate": "newData.isNumber()"
+                },
+                "originImportId": {
+                  ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 768"
+                },
+                "$other": {
+                  ".validate": false
+                }
+              }
+            },
+            "mutations": {
+              "$entityKey": {
+                "$predecessorOperationId": {
+                  ".write": "auth != null && auth.uid === $ownerUid && auth.uid === \"OWNER_UID\" && !data.exists() && newData.exists()",
+                  ".validate": "newData.child('schemaVersion').val() === 1 && newData.child('predecessorOperationId').val() === $predecessorOperationId && newData.child('operationId').isString() && newData.child('operationId').val() !== 'initial' && newData.child('operationId').val() !== $predecessorOperationId && newData.child('entityKey').val() === $entityKey && newData.child('type').isString() && (($predecessorOperationId === 'initial' && !newData.child('predecessorSlot').exists()) || ($predecessorOperationId !== 'initial' && newData.child('predecessorSlot').exists() && newData.child('predecessorSlot').isString() && newData.child('predecessorSlot').val() !== $predecessorOperationId && root.child('diaryV1').child($ownerUid).child('journals').child($journalId).child('mutations').child($entityKey).child(newData.child('predecessorSlot').val()).child('operationId').val() === $predecessorOperationId)) && ((newData.child('entityKey').val().matches(/^event_/) && newData.child('type').val() === 'editEvent' && root.child('diaryV1').child($ownerUid).child('journals').child($journalId).child('events').child(newData.child('entityKey').val().replace('event_', '')).exists()) || (newData.child('entityKey').val().matches(/^trigger_/) && newData.child('type').val() === 'renameTrigger' && root.child('diaryV1').child($ownerUid).child('journals').child($journalId).child('triggerCreations').child(newData.child('entityKey').val().replace('trigger_', '')).exists()) || (newData.child('entityKey').val() === 'categoryPolicy' && newData.child('type').val() === 'applyCategoryPolicy')) && newData.child('changes').exists() && newData.child('basisFingerprint').isString() && newData.child('basisFingerprint').val().matches(/^sha256:[0-9a-f]{64}$/) && newData.child('createdAtMs').isNumber() && newData.child('createdAtMs').val() >= 0 && newData.child('deviceId').isString() && newData.child('deviceId').val().length > 0 && newData.child('deviceId').val().length <= 128 && newData.child('acceptedAtMs').val() === now",
+                  "schemaVersion": {
+                    ".validate": "newData.isNumber()"
+                  },
+                  "operationId": {
+                    ".validate": "newData.isString()"
+                  },
+                  "predecessorOperationId": {
+                    ".validate": "newData.isString()"
+                  },
+                  "predecessorSlot": {
+                    ".validate": "newData.isString()"
+                  },
+                  "entityKey": {
+                    ".validate": "newData.isString()"
+                  },
+                  "type": {
+                    ".validate": "newData.isString()"
+                  },
+                  "changes": {
+                    ".validate": "((newData.parent().child('type').val() === 'editEvent' && (newData.hasChild('occurredAtMs') || newData.hasChild('reason') || newData.hasChild('triggerId')) && !newData.hasChild('name') && !newData.hasChild('categories') && !newData.hasChild('triggerMappings') && !newData.hasChild('sourceAnalysisId')) || (newData.parent().child('type').val() === 'renameTrigger' && newData.hasChild('name') && !newData.hasChild('occurredAtMs') && !newData.hasChild('reason') && !newData.hasChild('triggerId') && !newData.hasChild('categories') && !newData.hasChild('triggerMappings') && !newData.hasChild('sourceAnalysisId')) || (newData.parent().child('type').val() === 'applyCategoryPolicy' && newData.hasChild('categories') && newData.hasChild('triggerMappings') && !newData.hasChild('occurredAtMs') && !newData.hasChild('reason') && !newData.hasChild('triggerId') && !newData.hasChild('name')))",
+                    "occurredAtMs": {
+                      ".validate": "newData.isNumber() && newData.val() >= 0"
+                    },
+                    "reason": {
+                      ".validate": "newData.isString() && newData.val().length <= 4000"
+                    },
+                    "triggerId": {
+                      ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 768"
+                    },
+                    "name": {
+                      ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 200"
+                    },
+                    "categories": {
+                      ".validate": "newData.exists()"
+                    },
+                    "triggerMappings": {
+                      ".validate": "newData.exists()"
+                    },
+                    "sourceAnalysisId": {
+                      ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 768"
+                    },
+                    "$other": {
+                      ".validate": false
+                    }
+                  },
+                  "basisFingerprint": {
+                    ".validate": "newData.isString()"
+                  },
+                  "createdAtMs": {
+                    ".validate": "newData.isNumber()"
+                  },
+                  "deviceId": {
+                    ".validate": "newData.isString()"
+                  },
+                  "acceptedAtMs": {
+                    ".validate": "newData.isNumber()"
+                  },
+                  "originImportId": {
+                    ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 768"
+                  },
+                  "$other": {
+                    ".validate": false
+                  }
+                }
+              }
+            },
+            "analyses": {
+              "$analysisId": {
+                ".write": "auth != null && auth.uid === $ownerUid && auth.uid === \"OWNER_UID\" && !data.exists() && newData.exists()",
+                ".validate": "newData.child('analysisId').val() === $analysisId && newData.child('schemaVersion').val() === 1 && newData.child('sourceFingerprint').isString() && newData.child('sourceFingerprint').val().matches(/^sha256:[0-9a-f]{64}$/) && newData.child('coveredEventIds').hasChildren() && newData.child('model').isString() && newData.child('model').val().length > 0 && newData.child('model').val().length <= 200 && newData.child('generatedAtMs').isNumber() && newData.child('generatedAtMs').val() >= 0 && newData.child('proposal').exists() && newData.child('completeness').exists() && newData.child('acceptedAtMs').val() === now",
+                "analysisId": {
+                  ".validate": "newData.isString()"
+                },
+                "schemaVersion": {
+                  ".validate": "newData.isNumber()"
+                },
+                "sourceFingerprint": {
+                  ".validate": "newData.isString()"
+                },
+                "coveredEventIds": {
+                  ".validate": "newData.exists()"
+                },
+                "model": {
+                  ".validate": "newData.isString()"
+                },
+                "generatedAtMs": {
+                  ".validate": "newData.isNumber()"
+                },
+                "proposal": {
+                  ".validate": "newData.exists()"
+                },
+                "completeness": {
+                  ".validate": "newData.exists()"
+                },
+                "acceptedAtMs": {
+                  ".validate": "newData.isNumber()"
+                },
+                "originImportId": {
+                  ".validate": "newData.isString() && newData.val().length > 0 && newData.val().length <= 768"
+                },
+                "$other": {
+                  ".validate": false
+                }
+              }
+            }
+          }
+        }
+      }
     }
   }
 }

@@ -3,8 +3,8 @@
 // Скрипт — единственная вещь, которая превращает публичный шаблон правил с
 // заглушкой OWNER_UID в файл, который владелец вставляет в Console. Цена
 // ошибки в нём удвоенная: лишний символ в uid → синхронизации нет, а пропуск
-// заглушки в одно из шести разрешений (read+write на трёх узлах: данные,
-// выделенный planner, копии) → база открыта наполовину. Поэтому
+// заглушки в одно из разрешений (read+write на трёх legacy-узлах плюс read и
+// пять create-only листьев diaryV1) → база открыта наполовину. Поэтому
 // проверяем и чистую функцию, и CLI целиком (временный файл в .test_tmp,
 // репозиторий не трогаем).
 
@@ -16,7 +16,7 @@ import { tmpdir } from 'node:os';
 import { join, resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { buildRules, pinnedUid, validUid, PLACEHOLDER } from '../_tools/set-owner-uid.mjs';
+import { buildRules, grantsOf, pinnedUid, validUid, PLACEHOLDER } from '../_tools/set-owner-uid.mjs';
 
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const SCRIPT = join(ROOT, '_tools', 'set-owner-uid.mjs');
@@ -49,8 +49,9 @@ test('сборка правил: заглушка заменена во всех
   const { text, changed } = buildRules(source, UID);
 
   assert.equal(text.indexOf(PLACEHOLDER), -1, 'заглушка осталась в собранном файле');
-  assert.equal(changed.length, 6,
-    'ожидается шесть подстановок (.read и .write на трёх узлах), реально: ' + changed.join(', '));
+  assert.equal(changed.length, 12,
+    'ожидается двенадцать подстановок (.read и .write на трёх legacy-узлах + read и пять листьев diaryV1), реально: '
+    + changed.join(', '));
 
   const built = JSON.parse(text).rules;
   const template = JSON.parse(source).rules;
@@ -59,6 +60,9 @@ test('сборка правил: заглушка заменена во всех
   assert.deepEqual(Object.keys(built), Object.keys(template));
   for (const node of Object.keys(template)) {
     if (node.startsWith('.')) continue;
+    // diaryV1: read на $ownerUid, write — create-only на листьях, поэтому
+    // общий для legacy-узлов шаблон «.read === .write» к нему неприменим.
+    if (node === 'diaryV1') continue;
     assert.deepEqual(Object.keys(built[node]), Object.keys(template[node]));
     for (const effect of ['.read', '.write']) {
       assert.equal(built[node][effect],
@@ -66,6 +70,18 @@ test('сборка правил: заглушка заменена во всех
         node + effect + ' собрано не по шаблону');
     }
   }
+  // diaryV1 обязан получить тот же живой uid в каждом разрешении, иначе
+  // опубликованные правила пустят в домен любую анонимную сессию.
+  const diaryGrants = grantsOf(text).filter((grant) => grant.where.startsWith('diaryV1/'));
+  assert.equal(diaryGrants.length, 6,
+    'в diaryV1 ожидается шесть разрешений (read + пять create-only листьев), реально: '
+    + diaryGrants.map((grant) => grant.where).join(', '));
+  for (const grant of diaryGrants) {
+    assert.ok(grant.expression.includes('auth.uid === "' + UID + '"'),
+      grant.where + ': diaryV1 не закреплён за uid владельца');
+  }
+  assert.doesNotMatch(text, /\$ownerUid && auth\.uid === "OWNER_UID"/,
+    'в собранном файле остался литерал заглушки');
 });
 
 test('шаблон без заглушки: скрипт падает, а не пишет пустые правила', () => {
@@ -78,7 +94,7 @@ test('шаблон без заглушки: скрипт падает, а не �
 // иначе проба приняла бы заглушку за настоящего владельца.
 test('pinnedUid: собранный файл отдаёт uid, шаблон и пустые правила — null', () => {
   const built = JSON.parse(buildRules(readFileSync(TEMPLATE, 'utf8'), UID).text);
-  assert.deepEqual(pinnedUid(JSON.stringify(built)), { uid: UID, grants: 6 });
+  assert.deepEqual(pinnedUid(JSON.stringify(built)), { uid: UID, grants: 12 });
   assert.equal(pinnedUid(readFileSync(TEMPLATE, 'utf8')), null,
     'заглушка проведена как настоящий uid');
   assert.equal(pinnedUid('{"rules":{".read":false,".write":false}}'), null,
@@ -97,7 +113,7 @@ test('CLI: --uid пишет файл, --check его подтверждает', 
 
   const checked = run(['--check', '--out', out]);
   assert.equal(checked.code, 0, 'собранный файл не прошёл проверку: ' + checked.err);
-  assert.match(checked.out, /6 разрешениях/);
+  assert.match(checked.out, /12 разрешениях/);
 });
 
 test('CLI: битый uid и отсутствие файла — ненулевой выход, файл не создан', () => {

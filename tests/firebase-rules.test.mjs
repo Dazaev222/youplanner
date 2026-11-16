@@ -49,6 +49,15 @@ function readCloudRoots() {
     assert.ok(node, `${name} обязан указывать на именованный узел`);
     roots.push(node);
   }
+
+  // Дневник адресует свой корень через journalPath(), а не через js/sync/core.js.
+  // Берём имя корня из исходника, чтобы тест проверял контракт кода, а не
+  // список, продублированный в тесте.
+  const diarySource = readFileSync(join(ROOT, 'js/harness/diary/firebase-repository.js'), 'utf8');
+  const diaryMatch = diarySource.match(/return `([a-zA-Z0-9]+)\//);
+  const diaryRoot = diaryMatch ? diaryMatch[1] : null;
+  assert.ok(diaryRoot, 'в firebase-repository.js не найден корень journalPath');
+  roots.push(diaryRoot);
   return roots;
 }
 
@@ -85,6 +94,9 @@ test('разрешены ровно те узлы, которые адресуе
   assert.deepEqual(granted.sort(), [...new Set(roots)].sort(),
     'правила и js/sync/core.js должны называть одни и те же узлы: расхождение ломает синхронизацию молча');
   for (const node of granted) {
+    // diaryV1 — документированный доменный корень; его листья намеренно
+    // write-only, а чтение выдано на diaryV1/$ownerUid (см. diary-rules.test.mjs).
+    if (node === 'diaryV1') continue;
     assert.ok(node.length >= 16, `узел «${node}» подозрительно короткий — его легко подобрать`);
     assert.doesNotMatch(node, /\$/,
       'узлы в правилах — конкретные имена, а не шаблон $wildcard: шаблон открыл бы доступ всем узлам этого уровня');
@@ -112,6 +124,10 @@ test('условие одинаковое на read и write: «читаю, но
     byNode.get(grant.node)[grant.effect] = String(grant.expression);
   }
   for (const [node, effects] of byNode) {
+    // diaryV1/: чтение на $ownerUid, запись — create-only на листьях.
+    // Требовать одинаковое условие read/write на листе значило бы запретить
+    // чтение уже созданной истории: !data.exists() к read неприменим.
+    if (node.startsWith('diaryV1/')) continue;
     assert.ok(effects['.read'] && effects['.write'],
       `узел «${node}»: разрешение должно быть и на чтение, и на запись — синк делает и то, и другое`);
     assert.equal(effects['.read'], effects['.write'],
