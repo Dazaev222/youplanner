@@ -29,12 +29,14 @@
 import { pluralDays } from '../core/dates.js';
 import { showErrorToast, showToast } from '../core/dom.js';
 import { FAST_KEY } from '../data/fast.js';
+import { loadHabits, selectActiveHabits, selectArchivedHabits } from '../data/habits.js';
 import { PRAYER_KEY } from '../data/prayer.js';
 import { QAZA_LOG_KEY, QAZA_STORAGE_KEY } from '../data/qaza.js';
 import { SLEEP_KEY } from '../data/sleep.js';
 import { STORAGE_KEYS } from '../data/storage.js';
 import { isHeaderSafeKey, postAssistantChat } from './assistant-media.js';
 import { buildHabitsAnalysisRequest } from './assistant-analysis.js';
+import { buildDiaryContext } from './assistant-diary-context.js';
 import {
   PDF_MAX_CHARS,
   getPdfContext,
@@ -211,9 +213,17 @@ function readHistory() {
   }
 }
 
-function pushHistory(role, content) {
+function pushHistory(role, content, context) {
   const history = readHistory();
-  history.push({ role: role, content: content });
+  const entry = { role: role, content: content };
+  // Контекстные реплики (анализ Дневника в чат): по contextKind+requestId связаны
+  // «прошу анализ» и ответ модели, по contextFingerprint — сам источник истории
+  if (context && context.contextKind) {
+    entry.contextKind = context.contextKind;
+    if (context.contextFingerprint) entry.contextFingerprint = context.contextFingerprint;
+    if (context.requestId) entry.requestId = context.requestId;
+  }
+  history.push(entry);
   const tail = history.slice(-HISTORY_KEEP);
   try {
     localStorage.setItem(ASSISTANT_HISTORY_KEY, JSON.stringify(tail));
@@ -633,6 +643,33 @@ function lastDays(records, days) {
   return out;
 }
 
+// Записи дней без архивных привычек. Дни, где после вычистки не осталось
+// ни одной отметки, не попадают в снимок: пустой объект { } там выглядел бы
+// как «день был», хотя показывать в нём нечего. Неархивные ключи (и дни
+// не-объекты) переносятся как есть — фильтр не должен терять чужие данные.
+function withoutArchivedRecords(records, archivedIds) {
+  const ids = Object.keys(archivedIds);
+  if (ids.length === 0) return records;
+
+  const clean = {};
+  const dates = Object.keys(records);
+  for (let i = 0; i < dates.length; i++) {
+    const date = dates[i];
+    const day = records[date];
+    if (!day || typeof day !== 'object' || Array.isArray(day)) {
+      clean[date] = day;
+      continue;
+    }
+    const copy = {};
+    const habitIds = Object.keys(day);
+    for (let j = 0; j < habitIds.length; j++) {
+      if (!archivedIds[habitIds[j]]) copy[habitIds[j]] = day[habitIds[j]];
+    }
+    if (Object.keys(copy).length > 0) clean[date] = copy;
+  }
+  return clean;
+}
+
 // Разделы снимка берутся поимённо из реестров ключей (STORAGE_KEYS и
 // константы доменных модулей): строки те же, но расхождение с доменом
 // теперь поймает компилятор/тесты, а не пользователь.
@@ -643,16 +680,25 @@ function buildContext(contextDays) {
   const days = personaInt(contextDays, 2, 30, PERSONA_DEFAULTS.contextDays);
   const parts = [];
 
-  const habits = readSection(STORAGE_KEYS.habits);
-  if (Array.isArray(habits) && habits.length) {
-    parts.push('Привычки: ' + compact(habits.map(function (h) {
+  // Трекер видит только активные привычки: архивная исчезла с главного экрана
+  // и из прогресса, и её имя/записи в снимке спорили бы с тем, что видит
+  // человек. Полный список остаётся в хранилище — фильтр только здесь.
+  const habits = loadHabits();
+  const activeHabits = selectActiveHabits(habits);
+  const archivedIds = {};
+  const archived = selectArchivedHabits(habits);
+  for (let i = 0; i < archived.length; i++) archivedIds[archived[i].id] = true;
+
+  if (activeHabits.length) {
+    parts.push('Привычки: ' + compact(activeHabits.map(function (h) {
       return h && h.name ? h.name + ' (' + (h.type || '?') + (h.goal ? ', цель ' + h.goal : '') + ')' : '';
     }).filter(Boolean), 1200));
   }
 
   const records = readSection(STORAGE_KEYS.records);
   if (records) {
-    const windowDays = lastDays(records, days);
+    const visibleRecords = withoutArchivedRecords(records, archivedIds);
+    const windowDays = lastDays(visibleRecords, days);
     if (windowDays.length) {
       parts.push('Записи за ' + days + ' ' + pluralDays(days) + ':\n'
         + windowDays.join('\n'));
@@ -759,7 +805,12 @@ function buildMessages() {
 // автоудаление пары: начало диалога определяет сам разработчик API, а молча
 // выбрасывать второй пузырёк пользователь не просил
 function requestTail(history) {
-  const tail = history.slice(-HISTORY_SEND);
+  // Реплики анализа Дневника видны в общей ленте, но в исходящий history
+  // обычных запросов не попадают: иначе одно согласие превращалось бы в
+  // повторную отправку чувствительной истории с каждым будущим вопросом
+  // (мастер-ТЗ §5.4). Старые реплики без contextKind читаются как general.
+  const visible = history.filter(function (m) { return m.contextKind !== 'diary'; });
+  const tail = visible.slice(-HISTORY_SEND);
   let from = 0;
   while (from < tail.length && tail[from].role === 'assistant') from++;
   return tail.slice(from);
@@ -852,6 +903,127 @@ async function requestAssistantReply() {
     },
     readAssistantApiKey()
   );
+}
+
+// --- Общий анализ Дневника в чат ассистента ------------------------------------
+// Вход: типизированный dataset из дневника (js/harness/diary/analysis.js,
+// buildAnalysisDataset) и опциональные requestId/signal/лимиты. Состояния:
+// отмена, офлайн, занято, невалидный датасет/бюджет, ключ — до хода к API.
+// Ответ модели возвращается как текст и пишется в историю с contextKind
+// 'diary' и requestId. Контекст диалога (PDF/фото/привычки/история) в этот
+// ход не включается: адаптер собирает messages сам (assistant-diary-context.js).
+// Ошибки ход-а уходят с кодом домена (PROVIDER_*), а не как текст «упало».
+
+function diaryFailure(code, message) {
+  return { ok: false, error: { code: code, message: message, details: {}, retryable: false } };
+}
+
+export async function submitDiaryAnalysis(request) {
+  const signal = request && request.signal ? request.signal : null;
+  if (signal && signal.aborted) {
+    return diaryFailure('DIARY_CANCELLED', 'Запрос анализа отменён');
+  }
+  if (!navigator.onLine) {
+    return diaryFailure('DIARY_OFFLINE', 'Для анализа требуется интернет');
+  }
+  // Занятость общая с чатом: не вклиниваемся в запрос и не ставим
+  // чувствительный анализ в обычную очередь реплик (мастер-ТЗ §5.2.7)
+  if (assistantBusy || isPdfParsing() || isImageCompressing()) {
+    return diaryFailure('DIARY_BUSY', 'Ассистент занят — повторите после завершения текущего запроса');
+  }
+  const contextResult = buildDiaryContext(request ? request.dataset : null, {
+    requestId: request ? request.requestId : undefined,
+    maxEventsPerChunk: request ? request.maxEventsPerChunk : undefined,
+    maxChunks: request ? request.maxChunks : undefined,
+  });
+  if (!contextResult.ok) {
+    return contextResult;
+  }
+  if (!readAssistantApiKey()) {
+    return diaryFailure('PROVIDER_KEY_MISSING', 'Ключ ИИ не настроен');
+  }
+
+  const context = contextResult.request;
+  const userText = 'Прошу общий анализ Дневника привычек: событий '
+    + context.coveredEventIds.length + ', покрытие ' + context.completeness.status
+    + ' (отпечаток ' + context.sourceFingerprint + ').';
+  const diaryContext = {
+    contextKind: 'diary',
+    contextFingerprint: context.sourceFingerprint,
+    requestId: context.requestId,
+  };
+  pushHistory('user', userText, diaryContext);
+  renderHistory();
+
+  const persona = readAssistantPersona();
+  setAssistantBusy(true);
+  const typing = appendMessage('bot', 'Печатает…');
+  if (typing) typing.classList.add('is-typing');
+  typingNode = typing;
+  // Поколение на старте: очистка истории посреди полёта сдвинет счётчик,
+  // и запоздалый ответ в историю не попадёт
+  const generation = assistantGeneration;
+  let reply = null;
+  let error = null;
+  try {
+    reply = await postAssistantChat(
+      {
+        model: readAssistantModel(),
+        messages: context.messages,
+        temperature: persona.temperature,
+        max_tokens: persona.maxTokens,
+      },
+      readAssistantApiKey(),
+      signal
+    );
+  } catch (e) {
+    error = e;
+  } finally {
+    typingNode = null;
+    setAssistantBusy(false);
+    if (typing && typeof typing.classList !== 'undefined') {
+      typing.classList.remove('is-typing');
+    }
+  }
+  if (error) {
+    const aborted = signal && signal.aborted;
+    if (typing) {
+      if (aborted && typeof typing.remove === 'function') {
+        typing.remove();
+      } else if (typeof typing.classList !== 'undefined') {
+        typing.classList.add('is-error');
+        typing.textContent = aborted
+          ? 'Запрос анализа отменён'
+          : String(error.message || 'Не удалось получить ответ анализа');
+      }
+    }
+    if (aborted) {
+      return diaryFailure('DIARY_CANCELLED', 'Запрос анализа отменён');
+    }
+    return {
+      ok: false,
+      error: {
+        code: (error && error.code) || 'PROVIDER_UNAVAILABLE',
+        message: (error && error.message) || 'Не удалось получить ответ анализа',
+        details: {},
+        retryable: true,
+      },
+    };
+  }
+  if (generation === assistantGeneration) {
+    if (typing) typing.textContent = reply;
+    markBubbleDeletable(typing, pushHistory('assistant', reply, diaryContext));
+  } else if (typing && typeof typing.remove === 'function') {
+    // История очищена посреди полёта: пузырь в текущей ленте без истории
+    // вводил бы в заблуждение — снимаем его вместе с инвалидированным ответом
+    typing.remove();
+  }
+  return {
+    ok: true,
+    text: reply,
+    requestId: context.requestId,
+    sourceFingerprint: context.sourceFingerprint,
+  };
 }
 
 // --- Отрисовка ---------------------------------------------------------------
@@ -1431,6 +1603,8 @@ async function runAssistantReply() {
   // защитой. Индекс берётся из pushHistory: он учитывает и то, что история
   // за время запроса могла измениться
   if (generation === assistantGeneration) {
+    // Общий ход не несёт контекста Дневника: diary-метки привязаны к своему
+    // запросу в submitDiaryAnalysis и на чужие ответы не переносятся
     markBubbleDeletable(replyBubble, pushHistory('assistant', reply));
   }
 }

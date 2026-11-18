@@ -11,7 +11,7 @@ export const RESERVED_OPERATION_ID = 'initial';
 export const MAX_FIREBASE_KEY_LENGTH = 768;
 
 const FORBIDDEN_KEY_RE = /[.#$\[\]/\s\u0000-\u001f\u007f]/;
-const PROTO_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
+const ID_PROTO_KEYS = new Set(['__proto__', 'constructor', 'prototype']);
 const ID_PREFIX_RE = /^[a-z][a-z0-9]*$/;
 
 function cryptoSource(source) {
@@ -61,7 +61,7 @@ export function isFirebaseKey(key) {
   if (typeof key !== 'string') return false;
   if (!key || key.length > MAX_FIREBASE_KEY_LENGTH) return false;
   if (FORBIDDEN_KEY_RE.test(key)) return false;
-  if (PROTO_KEYS.has(key)) return false;
+  if (ID_PROTO_KEYS.has(key)) return false;
   return key.trim() === key;
 }
 

@@ -9,7 +9,7 @@ export let levelSheetTarget = null;
 // Пустое поле значит, что выполнять нечего, и пункт гаснет
 export function openLevelSheet(habitId, date) {
   const habit = findHabit(habitId);
-  if (!habit || !date || !hasLevelPopup(habitId)) return;
+  if (!habit || !date || habit.isArchived === true || !hasLevelPopup(habitId)) return;
 
   const entry = getEntry(date, habitId);
   const value = entry ? entry.value : undefined;

@@ -2,6 +2,7 @@ import { bus } from '../core/bus.js';
 import { ARCHIVE_KEY, loadArchive } from './archive.js';
 import { FAST_KEY, loadFast, validFastHistory } from './fast.js';
 import { loadHabits, pruneResolvedTombstones } from './habits.js';
+import { normalizeHabitArchive } from './habit-archive.js';
 import { PRAYER_KEY, loadPrayer } from './prayer.js';
 import { MATRIX_STORAGE_KEY } from './matrix.js';
 import { QAZA_LOG_KEY, QAZA_STORAGE_KEY, loadQaza, loadQazaLog, validQazaLogDate, validQazaLogEntries } from './qaza.js';
@@ -102,6 +103,9 @@ export function parseBackup(text) {
 
   if (!data || typeof data !== 'object' || Array.isArray(data)) return null;
   if (!Array.isArray(data.habits)) return null;
+  // Архивная пара нормализуется на границе: валидная сохраняется, повреждённая
+  // снимается, привычка не теряется. Старые копии без полей читаются как есть.
+  data.habits = data.habits.map(normalizeHabitArchive);
   // Записи проверяются тем же валидатором, что и облачный снимок:
   // ключи-не-даты и дни-не-объекты роняют разбор целиком. Иначе мусор
   // уехал бы в хранилище, а оттуда наверх (syncBody), и у ДРУГИХ устройств

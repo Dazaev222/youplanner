@@ -3,7 +3,7 @@ import { escapeHtml } from '../core/dom.js';
 import { sparkValues, sparklineSvg } from './sparkline.js';
 import { fastHistorySince } from '../data/archive.js';
 import { FAST_HISTORY_MIN, fastPeriodStats, loadFast } from '../data/fast.js';
-import { loadHabits } from '../data/habits.js';
+import { loadHabits, selectActiveHabits } from '../data/habits.js';
 import { loadQazaLog, qazaDayCounts, qazaTotalRemaining } from '../data/qaza.js';
 import { calcProgress, loadRecords } from '../data/records.js';
 import { loadSleep, sleepAverageDurationMin, sleepAverageMinutes, sleepEntriesInPeriod, sleepFormatDuration, sleepMinutesByDay, sleepTimeLabel, sleepTimeMinutes, sleepWakeMinutes } from '../data/sleep.js';
@@ -103,7 +103,7 @@ export function renderStatsView() {
   setStatsValue('#stats-list [data-stat="fast"] .stats-row-value',
     fast ? fast.remaining : '—');
 
-  const average = habitsAveragePercent(loadHabits(), dates);
+  const average = habitsAveragePercent(selectActiveHabits(loadHabits()), dates);
   setStatsValue('#stats-list [data-stat="habits"] .stats-row-value',
     average === null ? '—' : Math.round(average) + '%');
 }
@@ -277,7 +277,7 @@ export function renderStatsHabitsView() {
   if (!list) return;
 
   const dates = statsPeriodDates(loadStatsPeriod('habits'), new Date());
-  const habits = loadHabits();
+  const habits = selectActiveHabits(loadHabits());
   // Спарклайн — за последние SPARK_DAYS дней НЕЗАВИСИМО от выбранного периода:
   // процент справа уже отвечает на «как за период», а микро-тренд нужен на
   // вопрос «что с этим происходит в последние две недели». Один и тот же
@@ -311,8 +311,9 @@ export function renderStatsHabitView() {
   markStatsPeriod('stats-habit-period');
 
   // Список читается из хранилища, как в хабе: раздел открывают из Настроек,
-  // где состояние таблицы могло устареть
-  const habits = loadHabits();
+  // где состояние таблицы могло устареть. Архивная привычка сюда не попадает:
+  // список её не показывает, а остаток выбора после возврата в архив молчит
+  const habits = selectActiveHabits(loadHabits());
   let habit = null;
   for (let i = 0; i < habits.length; i++) {
     if (habits[i].id === statsHabitId) { habit = habits[i]; break; }

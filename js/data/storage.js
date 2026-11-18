@@ -6,6 +6,7 @@
 // устройства (обоснование — в шапке js/ui/assistant-view.js).
 import { safeSetItem } from '../core/storage.js';
 import { isPlainObject } from '../core/struct.js';
+import { validHabitArchiveActorId } from './habit-archive.js';
 
 export const STORAGE_KEYS = {
   habits: 'youplanner.habits',
@@ -163,6 +164,38 @@ export function plannerObserveVersions(env, snapshot) {
 // менять их форму нельзя. Ключ — состояние устройства: на сервер не уходит и
 // в файловые копии не входит.
 export const SECTION_WRITE_TS_KEY = 'youplanner.sync.section-writes';
+
+// ── actorId архива привычек ─────────────────────────────────────────────────
+// Стабильный идентификатор установки для версий архива. Не данные пользователя
+// и не раздел синхронизации: в облако, файловые копии и экспорт не входит.
+// Ключ отдельный от STORAGE_KEYS именно поэтому. Значение генерируется
+// существующим безопасным генератором (crypto.randomUUID с фолбэком) и
+// проверяется тем же ограничением длины, что и версия пары.
+export const HABIT_ARCHIVE_ACTOR_KEY = 'youplanner.habit.archive.actor';
+let habitArchiveActorCache = null;
+
+export function loadHabitArchiveActor() {
+  if (habitArchiveActorCache !== null) return habitArchiveActorCache;
+  let stored = null;
+  try {
+    stored = typeof localStorage === 'undefined'
+      ? null
+      : localStorage.getItem(HABIT_ARCHIVE_ACTOR_KEY);
+  } catch (e) {
+    stored = null;
+  }
+  if (validHabitArchiveActorId(stored)) {
+    habitArchiveActorCache = stored;
+    return stored;
+  }
+  const generated = plannerNewActorId();
+  habitArchiveActorCache = generated;
+  // Провал записи не отменяет архивацию: идентификатор останется стабильным
+  // в памяти до перезагрузки, а повторная попытка будет при следующем вызове
+  // после сброса кэша.
+  safeSetItem(HABIT_ARCHIVE_ACTOR_KEY, generated);
+  return generated;
+}
 
 // Карта меток чтением с проверкой: битая строка или чужая форма — «меток нет»,
 // вызывающий продолжает работу с нулевыми метками (как до введения конвертов).

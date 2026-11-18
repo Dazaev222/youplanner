@@ -40,6 +40,7 @@
 
 import { ARCHIVE_KEY } from '../data/archive.js';
 import { FAST_KEY, FAST_VERSION, validFastHistory } from '../data/fast.js';
+import { normalizeHabitArchive } from '../data/habit-archive.js';
 import { invalidateRecordsCache } from '../data/records.js';
 import { PRAYER_KEY } from '../data/prayer.js';
 import { QAZA_LOG_KEY, QAZA_LOG_VERSION, QAZA_STORAGE_KEY, validQazaLogEntries } from '../data/qaza.js';
@@ -70,6 +71,13 @@ function normalizeSleep(value) {
   return Object.assign({}, value, { history: validSleepHistory(value.history) });
 }
 
+// 4) Привычки: архивная пара нормализуется на границе. Валидная остаётся
+//    (только известные поля версии), повреждённая снимается, сама привычка
+//    и её остальные поля сохраняются. Legacy-элементы не переписываются.
+function normalizeHabits(value) {
+  return value.map(normalizeHabitArchive);
+}
+
 export const CLOUD_SECTIONS = [
   // Привычки: без конверта; пустой раздел сервера не затирает непустой
   // локальный. Гонка — mergeHabitsById с tombstones-контекстом.
@@ -80,7 +88,7 @@ export const CLOUD_SECTIONS = [
     envelope: false,
     emptyWins: 'ifLocalEmpty',
     skipWhenPending: false,
-    normalize: null,
+    normalize: normalizeHabits,
     snapshotMerge: null,
     raceMerge: 'collection:habits',
     onWrite: null,

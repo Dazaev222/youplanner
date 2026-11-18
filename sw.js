@@ -151,7 +151,14 @@
 // access-v1 несовместим со старыми клиентами: на старой offline PWA —
 // запрет отправки legacy-команд (UI показывает необходимость обновления).
 // v63: оболочка дневника и готовый сервис данных, включая офлайн-зависимости.
-const CACHE = 'youplanner-v63';
+// v64: архив привычек — js/data/habit-archive.js (неделимая пара
+// {isArchived, archiveVersion} и её слияние), js/ui/habits-archive-view.js
+// (экран «Архив привычек»), правки js/data/habits.js, js/sync/merge.js,
+// js/sync/sections.js, js/sync/sync.js, js/data/backup.js, js/ui/main-table.js,
+// js/ui/stats-view.js, js/ui/assistant-analysis.js, js/ui/assistant-view.js,
+// js/ui/habits-edit.js, js/ui/router.js, js/events/nav-events.js, index.html,
+// styles/habits-edit.css. Оба новых модуля — в precache.
+const CACHE = 'youplanner-v64';
 // Иконки — все из manifest.json: отсутствующая в кэше иконка ломала бы
 // офлайн-установку PWA (аудит 2026-10-31: icon-512.png не кэшировался)
 const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './icon-512.png', './icon.svg',
@@ -211,6 +218,9 @@ const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './ic
   './js/ui/assistant-media.js',
   // Кнопка «Анализ привычек»: снимок статистики в реплику чата
   './js/ui/assistant-analysis.js',
+  // Общий ежедневный анализ Дневника в чат ассистента (контекст + бюджет):
+  // модуль попал в precache вместе с графом импортов
+  './js/ui/assistant-diary-context.js',
   './js/ui/prayer-view.js',
   './js/ui/fast-view.js',
   './js/ui/sleep-view.js',
@@ -220,6 +230,7 @@ const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './ic
   './js/ui/main-table.js',
   './js/ui/level-sheet.js',
   './js/ui/habits-edit.js',
+  './js/ui/habits-archive-view.js',
   './js/ui/stats-view.js',
   './js/app.js',
   // Обработчики bindEvents, вынесенные из app.js (пилот Фабрики 2026-11-08)
@@ -229,6 +240,7 @@ const ASSETS = ['./', './index.html', './manifest.json', './icon-180.png', './ic
   './js/core/bus.js', './js/core/dates.js',
   './js/core/storage.js', './js/core/dom.js',
   './js/data/storage.js', './js/data/schedule.js', './js/data/habits.js',
+  './js/data/habit-archive.js',
   './js/data/migrations.js', './js/data/records.js', './js/data/qaza.js',
   './js/data/prayer.js', './js/data/fast.js', './js/data/sleep.js',
   './js/data/stats.js', './js/data/backup.js', './js/data/background.js',

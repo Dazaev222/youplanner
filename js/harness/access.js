@@ -94,36 +94,36 @@ function accessRejectUnknown(raw, allowedKeys) {
   return true;
 }
 
-function fail(reason) {
+function accessFail(reason) {
   return { ok: false, reason };
 }
 
 /* --- Валидация policy ---------------------------------------------------------------- */
 
 export function validateAccessPolicy(raw) {
-  if (!isPlainObject(raw)) return fail('schema');
+  if (!isPlainObject(raw)) return accessFail('schema');
   if (!accessRejectUnknown(raw, ['schemaVersion', 'version', 'requestId', 'mode',
-    'requestedBy', 'requestedAt', 'confirmation'])) return fail('unknown');
-  if (raw.schemaVersion !== 1 || !accessIsInt(raw.schemaVersion)) return fail('schema');
+    'requestedBy', 'requestedAt', 'confirmation'])) return accessFail('unknown');
+  if (raw.schemaVersion !== 1 || !accessIsInt(raw.schemaVersion)) return accessFail('schema');
   if (!accessIsInt(raw.version) || raw.version < 1 || raw.version > ACCESS_MAX_VERSION) {
-    return fail('version');
+    return accessFail('version');
   }
-  if (!accessIsIdString(raw.requestId)) return fail('requestId');
-  if (!ACCESS_MODES.includes(raw.mode)) return fail('mode');
+  if (!accessIsIdString(raw.requestId)) return accessFail('requestId');
+  if (!ACCESS_MODES.includes(raw.mode)) return accessFail('mode');
   if (typeof raw.requestedBy !== 'string' || !raw.requestedBy ||
-      raw.requestedBy.length > 128) return fail('requestedBy');
-  if (!accessIsOwnerTime(raw.requestedAt)) return fail('requestedAt');
+      raw.requestedBy.length > 128) return accessFail('requestedBy');
+  if (!accessIsOwnerTime(raw.requestedAt)) return accessFail('requestedAt');
   if (raw.mode === 'unrestricted') {
     const confirmation = raw.confirmation;
-    if (!isPlainObject(confirmation)) return fail('confirmation');
+    if (!isPlainObject(confirmation)) return accessFail('confirmation');
     if (!accessRejectUnknown(confirmation, ['kind', 'requestId', 'confirmedBy',
-      'confirmedAt'])) return fail('unknown');
-    if (confirmation.kind !== ACCESS_CONFIRM_KIND) return fail('confirmation');
-    if (confirmation.requestId !== raw.requestId) return fail('confirmation');
-    if (confirmation.confirmedBy !== raw.requestedBy) return fail('confirmation');
-    if (!accessIsOwnerTime(confirmation.confirmedAt)) return fail('confirmation');
+      'confirmedAt'])) return accessFail('unknown');
+    if (confirmation.kind !== ACCESS_CONFIRM_KIND) return accessFail('confirmation');
+    if (confirmation.requestId !== raw.requestId) return accessFail('confirmation');
+    if (confirmation.confirmedBy !== raw.requestedBy) return accessFail('confirmation');
+    if (!accessIsOwnerTime(confirmation.confirmedAt)) return accessFail('confirmation');
   } else if ('confirmation' in raw) {
-    return fail('confirmation');   // confirmation в safe/medium запрещён
+    return accessFail('confirmation');   // confirmation в safe/medium запрещён
   }
   return { ok: true, policy: raw };
 }
@@ -131,31 +131,31 @@ export function validateAccessPolicy(raw) {
 /* --- Валидация status ---------------------------------------------------------------- */
 
 export function validateAccessStatus(raw) {
-  if (!isPlainObject(raw)) return fail('schema');
+  if (!isPlainObject(raw)) return accessFail('schema');
   if (!accessRejectUnknown(raw, ['schemaVersion', 'observedVersion',
     'observedRequestId', 'appliedVersion', 'appliedRequestId',
     'effectiveMode', 'state', 'reason', 'agentSessionId', 'updatedAt',
-    'docker'])) return fail('unknown');
-  if (raw.schemaVersion !== 1 || !accessIsInt(raw.schemaVersion)) return fail('schema');
+    'docker'])) return accessFail('unknown');
+  if (raw.schemaVersion !== 1 || !accessIsInt(raw.schemaVersion)) return accessFail('schema');
   if (!accessIsInt(raw.observedVersion) || raw.observedVersion < 0) {
-    return fail('observedVersion');
+    return accessFail('observedVersion');
   }
   // RequestId эхом повторяет политику: '' до первой записи либо тот же
   // алфавит [A-Za-z0-9_-] (A7.2).
-  if (!accessIsRequestIdEcho(raw.observedRequestId)) return fail('observedRequestId');
+  if (!accessIsRequestIdEcho(raw.observedRequestId)) return accessFail('observedRequestId');
   if (!accessIsInt(raw.appliedVersion) || raw.appliedVersion < 0 ||
-      raw.appliedVersion > raw.observedVersion) return fail('appliedVersion');
-  if (!accessIsRequestIdEcho(raw.appliedRequestId)) return fail('appliedRequestId');
-  if (!ACCESS_MODES.includes(raw.effectiveMode)) return fail('effectiveMode');
-  if (!ACCESS_STATES.includes(raw.state)) return fail('state');
-  if (!ACCESS_REASONS.includes(raw.reason)) return fail('reason');
-  if (!accessIsIdString(raw.agentSessionId)) return fail('agentSessionId');
-  if (!accessIsTimestamp(raw.updatedAt)) return fail('updatedAt');
+      raw.appliedVersion > raw.observedVersion) return accessFail('appliedVersion');
+  if (!accessIsRequestIdEcho(raw.appliedRequestId)) return accessFail('appliedRequestId');
+  if (!ACCESS_MODES.includes(raw.effectiveMode)) return accessFail('effectiveMode');
+  if (!ACCESS_STATES.includes(raw.state)) return accessFail('state');
+  if (!ACCESS_REASONS.includes(raw.reason)) return accessFail('reason');
+  if (!accessIsIdString(raw.agentSessionId)) return accessFail('agentSessionId');
+  if (!accessIsTimestamp(raw.updatedAt)) return accessFail('updatedAt');
   const docker = raw.docker;
-  if (!isPlainObject(docker)) return fail('docker');
-  if (!accessRejectUnknown(docker, ['state', 'checkedAt'])) return fail('unknown');
-  if (!ACCESS_DOCKER_STATES.includes(docker.state)) return fail('docker');
-  if (!accessIsTimestamp(docker.checkedAt)) return fail('docker');
+  if (!isPlainObject(docker)) return accessFail('docker');
+  if (!accessRejectUnknown(docker, ['state', 'checkedAt'])) return accessFail('unknown');
+  if (!ACCESS_DOCKER_STATES.includes(docker.state)) return accessFail('docker');
+  if (!accessIsTimestamp(docker.checkedAt)) return accessFail('docker');
   return { ok: true, status: raw };
 }
 

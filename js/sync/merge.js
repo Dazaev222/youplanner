@@ -33,6 +33,7 @@ import { hasData, mergeTombstonesById } from './core.js';
 import { CLOUD_SECTIONS } from './sections.js';
 import { validQazaLogEntries } from '../data/qaza.js';
 import { validSleepHistory } from '../data/sleep.js';
+import { applyHabitArchive, mergeHabitArchivePair, normalizeHabitArchive } from '../data/habit-archive.js';
 import { isPlainObject } from '../core/struct.js';
 
 // ── plannerV1: ядро слияния области планирования (ТЗ §1.3) ─────────────────
@@ -648,7 +649,7 @@ export function mergeHabitsById(localHabits, cloudHabits, cloudWins, opts) {
   for (let i = 0; i < alive.length; i++) {
     const habit = alive[i];
     if (habit && habit.id != null && byId[habit.id] === undefined) {
-      byId[habit.id] = habit;
+      byId[habit.id] = normalizeHabitArchive(habit);
       order.push(habit.id);
     }
   }
@@ -657,9 +658,15 @@ export function mergeHabitsById(localHabits, cloudHabits, cloudWins, opts) {
     const habit = cloud[i];
     if (!habit || habit.id == null) continue;
     if (byId[habit.id] !== undefined) {
-      if (cloudWins) byId[habit.id] = habit;
+      // Остальные поля выбирает cloudWins, но архивная пара — отдельное
+      // решение: она переносится с победившей по версии стороны независимо
+      // от того, чьё имя/цель/время осталось. applyHabitArchive копирует
+      // объект, поэтому входные снимки не мутируются.
+      const localHabit = byId[habit.id];
+      const winner = cloudWins ? habit : localHabit;
+      byId[habit.id] = applyHabitArchive(winner, mergeHabitArchivePair(localHabit, habit));
     } else if (!tombstoned(habit.id)) {
-      byId[habit.id] = habit;
+      byId[habit.id] = normalizeHabitArchive(habit);
       extra.push(habit.id);
     }
   }

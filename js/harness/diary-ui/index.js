@@ -7,7 +7,7 @@ import { buildDiaryViewModel, durationParts, formatDiaryDuration } from './view-
 import { calculateRingProgress } from './milestones.js';
 import { renderSettings } from './settings.js';
 
-export function mountDiary({ onBack, version = '', initialScreen = 'home', compositionFactory = createDiaryComposition } = {}) {
+export function mountDiary({ onBack, version = '', initialScreen = 'home', compositionFactory = createDiaryComposition, onSubmitDiaryAnalysis } = {}) {
   const root = document.getElementById('diary-view');
   let dead = false, subscription, composition, timer, initializing = false, syncing = false;
   let screen = initialScreen, eventId, stack = [], clockNodes = [], record, ring, monthLabel;
@@ -16,6 +16,12 @@ export function mountDiary({ onBack, version = '', initialScreen = 'home', compo
   const title = el('h1', 'Дневник привычек');
   const content = el('div', undefined, 'diary-content');
   const ctx = { projection: null, service: null, dirty: false, refresh, synchronize, version, onBack: () => { if(canLeave()) onBack?.(); },
+    // Общий анализ Дневника в чате: вызывает ассистентский ход с датасетом,
+    // собранным из контекста (js/ui/assistant-diary-context.js). Без провайдера
+    // — честный неготовый ответ, а не молчаливый нет-операция
+    onSubmitDiaryAnalysis: typeof onSubmitDiaryAnalysis === 'function'
+      ? onSubmitDiaryAnalysis
+      : function () { return Promise.resolve({ ok: false, error: { code: 'DIARY_NOT_READY', message: 'Анализ в чате не подключён' } }); },
     open(next, id) { if (!canLeave()) return; stack.push([screen, eventId]); screen = next; eventId = id; paint(); },
     replace(next, id) { ctx.dirty = false; screen = next; eventId = id; paint(); }
   };

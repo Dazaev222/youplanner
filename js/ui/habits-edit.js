@@ -1,8 +1,9 @@
 import { escapeHtml } from '../core/dom.js';
-import { HABIT_TYPES, addHabit, hasRecords, loadHabits, removeHabit, updateHabit } from '../data/habits.js';
+import { HABIT_TYPES, addHabit, hasRecords, loadHabits, removeHabit, selectActiveHabits, setHabitArchived, updateHabit } from '../data/habits.js';
 import { QAZA_HABIT_ID } from '../data/qaza.js';
 import { isLevelHabit } from '../data/records.js';
 import { findHabit, renderMainView } from './main-table.js';
+import { habitArchiveErrorMessage } from './habits-archive-view.js';
 import { appState } from './state.js';
 // Опции выпадающего списка типов привычек
 export function typeOptionsMarkup(current) {
@@ -31,15 +32,19 @@ let modalOpener = null;
 // (замеры в браузере: строка схлопывалась, прокрутка прыгала, фокус падал в
 // body).
 let renderedEditSignature = null;
-// Что рисует editHabitRow: id, название, тип, единица, цель и время. Любое
-// отличие этих полей — это другая разметка списка.
+// Текст подтверждения архивации: человек должен понимать, что привычка
+// исчезнет с главного экрана, но история останется.
+export const HABIT_ARCHIVE_CONFIRM =
+  'Привычка исчезнет с главного экрана и из ежедневного прогресса. История сохранится.';
+// Что рисует editHabitRow: id, название, тип, единица, цель, время и архивный
+// флаг. Любое отличие этих полей — это другая разметка списка.
 function habitsSignature() {
   let signature = '';
   for (let i = 0; i < appState.habits.length; i++) {
     const habit = appState.habits[i];
     signature += habit.id + '|' + habit.name + '|' + habit.type + '|' +
       (habit.unit || '') + '|' + (habit.goal === null || habit.goal === undefined ? '' : habit.goal) +
-      '|' + (habit.time || '') + ';';
+      '|' + (habit.time || '') + '|' + (habit.isArchived === true ? '1' : '0') + ';';
   }
   return signature;
 }
@@ -110,8 +115,11 @@ function renderHabitRows(listId, rowMarkup) {
   if (!list) return;
 
   let html = '';
-  for (let i = 0; i < appState.habits.length; i++) {
-    html += rowMarkup(appState.habits[i]);
+  // Архивные привычки живут на своём экране: в списке правки их нет, иначе
+  // «В архив» навсегда оставалась бы кнопкой на уже архивной строке
+  const habits = selectActiveHabits(appState.habits);
+  for (let i = 0; i < habits.length; i++) {
+    html += rowMarkup(habits[i]);
   }
 
   list.innerHTML = html;
@@ -136,6 +144,8 @@ function modalHabitRow(habit) {
         escapeHtml(habit.time || '') + '" aria-label="Время">'
       : '') +
     '<button type="button" class="btn btn-secondary habit-save">Сохранить</button>' +
+    // Архив — обратимая альтернатива удалению: записи и история остаются
+    (row.isQaza ? '' : '<button type="button" class="btn btn-secondary habit-archive">В архив</button>') +
     // У каза кнопки удаления нет: удалив привычку, синхронизацию не восстановить
     (row.isQaza ? '' : '<button type="button" class="btn btn-danger habit-delete">Удалить</button>') +
     '</li>';
@@ -179,6 +189,8 @@ function editHabitRow(habit) {
       '<p class="form-error" role="alert"></p>' +
       '<div class="habit-row-actions">' +
         '<button type="button" class="btn btn-primary edit-save">Сохранить</button>' +
+        // Архив — обратимая альтернатива удалению: записи и история остаются
+        (row.isQaza ? '' : '<button type="button" class="btn btn-secondary edit-archive">В архив</button>') +
         // У каза удаления нет: удалив привычку, синхронизацию не восстановить
         (row.isQaza ? '' : '<button type="button" class="btn btn-danger edit-delete">Удалить</button>') +
       '</div>' +
@@ -200,6 +212,21 @@ function removeHabitConfirmed(habitId, habit) {
   if (!removeHabit(habitId)) return false;
   appState.habits = loadHabits();
   return true;
+}
+
+// Подтверждённая архивация. Возвращает { ok } либо { ok:false, error },
+// чтобы оба списка показали причину отказа в своём месте. Отмена — тоже
+// ok:false, но без error: молчание здесь правильно, человек сам её выбрал.
+function archiveHabitConfirmed(habitId, habit) {
+  if (!habit || habit.isArchived === true) return { ok: false };
+  const question = 'Убрать привычку «' + habit.name + '» в архив?\n\n' + HABIT_ARCHIVE_CONFIRM;
+  if (!window.confirm(question)) return { ok: false };
+
+  const result = setHabitArchived(habitId, true);
+  if (!result.ok) return { ok: false, error: result.error };
+
+  appState.habits = loadHabits();
+  return { ok: true };
 }
 
 // Сборка patch из данных строки: время — только у привычек с уровнями
@@ -238,6 +265,18 @@ export function onHabitListClick(event) {
 
   if (target.closest('.habit-delete')) {
     if (!removeHabitConfirmed(habitId, habit)) return;
+    setFormError('');
+    renderHabitList();
+    renderMainView();
+    return;
+  }
+
+  if (target.closest('.habit-archive')) {
+    const result = archiveHabitConfirmed(habitId, habit);
+    if (!result.ok) {
+      if (result.error) setFormError(habitArchiveErrorMessage(result.error));
+      return;
+    }
     setFormError('');
     renderHabitList();
     renderMainView();
@@ -297,6 +336,18 @@ export function onHabitsEditClick(event) {
 
   if (target.closest('.edit-delete')) {
     if (!removeHabitConfirmed(habitId, habit)) return;
+    renderHabitsEditList();
+    renderMainView();
+    return;
+  }
+
+  if (target.closest('.edit-archive')) {
+    const result = archiveHabitConfirmed(habitId, habit);
+    if (!result.ok) {
+      if (result.error) setRowError(item, habitArchiveErrorMessage(result.error));
+      return;
+    }
+    setRowError(item, '');
     renderHabitsEditList();
     renderMainView();
     return;

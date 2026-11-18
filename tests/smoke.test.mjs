@@ -108,7 +108,7 @@ test('нет неявных зависимостей: чужое имя обяз
         .forEach((s) => imported.add(s.split(/\s+as\s+/)[0]));
     }
     const declared = new Set([...text.matchAll(
-      /^(?:export\s+)?(?:const|let|function)\s+([A-Za-z_$][\w$]*)/gm)].map((m) => m[1]));
+      /^[ \t]*(?:export\s+)?(?:const|let|var|function|async function|class)\s+([A-Za-z_$][\w$]*)/gm)].map((m) => m[1]));
     // код без строк и комментариев
     let code = '';
     let quote = null;
@@ -127,6 +127,12 @@ test('нет неявных зависимостей: чужое имя обяз
     const missing = new Set();
     for (const m of code.matchAll(/[A-Za-z_$][\w$]*/g)) {
       const name = m[0];
+      // Свойство объекта ({ ok: false }) и доступ к свойству (response.ok) —
+      // это не идентификаторы: правило «чужое имя обязано быть в import» к ним
+      // не относится, проверяем только настоящие идентификаторные вхождения.
+      const afterColon = code.slice(m.index + m[0].length).match(/^\s*:/);
+      const beforeChar = m.index > 0 ? code[m.index - 1] : '';
+      if (afterColon || beforeChar === '.') continue;
       if (KEYWORDS.has(name) || declared.has(name) || imported.has(name)) continue;
       if (ownerOf.has(name)) missing.add(`${name} (из ${ownerOf.get(name)})`);
     }

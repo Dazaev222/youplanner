@@ -20,9 +20,9 @@ import {
   qazaStreak,
 } from '../data/stats.js';
 import { FAST_KEY } from '../data/fast.js';
+import { loadHabits, selectActiveHabits } from '../data/habits.js';
 import { QAZA_HABIT_ID, QAZA_STORAGE_KEY, copyQaza, qazaTotalRemaining } from '../data/qaza.js';
 import { SLEEP_KEY } from '../data/sleep.js';
-import { STORAGE_KEYS } from '../data/storage.js';
 
 // Потолки снимка и всего запроса: реплика-анализ не должна раздувать
 // историю чата (HISTORY_KEEP в assistant-view.js) и сама себя обрезает
@@ -80,7 +80,9 @@ export function buildHabitsAnalysisSnapshot(today) {
   if (!isDateLike(today)) today = new Date();
   const dates = analysisWindow(today, ANALYSIS_DAYS);
   const records = loadRecords();
-  const habits = readStoredSection(STORAGE_KEYS.habits);
+  // Только активные: архивная привычка не участвует в ежедневном прогрессе,
+  // и её строка в анализе противоречила бы экрану «Статистика»
+  const habits = selectActiveHabits(loadHabits());
   const recordsPresent = records && typeof records === 'object'
     && Object.keys(records).length > 0;
   const lines = [];

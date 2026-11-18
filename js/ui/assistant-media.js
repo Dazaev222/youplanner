@@ -92,7 +92,7 @@ function stripUnsafeHeaderChars(apiKey) {
 // две ветки не разъезжались по формулировкам.
 const TIMEOUT_ERROR_TEXT = 'Сервис не ответил за 60 секунд. Попробуйте ещё раз.';
 
-export async function postAssistantChat(payload, apiKey) {
+export async function postAssistantChat(payload, apiKey, signal) {
   // Уже сохранённый кривой ключ не должен ни ронять fetch до сети («Нет
   // связи» при исправной сети), ни блокировать запрос: не-ISO символы
   // вырезаются, сервис отклонит обрезанный ключ 401-й — и ниже это
@@ -110,6 +110,31 @@ export async function postAssistantChat(payload, apiKey) {
   // (F5, аудит GPT 2026-11-03) — поэтому cancel() в finally, накрывающем и
   // чтение тела.
   const guard = timeoutGuard(REQUEST_TIMEOUT_MS);
+  // Внешняя отмена (анализ Дневника): собственный контроллер, потому что
+  // guard.cancel() снимает только таймер, а fetch принимает один сигнал.
+  // Таймаут guard-а форвардится во внешний контроллер, внешний abort —
+  // в fetch; отменённый ход ловится ниже как AbortError.
+  let external = null;
+  let forwardExternal = null;
+  let forwardTimeout = null;
+  if (signal && typeof AbortController === 'function') {
+    external = new AbortController();
+    if (signal.aborted) {
+      external.abort();
+    } else {
+      forwardExternal = function () { external.abort(); };
+      if (typeof signal.addEventListener === 'function') {
+        signal.addEventListener('abort', forwardExternal, { once: true });
+      } else {
+        external = null;
+      }
+    }
+  }
+  if (external && guard.signal && typeof guard.signal.addEventListener === 'function') {
+    forwardTimeout = function () { external.abort(); };
+    guard.signal.addEventListener('abort', forwardTimeout, { once: true });
+  }
+  const fetchSignal = external ? external.signal : guard.signal;
   try {
     let response;
     try {
@@ -120,7 +145,7 @@ export async function postAssistantChat(payload, apiKey) {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify(payload),
-        signal: guard.signal,
+        signal: fetchSignal,
       });
     } catch (e) {
       // Реальная причина — в консоль (helper), текст — в ленту: TypeError
@@ -187,6 +212,14 @@ export async function postAssistantChat(payload, apiKey) {
   } finally {
     // Таймер больше не нужен при любом исходе — включая отказ на чтении тела
     guard.cancel();
+    if (forwardTimeout && guard.signal
+      && typeof guard.signal.removeEventListener === 'function') {
+      guard.signal.removeEventListener('abort', forwardTimeout);
+    }
+    if (signal && forwardExternal
+      && typeof signal.removeEventListener === 'function') {
+      signal.removeEventListener('abort', forwardExternal);
+    }
   }
 }
 

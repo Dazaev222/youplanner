@@ -4,7 +4,8 @@ import { safeSetItem } from '../core/storage.js';
 // он защищает: removeHabit ниже мутирует кэш записей in-place и обязан
 // сдвигать версию кэша прогресса
 import { loadRecords, saveRecords, touchRecordsVersion } from './records.js';
-import { STORAGE_KEYS } from './storage.js';
+import { STORAGE_KEYS, loadHabitArchiveActor } from './storage.js';
+import { applyHabitArchive, nextHabitArchiveVersion, normalizeHabitArchive, readHabitArchive } from './habit-archive.js';
 // 12 привычек по умолчанию (порядок и значения — из спеки, п.5)
 export const DEFAULT_HABITS = [
   { id: 'h1', name: 'Фаджр', type: 'boolean', unit: '', goal: null },
@@ -74,7 +75,7 @@ export function loadHabits() {
     if (!raw) return [];
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.filter(validHabitItem);
+    return parsed.filter(validHabitItem).map(normalizeHabitArchive);
   } catch (e) {
     return [];
   }
@@ -83,6 +84,68 @@ export function saveHabits(habits) {
   if (!safeSetItem(STORAGE_KEYS.habits, JSON.stringify(habits))) return false;
   bus.emit('data:changed');
   return true;
+}
+// Активные и архивные привычки. Полный список остаётся в хранилище и в
+// appState: фильтрация — только на уровне потребителей (главный экран,
+// статистика, анализ), иначе синхронизация и копии потеряли бы объекты.
+// Строго isArchived === true: строка "true" не считается архивом, а
+// повреждённая пара уже снята loadHabits.
+export function selectActiveHabits(habits) {
+  if (!Array.isArray(habits)) return [];
+  return habits.filter(function (habit) {
+    return habit && habit.isArchived !== true;
+  });
+}
+export function selectArchivedHabits(habits) {
+  if (!Array.isArray(habits)) return [];
+  return habits.filter(function (habit) {
+    return habit && habit.isArchived === true;
+  });
+}
+// Единственная операция смены архивного состояния. Возвращает
+// { ok, changed, habit?, error? }:
+//   unknown-habit — id нет в полном списке;
+//   invalid-state — цель не boolean;
+//   actor-unavailable / version-exhausted — версию построить нельзя;
+//   save-failed — хранилище отвергло запись (состояние не изменилось).
+// Повтор уже достигнутого состояния — no-op без записи и без роста версии.
+// records, месячные сводки, tombstones и история Дневника не трогаются:
+// removeHabit здесь не вызывается.
+export function setHabitArchived(id, archived) {
+  if (typeof archived !== 'boolean') return { ok: false, changed: false, error: 'invalid-state' };
+  if (typeof id !== 'string' || id === '') {
+    return { ok: false, changed: false, error: 'unknown-habit' };
+  }
+  const habits = loadHabits();
+  let index = -1;
+  for (let i = 0; i < habits.length; i++) {
+    if (habits[i].id === id) { index = i; break; }
+  }
+  if (index === -1) return { ok: false, changed: false, error: 'unknown-habit' };
+
+  const current = readHabitArchive(habits[index]);
+  if (current.kind === 'valid' && current.isArchived === archived) {
+    return { ok: true, changed: false, habit: habits[index] };
+  }
+
+  const actorId = loadHabitArchiveActor();
+  const version = nextHabitArchiveVersion(current.version, actorId);
+  if (!version) {
+    return {
+      ok: false,
+      changed: false,
+      error: actorId ? 'version-exhausted' : 'actor-unavailable',
+    };
+  }
+  const updated = applyHabitArchive(habits[index], {
+    isArchived: archived,
+    archiveVersion: version,
+  });
+  habits[index] = updated;
+  if (!saveHabits(habits)) {
+    return { ok: false, changed: false, error: 'save-failed' };
+  }
+  return { ok: true, changed: true, habit: updated };
 }
 // Есть ли хотя бы одна запись у привычки
 export function hasRecords(habitId) {
@@ -111,11 +174,17 @@ export function addHabit(habit) {
   return newHabit;
 }
 // Меняет поля привычки. Неизвестный id → null. id менять нельзя.
+// Архивная пара — не обычное поле: её нельзя снять или подменить патчем,
+// только выделенной setHabitArchived. Иначе редактирование имени/цели
+// молча снимало бы архив или подделывало версию.
 export function updateHabit(id, patch) {
   const habits = loadHabits();
   for (let i = 0; i < habits.length; i++) {
     if (habits[i].id !== id) continue;
-    const merged = Object.assign({}, habits[i], patch, { id: habits[i].id });
+    const safePatch = Object.assign({}, patch);
+    delete safePatch.isArchived;
+    delete safePatch.archiveVersion;
+    const merged = Object.assign({}, habits[i], safePatch, { id: habits[i].id });
     habits[i] = merged;
     if (!saveHabits(habits)) return null;
     return merged;

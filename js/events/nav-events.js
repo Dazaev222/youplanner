@@ -6,6 +6,7 @@
 // значение в момент обращения.
 import { onTableChange, onTableClick } from '../ui/main-table.js';
 import { openModal, onHabitListClick, onHabitsEditClick, onHabitsEditChange } from '../ui/habits-edit.js';
+import { onHabitsArchiveClick } from '../ui/habits-archive-view.js';
 import { onPrayerGeo, onPrayerMadhhabChange, onPrayerManualSave, onPrayerMethodChange, onPrayerRefresh, onPrayerShowAll } from '../ui/prayer-view.js';
 import { flushPendingSleepSave, onSleepFieldChange } from '../ui/sleep-view.js';
 import { closeStatsMenu, openStatsMenu, renderStatsCategory, setStatsHabitId } from '../ui/stats-view.js';
@@ -303,6 +304,23 @@ export function bindNavEvents() {
   if (habitsEditList) {
     habitsEditList.addEventListener('click', onHabitsEditClick);
     habitsEditList.addEventListener('change', onHabitsEditChange);
+  }
+
+  // Архив привычек: строка в Настройках, возврат в них же и делегированный
+  // обработчик статичного списка (перерисовка слушатель не дублирует)
+  const settingsArchive = document.getElementById('settings-habits-archive');
+  if (settingsArchive) {
+    settingsArchive.addEventListener('click', function () { switchAppView('habits-archive'); });
+  }
+
+  const habitsArchiveBack = document.getElementById('habits-archive-back');
+  if (habitsArchiveBack) {
+    habitsArchiveBack.addEventListener('click', function () { switchAppView('settings'); });
+  }
+
+  const habitsArchiveList = document.getElementById('habits-archive-list');
+  if (habitsArchiveList) {
+    habitsArchiveList.addEventListener('click', onHabitsArchiveClick);
   }
 
   // Нижний таб-бар: тот же переключатель разделов, что и у кнопок шапки

@@ -159,3 +159,57 @@ body.view-matrix #header-actions {
   display: none;
 }
 
+/* --- Экран «Архив привычек» ---------------------------------------------- */
+/* Тот же каркас, что у списка правки: строка — имя слева, действие справа */
+#habits-archive-view {
+  margin-top: 20px;
+  padding: 22px 26px 26px;
+}
+
+#habits-archive-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 16px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.habit-archive-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  min-height: 44px;
+  padding: 10px 16px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-md);
+  background-color: var(--surface-alt);
+}
+
+.habit-archive-name {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 500;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.habit-archive-unit {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+
+.habit-archive-row .btn {
+  flex: 0 0 auto;
+  min-height: 44px;
+  font-size: 14px;
+}
+
+/* Пустая ошибка не держит полосу над списком */
+#habits-archive-error:empty {
+  display: none;
+}
+

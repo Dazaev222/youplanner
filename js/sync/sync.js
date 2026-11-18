@@ -2,6 +2,7 @@ import { bus } from '../core/bus.js';
 import { loadArchive } from '../data/archive.js';
 import { loadFast } from '../data/fast.js';
 import { DEFAULT_HABITS, defaultHabit, loadHabits, loadTombstones, pruneResolvedTombstones, saveHabits } from '../data/habits.js';
+import { normalizeHabitArchive } from '../data/habit-archive.js';
 import { markMigration, migratePressHabit } from '../data/migrations.js';
 import { loadPrayer } from '../data/prayer.js';
 import { loadQaza, loadQazaLog } from '../data/qaza.js';
@@ -210,7 +211,7 @@ function adoptServerHabitsIfLocalEmpty(data) {
     // как в mergeHabitsById
     const ts = h && h.id != null ? tombstones[h.id] : undefined;
     return !(typeof ts === 'number' && Number.isFinite(ts));
-  });
+  }).map(normalizeHabitArchive);
   if (!hasData(habits)) return;
   // safeSetItem, как во всём sync-слое: сырой setItem при исчерпанной квоте
   // бросал в catch syncFromCloud — сервер помечался недоступным (он ведь
@@ -756,7 +757,7 @@ function ackPlannerPublish(info) {
 // ── plannerV1 в выделенном корне (FIREBASE_PLANNER_URL) ─────────────────────
 // Состояние планировщика живёт соседним корнем, а не ребёнком рабочего узла:
 // клиент на кэше ниже v43 ключа plannerV1 не знает, и его корневой PUT стирал
-// узел с сервера (status.md, заходит 2026-11-05). Соседний корень корневой
+// узел с сервера (журнал заходит 2026-11-05). Соседний корень корневой
 // PUT не заменяет (та же дисциплина, что у узла бэкапов), поэтому данные
 // переживают любой его PUT. Правила узла — запись только владельцу.
 

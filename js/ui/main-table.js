@@ -6,7 +6,13 @@ import { CIRCLE_CENTER, CIRCLE_LENGTH, CIRCLE_RADIUS, CIRCLE_SIZE, MONTHS_GENITI
 import { openLevelSheet } from './level-sheet.js';
 import { LEVEL_LATE, LEVEL_ON_TIME, LEVEL_TWO_MIN, QURAN_HABIT_ID, SPORT_VALUES, SPORT_VALUE_LABELS, calcProgress, defaultLevel, getEntry, getRecord, habitMarkDate, hasLevelPopup, isChoiceLevelHabit, isLevelHabit, writeHabitEntry } from '../data/records.js';
 import { cssEscape, escapeHtml, pad2, setHidden } from '../core/dom.js';
-import { CHOICE_OPTIONS, loadHabits } from '../data/habits.js';
+import { CHOICE_OPTIONS, loadHabits, selectActiveHabits, selectArchivedHabits } from '../data/habits.js';
+// Активные привычки текущего состояния. Полный appState.habits не фильтруем:
+// синхронизация, копии и редактор работают с ним целиком, а главный экран,
+// карточки и круги показывают только то, что человек не убрал в архив.
+function visibleHabits() {
+  return selectActiveHabits(appState.habits);
+}
 // Привычка из текущего состояния по id
 export function findHabit(habitId) {
   for (let i = 0; i < appState.habits.length; i++) {
@@ -233,6 +239,14 @@ export function renderMainView() {
   const note = document.getElementById('habits-note');
   if (note) note.hidden = !(cloudReady && !cloudReachable && appState.habits.length === 0);
 
+  // Отдельное пустое состояние: привычки есть, но все в архиве. Молчащая
+  // пустая таблица читалась бы как «данные не загрузились» или «всё удалено»
+  const emptyNote = document.getElementById('habits-empty-note');
+  if (emptyNote) {
+    emptyNote.hidden = !(visibleHabits().length === 0 &&
+      selectArchivedHabits(appState.habits).length > 0);
+  }
+
   if (isMainDayView()) {
     if (dayBox) dayBox.hidden = false;
     if (tabs) tabs.hidden = true;
@@ -254,10 +268,11 @@ export function renderDayCards() {
   if (!box) return;
 
   const today = toISODate(new Date());
+  const habits = visibleHabits();
   let html = '';
 
-  for (let h = 0; h < appState.habits.length; h++) {
-    const habit = appState.habits[h];
+  for (let h = 0; h < habits.length; h++) {
+    const habit = habits[h];
     let inner = '';
 
     if (habit.type === 'boolean') {
@@ -333,9 +348,10 @@ export function renderTable() {
   thead += '<th scope="col" class="progress-col">Прогресс</th></tr>';
 
   // В круге — прогресс за неделю, второй строкой — за месяц
+  const habits = visibleHabits();
   let tbody = '';
-  for (let h = 0; h < appState.habits.length; h++) {
-    const habit = appState.habits[h];
+  for (let h = 0; h < habits.length; h++) {
+    const habit = habits[h];
     tbody += '<tr class="habit-row" data-habit-id="' + escapeHtml(habit.id) + '">';
     tbody += '<td><span class="habit-name">' + escapeHtml(habit.name) + '</span>';
     if (habit.unit) {
@@ -387,7 +403,9 @@ export function onTableChange(event) {
   const habitId = cellData(cell, target, 'data-habit-id');
   const date = cellData(cell, target, 'data-date');
   const habit = findHabit(habitId);
-  if (!habit || !date) return;
+  // Устаревшее событие строки архивной привычки не создаёт отметку:
+  // строки на экране уже нет, а история архивной не редактируется с главной
+  if (!habit || !date || habit.isArchived === true) return;
 
   const entry = getEntry(date, habitId);
   const current = entry ? entry.value : undefined;
@@ -486,7 +504,7 @@ export function onTableClick(event) {
   const habitId = cellData(cell, button, 'data-habit-id');
   const date = cellData(cell, button, 'data-date');
   const habit = findHabit(habitId);
-  if (!habit || !date) return;
+  if (!habit || !date || habit.isArchived === true) return;
 
   // Повторный клик по «✗» сбрасывает запись в «пусто»
   const current = getRecord(date, habitId);
@@ -606,6 +624,7 @@ export function captureMainSnapshot() {
   const dayView = isMainDayView();
   const today = toISODate(new Date());
   const weekStart = appState.weekStart;
+  const habits = visibleHabits();
 
   // Даты видимых колонок — те же, что строит renderTable; в режиме «День»
   // карточка одна и она всегда про сегодня
@@ -624,7 +643,7 @@ export function captureMainSnapshot() {
   // нормализуются к null, чтобы undefined и null не казались разными.
   let habitsSig = null;
   try {
-    habitsSig = JSON.stringify(appState.habits.map(function (h) {
+    habitsSig = JSON.stringify(habits.map(function (h) {
       return [h.id, h.name, h.unit, h.type,
         h.goal === undefined ? null : h.goal,
         h.time === undefined ? null : h.time];
@@ -637,8 +656,8 @@ export function captureMainSnapshot() {
   // cellMarkup и renderDayCards. Ключ «дата|привычка», значение —
   // JSON-пара или null («записи нет»).
   const cells = {};
-  for (let h = 0; h < appState.habits.length; h++) {
-    const habit = appState.habits[h];
+  for (let h = 0; h < habits.length; h++) {
+    const habit = habits[h];
     for (let i = 0; i < dates.length; i++) {
       const entry = getEntry(dates[i], habit.id);
       cells[dates[i] + '|' + habit.id] =
@@ -659,8 +678,8 @@ export function captureMainSnapshot() {
     // Месяц — текущий, тем же окном, что monthPercent и «Статистика → Месяц»
     const now = new Date();
     const monthPeriod = getMonthDatesToToday(now.getFullYear(), now.getMonth());
-    for (let h = 0; h < appState.habits.length; h++) {
-      const habit = appState.habits[h];
+    for (let h = 0; h < habits.length; h++) {
+      const habit = habits[h];
       // Значения те же, что дают weekPercent/monthPercent: тот же
       // calcProgress на тех же датах
       circles[habit.id] = weekStart
@@ -726,8 +745,9 @@ export function syncMainViewFromData() {
 
   // Дифф кругов: у привычек с тем же id, но сдвинувшимся процентом
   const circleHabits = [];
-  for (let h = 0; h < appState.habits.length; h++) {
-    const habit = appState.habits[h];
+  const habits = visibleHabits();
+  for (let h = 0; h < habits.length; h++) {
+    const habit = habits[h];
     const was = old.circles[habit.id];
     const now = snap.circles[habit.id];
     if (!was || !now || was[0] !== now[0] || was[1] !== now[1]) {
@@ -801,7 +821,7 @@ function patchWeekCell(habit, date) {
 function patchDayCardControls(habit, date) {
   const box = document.getElementById('day-cards');
   if (!box) throw new Error('контейнера карточек нет');
-  const index = appState.habits.indexOf(habit);
+  const index = visibleHabits().indexOf(habit);
   const card = index >= 0 ? box.children[index] : null;
   if (!card) throw new Error('карточки привычки нет: ' + habit.id);
   const controls = childByClass(card, 'day-card-controls');

@@ -510,12 +510,12 @@ export function validateAnalysis(raw) {
     && !isObject(record.completeness)) {
     return invalid('completeness', 'completeness: complete/partial/unknown');
   }
-  const proposalError = validateAnalysisProposal(record.proposal);
+  const proposalError = validateProposalPayload(record.proposal);
   if (proposalError) return proposalError;
   return ok(record);
 }
 
-export function validateAnalysisProposal(raw) {
+export function validateProposalPayload(raw) {
   if (!isObject(raw)) return invalid('proposal', 'proposal должен быть объектом');
   for (const key of Object.keys(raw)) {
     if (!['categories', 'triggerMappings', 'reasonGroups', 'summary'].includes(key)) {

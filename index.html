@@ -133,6 +133,10 @@
          «привычек нет». Показывается из renderMainView -->
     <p id="habits-note" class="habits-note" hidden>Привычки не загружены: нет связи с сервером.</p>
 
+    <!-- Все привычки в архиве — это не «нет данных»: экран говорит, где их
+         вернуть. Показывается из renderMainView. -->
+    <p id="habits-empty-note" class="habits-note" hidden>Все привычки в архиве. Вернуть их можно в Настройках → Архив привычек.</p>
+
     <!-- Режим «День»: по карточке на привычку за сегодня -->
     <div id="day-cards" hidden></div>
 
@@ -527,6 +531,11 @@
         </button>
       </li>
       <li>
+        <button type="button" id="settings-habits-archive" class="settings-row">
+          <span>Архив привычек</span><span class="settings-chevron">›</span>
+        </button>
+      </li>
+      <li>
         <button type="button" class="settings-row" id="settings-edit-schedule">
           Редактировать расписание
           <span class="settings-chevron">›</span>
@@ -875,6 +884,19 @@
     <div class="qaza-actions">
       <button type="button" id="habits-edit-add" class="btn btn-primary">+ Добавить привычку</button>
     </div>
+  </section>
+
+  <!-- Архив привычек: сюда переносятся привычки, которые больше не нужно
+       отмечать каждый день. Записи и история сохраняются, привычку можно
+       вернуть. Открывается строкой из Настроек. -->
+  <section id="habits-archive-view" hidden>
+    <div class="qaza-head">
+      <button type="button" id="habits-archive-back" class="btn btn-secondary">← Назад</button>
+      <h2>Архив привычек</h2>
+    </div>
+    <p id="habits-archive-empty" class="habits-note" hidden>В архиве пока нет привычек.</p>
+    <p id="habits-archive-error" class="form-error" role="alert"></p>
+    <ul id="habits-archive-list"></ul>
   </section>
 
   <!-- PWA-пульт Mobile Harness (ТЗ U5.2): чат с ПК-агентом и подтверждения

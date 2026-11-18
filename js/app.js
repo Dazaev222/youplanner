@@ -23,10 +23,11 @@ import {
   onAssistantInputInput, onAssistantInputKeydown, onAssistantKeyCancel,
   onAssistantKeySave, onAssistantModelChange, onAssistantPdfClear,
   onAssistantPdfPick, onAssistantPersonaRangeInput, onAssistantSettingsTabClick,
-  openAssistantKeyModal, renderAssistantView,
+  openAssistantKeyModal, renderAssistantView, submitDiaryAnalysis,
 } from './ui/assistant-view.js';
 import { fastInitMode, onFastAdd, onFastDone, onFastEdit, onFastInitCancel, onFastInitSave, renderFastView, resetFastForm } from './ui/fast-view.js';
 import { closeModal, onFormSubmit, onHabitListClick, onHabitsEditChange, onHabitsEditClick, openModal, renderHabitsEditList, setFormError, updateFormFields } from './ui/habits-edit.js';
+import { renderHabitsArchiveView } from './ui/habits-archive-view.js';
 import { closeLevelSheet, onLevelPick } from './ui/level-sheet.js';
 import { changeWeek, goToday, onTableChange, onTableClick, refreshMainSnapshot, renderDayCards, renderHeader, renderMainView, renderTable, syncMainViewFromData, updateRowCircle } from './ui/main-table.js';
 import { onPrayerGeo, onPrayerMadhhabChange, onPrayerManualSave, onPrayerMethodChange, onPrayerRefresh, onPrayerShowAll, renderPrayerSettings, renderPrayerView, resetPrayerShowAll, startPrayerClock } from './ui/prayer-view.js';
@@ -313,6 +314,7 @@ const ROUTE_RENDER = {
   'main': renderMainView,
   'qaza': function () { ensureQazaState(); renderQazaView(); },
   'edit-habits': function () { appState.habits = loadHabits(); renderHabitsEditList(); },
+  'habits-archive': renderHabitsArchiveView,
   'settings': renderSettingsView,
   'stats': function () {
     renderStatsView();
@@ -343,7 +345,17 @@ const ROUTE_RENDER = {
     const generation = ++diaryLoadGeneration;
     import('./harness/diary-ui/index.js').then(({ mountDiary }) => {
       if (generation === diaryLoadGeneration && currentView === 'diary') {
-        diarySession = mountDiary({ onBack: () => switchAppView('main'), version: APP_VERSION, initialScreen: diaryInitialScreen });
+        diarySession = mountDiary({
+          onBack: () => switchAppView('main'),
+          version: APP_VERSION,
+          initialScreen: diaryInitialScreen,
+          // Общий анализ Дневника (мастер-ТЗ §5.3.6): сначала готовый экран
+          // чата, затем согласованный ход — без синтетического клика по форме
+          onSubmitDiaryAnalysis: function (payload) {
+            switchAppView('assistant');
+            return submitDiaryAnalysis(payload);
+          },
+        });
         diaryInitialScreen = 'home';
       }
     }).catch(() => {

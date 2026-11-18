@@ -22,6 +22,7 @@ export const SCREENS = {
   'main': { el: 'main', tab: 'main' },
   'settings': { el: 'settings-view', tab: 'settings', bodyClass: 'view-settings' },
   'edit-habits': { el: 'habits-edit-view', tab: 'settings', bodyClass: 'view-settings' },
+  'habits-archive': { el: 'habits-archive-view', tab: 'settings', bodyClass: 'view-settings' },
   'qaza': { el: 'qaza-view', tab: 'qaza', bodyClass: 'view-qaza' },
   'prayer': { el: 'prayer-view', tab: 'qaza', bodyClass: 'view-prayer' },
   'prayer-settings': { el: 'prayer-settings-view', tab: 'settings', bodyClass: 'view-settings' },

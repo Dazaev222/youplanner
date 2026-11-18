@@ -10,7 +10,7 @@ import { calculateStatistics } from './statistics.js';
 import {
   LIMITS,
   validateAnalysis,
-  validateAnalysisProposal as validateProposalShape,
+  validateProposalPayload as validateProposalShape,
 } from './schema.js';
 
 export const ANALYSIS_LIMITS = Object.freeze({
@@ -22,15 +22,15 @@ export const ANALYSIS_LIMITS = Object.freeze({
   maxSummaryLength: 4000,
 });
 
-function isObject(value) {
+function isAnalysisObject(value) {
   return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 
 function cloneMap(value) {
   const out = {};
-  if (!isObject(value)) return out;
+  if (!isAnalysisObject(value)) return out;
   for (const [key, item] of Object.entries(value)) {
-    out[key] = isObject(item) ? { ...item } : item;
+    out[key] = isAnalysisObject(item) ? { ...item } : item;
   }
   return out;
 }
@@ -90,7 +90,7 @@ function completenessOf(snapshot, events) {
  * точную статистику домена и не содержит uid/deviceId/технических квитанций.
  */
 export async function buildAnalysisDataset({ snapshot, nowMs, clock } = {}) {
-  if (!isObject(snapshot) || !snapshot.initialization) {
+  if (!isAnalysisObject(snapshot) || !snapshot.initialization) {
     return fail('DEPENDENCY_MISSING', 'Сначала нужна initialization', { path: 'initialization' });
   }
   const at = Number.isFinite(nowMs)
@@ -166,7 +166,7 @@ export function planAnalysisChunks(dataset, {
   maxEventsPerChunk = ANALYSIS_LIMITS.maxEventsPerChunk,
   maxChunks = ANALYSIS_LIMITS.maxChunks,
 } = {}) {
-  if (!isObject(dataset) || !Array.isArray(dataset.events)
+  if (!isAnalysisObject(dataset) || !Array.isArray(dataset.events)
     || !Array.isArray(dataset.coveredEventIds)) {
     return invalid('dataset', 'Нужен датасет анализа');
   }
@@ -222,12 +222,12 @@ function triggerIdList(triggers) {
   if (Array.isArray(triggers)) {
     return triggers.map((item) => (typeof item === 'string' ? item : item && item.triggerId));
   }
-  if (isObject(triggers)) return Object.keys(triggers);
+  if (isAnalysisObject(triggers)) return Object.keys(triggers);
   return undefined;
 }
 
 function rejectProtoKeys(value, path) {
-  if (!isObject(value)) return null;
+  if (!isAnalysisObject(value)) return null;
   for (const key of Object.keys(value)) {
     if (key === '__proto__' || key === 'constructor' || key === 'prototype') {
       return invalid(`${path}.${key}`, 'Запрещённый ключ');
@@ -253,7 +253,7 @@ export function validateAnalysisProposal(input, {
       return invalid('proposal', 'Ответ провайдера не является JSON', { reason: 'invalid-json' });
     }
   }
-  if (!isObject(raw)) return invalid('proposal', 'proposal должен быть объектом');
+  if (!isAnalysisObject(raw)) return invalid('proposal', 'proposal должен быть объектом');
 
   const protoError = rejectProtoKeys(raw, 'proposal');
   if (protoError) return protoError;
@@ -562,14 +562,14 @@ export async function requestAnalysis({
 
 function validCategoryMap(categories) {
   const out = {};
-  if (!isObject(categories) || Object.keys(categories).length === 0) {
+  if (!isAnalysisObject(categories) || Object.keys(categories).length === 0) {
     return invalid('categories', 'categories обязана быть полной картой');
   }
   for (const [categoryId, category] of Object.entries(categories)) {
     if (!isFirebaseKey(categoryId) || categoryId.startsWith('__')) {
       return invalid(`categories.${categoryId}`, 'Недопустимый categoryId');
     }
-    if (!isObject(category) || typeof category.name !== 'string'
+    if (!isAnalysisObject(category) || typeof category.name !== 'string'
       || category.name.trim().length === 0
       || category.name.length > LIMITS.triggerNameLength) {
       return invalid(`categories.${categoryId}.name`, 'Недопустимое имя категории');
@@ -674,7 +674,7 @@ export async function applyAnalysis({
       path: 'consent',
     });
   }
-  if (!isObject(snapshot) || !snapshot.initialization) {
+  if (!isAnalysisObject(snapshot) || !snapshot.initialization) {
     return fail('DEPENDENCY_MISSING', 'Сначала нужна initialization', { path: 'initialization' });
   }
   if (!commands || typeof commands.commitMutation !== 'function') {
@@ -726,7 +726,7 @@ export async function applyAnalysis({
   }
 
   const mappings = prepared.changes && prepared.changes.triggerMappings;
-  if (isObject(mappings)) {
+  if (isAnalysisObject(mappings)) {
     for (const triggerId of Object.keys(mappings)) {
       if (!snapshot.triggerCreations || !snapshot.triggerCreations[triggerId]) {
         return fail('DEPENDENCY_MISSING', 'Триггер не существует', {
